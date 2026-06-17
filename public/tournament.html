@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <title>Tournament — Klaxon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="room">
+  <header class="bar">
+    <nav class="bar-left crumbs" aria-label="Breadcrumb">
+      <a class="crumb crumb-mark" href="/">Klaxon</a>
+      <span class="crumb-sep">›</span>
+      <span class="crumb">Tournament</span>
+      <span class="room-code" id="t-code">·····</span>
+      <span class="room-name" id="t-name"></span>
+    </nav>
+  </header>
+
+  <main class="stage">
+    <section class="panel">
+      <h3>Add rooms</h3>
+      <div class="sound-row">
+        <input id="room-base" value="Room" placeholder="Room name prefix (e.g. Round 1 Room)" />
+        <input id="room-qty" type="number" min="1" max="50" value="1" aria-label="How many rooms" />
+        <button id="add-rooms" class="primary">Add</button>
+      </div>
+      <p class="hint">Each room gets a player link and a private reader link. Hand the
+        reader link to whoever moderates that room; share the player link (or room code)
+        with the teams.</p>
+      <p id="t-msg" class="msg"></p>
+    </section>
+
+    <section class="panel" id="bulk-panel">
+      <h3>Copy for spreadsheet</h3>
+      <p class="hint">Tab-separated — paste into Google Sheets / Excel and each room fills a
+        row across columns. Or grab a single column of links.</p>
+      <div class="bulk-btns">
+        <button id="copy-table" class="primary tiny">Copy full table</button>
+        <button id="copy-players" class="ghost tiny">Copy player links</button>
+        <button id="copy-readers" class="ghost tiny">Copy reader links</button>
+        <button id="copy-coreaders" class="ghost tiny">Copy co-reader links</button>
+        <label class="vol"><input type="checkbox" id="tsv-header" checked /> header row</label>
+      </div>
+      <textarea id="tsv-preview" class="tsv-preview" readonly rows="5"
+        aria-label="Spreadsheet preview" spellcheck="false"></textarea>
+    </section>
+
+    <section class="panel">
+      <h3>Rooms <span id="room-count" class="muted-count"></span></h3>
+      <div id="rooms-list" class="rooms-list"></div>
+      <p id="rooms-empty" class="hint">No rooms yet — add some above.</p>
+    </section>
+  </main>
+
+  <script type="module" src="/js/tournament.js"></script>
+</body>
+</html>

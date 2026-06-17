@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <title>Klaxon — online quizbowl buzzing system</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="landing">
+  <main class="card">
+    <h1 class="wordmark">Klaxon</h1>
+    <p class="tag">An online quizbowl buzzing system.</p>
+
+    <section>
+      <h2>Join a room</h2>
+      <form id="join-form" class="row">
+        <input id="join-code" inputmode="text" autocapitalize="characters"
+               maxlength="5" placeholder="ROOM CODE" aria-label="Room code" />
+        <input id="join-name" placeholder="Your name" aria-label="Your name" />
+        <button type="submit">Join</button>
+      </form>
+      <p class="hint">Reading a room? Use the link from when you created it.</p>
+    </section>
+
+    <section>
+      <h2>Create a room</h2>
+      <form id="create-room" class="stack">
+        <input id="room-name" placeholder="Room name (optional)" />
+        <input id="room-tournament" placeholder="Tournament code (optional)"
+               maxlength="5" autocapitalize="characters" />
+        <button type="submit">Create room &amp; read</button>
+      </form>
+    </section>
+
+    <details>
+      <summary>Create a tournament</summary>
+      <form id="create-tournament" class="stack">
+        <input id="tournament-name" placeholder="Tournament name" />
+        <fieldset class="opt-defaults">
+          <legend>Default settings for every room</legend>
+          <label class="toggle"><input type="checkbox" id="t-def-queue" /> Buzzer queue mode</label>
+          <label class="toggle"><input type="checkbox" id="t-def-withdraw" /> Allow players to withdraw</label>
+          <label class="toggle"><input type="checkbox" id="t-def-autoclear" /> Auto-clear buzzer 5s after a buzz</label>
+        </fieldset>
+        <button type="submit">Create tournament</button>
+      </form>
+      <p class="hint">A tournament links rooms together and can hold a schedule
+        so teams jump between rooms each round. Rooms you add start with the
+        defaults above (each reader can still change them in their room).</p>
+    </details>
+
+    <p id="msg" class="msg" role="status"></p>
+  </main>
+
+  <footer class="site-foot">
+    <a href="/about">About</a>
+  </footer>
+  <script type="module" src="/js/landing.js"></script>
+</body>
+</html>

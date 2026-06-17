@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <title>About Klaxon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="landing">
+  <main class="card prose">
+    <h1 class="wordmark">Klaxon</h1>
+    <p class="tag">An online quizbowl buzzing system.</p>
+
+    <p>Klaxon is a buzzer for quizbowl, built for the particular problem of playing
+      the game when the players are not in the same room.</p>
+
+    <p>In a physical match the buzzer is an honest instrument. Two people sit at a
+      table, each rests a thumb on a button, and the device reports, without opinion,
+      which thumb moved first. Move the match onto the internet and that honesty
+      quietly disappears. A buzz no longer travels a few inches of wire; it travels
+      from a laptop in one city to a server in another and back, and the trip does not
+      take the same amount of time for everyone. A player on a fast home connection
+      sits closer, in the only sense the network cares about, than a player on a phone
+      in a school hallway. Left alone, an online buzzer rewards the connection rather
+      than the reflex, and it does so invisibly, which is the worse of the two.</p>
+
+    <p>Klaxon's work is to give the reflex back its advantage. When you press the
+      button, your device notes the precise moment of the press and sends that reading
+      along with the buzz itself. A single server, which no player can reach or argue
+      with, serves as the referee for the room. It does not settle the order by which
+      message happens to arrive first, since that would be a contest of bandwidth. It
+      settles it by when each player actually pressed.</p>
+
+    <p>To do that it has to know how long each buzz spent in transit, so it measures
+      the distance, continuously and on its own, for every player in the room. When a
+      buzz arrives, the server subtracts that travel time and recovers the instant the
+      button was really pushed. A player across the country and a player across the
+      street, pressing at the same moment, are recorded as tied. Distance stops
+      mattering, and reaction time is all that is left.</p>
+
+    <p>A short, deliberate pause is built into this. The moment anyone buzzes the
+      reading stops for everyone, but the system waits a fraction of a second before it
+      commits to an order, long enough for any buzzes already in flight to land. Only
+      then does it rank them by their true press times, so that two players who lunge
+      at the same instant are judged together rather than by the accident of whose
+      signal finished first.</p>
+
+    <p>Because the system credits a buzz to the moment you claim you pressed, it is
+      careful with that trust. The server is the only authority: your device may
+      request a buzz, but it cannot award itself the point, alter a score, or take
+      control of the buzzer, because none of those things live anywhere a player can
+      reach. The server measures each connection for itself rather than believing
+      whatever a browser reports, so no one can pose as more distant in order to be
+      handed extra credit. There is a firm limit on how far back a press can be placed;
+      a buzz can be rewound only as far as the player's real connection allows, and a
+      claim to have pressed impossibly early is discarded rather than rewarded. Timing
+      that looks engineered rather than human is noted.</p>
+
+    <p>A word of realism about the larger setup. Most online tournaments run over a
+      video call, usually Zoom, and a video call carries a delay of its own that Klaxon
+      has no way to remove. The question reaches each room through that call, and Zoom
+      does not deliver sound to everyone at the same instant; one room may hear the last
+      word of a clue a beat before another does. Klaxon governs the buzzer, not the
+      broadcast. It can only be fair from the moment the audio actually reaches you. It
+      corrects the part of the chain it controls and stays honest about the part it does
+      not.</p>
+
+    <p>That is most of the design. Klaxon removes the unfairness the network introduces
+      and then declines to add any of its own. It cannot make you quicker, and it is not
+      trying to. Once the connection has been taken out of the argument, what remains is
+      the thing the game was always about.</p>
+
+    <p>Created by <strong>Michael Bentley</strong>.</p>
+
+    <ul class="links">
+      <li><a href="https://www.doc-ent.com" rel="noopener" target="_blank">www.doc-ent.com</a></li>
+      <li><a href="https://www.hsquizbowl.org" rel="noopener" target="_blank">www.hsquizbowl.org</a></li>
+    </ul>
+
+    <p><a href="/" class="back">&larr; Back to Klaxon</a></p>
+  </main>
+</body>
+</html>

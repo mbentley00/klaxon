@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#f3efe6" />
+  <title>Klaxon — room</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="room">
+  <header class="bar">
+    <nav class="bar-left crumbs" aria-label="Breadcrumb">
+      <a class="crumb crumb-mark" href="/">Klaxon</a>
+      <span class="crumb-sep">›</span>
+      <a class="crumb" href="/" title="Create or join another game">New game</a>
+      <span class="crumb-sep">›</span>
+      <span class="room-code" id="room-code">····</span>
+      <span class="room-name" id="room-name"></span>
+      <span id="role-badge" class="badge"></span>
+    </nav>
+    <div class="bar-right">
+      <span id="conn" class="pill" title="Connection">connecting…</span>
+      <span id="latency" class="pill" title="Your latency"></span>
+    </div>
+  </header>
+
+  <!-- Neutral placeholder while we decide which view to show (no flash). -->
+  <div id="loading" class="gate"><div class="card"><p>Connecting…</p></div></div>
+
+  <!-- Name gate (hidden until needed) -->
+  <div id="gate" class="gate hidden">
+    <div class="card">
+      <h2 id="gate-title">Join</h2>
+      <input id="gate-name" placeholder="Your name" autofocus />
+      <input id="gate-team" placeholder="Team (optional)" />
+      <div class="row">
+        <button id="gate-join">Join as player</button>
+        <button id="gate-spectate" class="ghost">Spectate</button>
+      </div>
+      <p id="gate-msg" class="msg"></p>
+    </div>
+  </div>
+
+  <main id="stage" class="stage hidden">
+    <!-- Sound warning (shown when the browser can't play the buzz sound) -->
+    <div id="sound-warn" class="sound-warn hidden" role="alert">
+      Sound is off or blocked — you won't hear buzzes.
+      <button id="enable-sound" class="tiny">Enable sound</button>
+    </div>
+
+    <!-- The buzzer: gray when "Ready to Buzz", red when someone has buzzed.
+         Players press to buzz; staff press (or Space) to reset. -->
+    <section id="buzz-area">
+      <div id="phase-label" class="phase ready">Ready to Buzz</div>
+      <button id="buzzer" class="buzzer ready" disabled>BUZZ</button>
+      <div id="buzz-feedback" class="feedback"></div>
+      <p id="player-hint" class="hint hidden">Tip: press <kbd>Space</kbd> to buzz.</p>
+      <p id="reader-hint" class="hint hidden">Press <kbd>Space</kbd> or tap the buzzer to reset.</p>
+    </section>
+
+    <!-- Buzz queue / order -->
+    <section id="queue-view" class="order hidden">
+      <h3>Buzz queue</h3>
+      <ol id="queue-list"></ol>
+      <div id="queue-controls" class="row hidden">
+        <button id="ctl-next" class="ghost hidden">Next buzzer →</button>
+        <button id="ctl-clear" class="ghost">Clear queue</button>
+      </div>
+      <button id="ctl-withdraw" class="ghost hidden">Withdraw my buzz</button>
+    </section>
+
+    <!-- Players (staff only) -->
+    <section id="players-panel" class="panel hidden">
+      <h3>Players <span id="player-count" class="muted-count"></span>
+        <button id="remove-all" class="tiny ghost hidden">Remove all</button></h3>
+      <div id="offline-alert" class="offline-alert hidden" role="status" aria-live="polite"></div>
+      <ul id="players-list" class="players"></ul>
+    </section>
+
+    <!-- Invite links (staff only) — kept directly under Players on purpose. -->
+    <section id="share-panel" class="share hidden">
+      <h3>Invite</h3>
+      <label class="share-row">
+        <span>Player join link</span>
+        <span class="copy-field">
+          <input id="share-player" readonly />
+          <button class="copy-btn ghost tiny" data-target="share-player">Copy</button>
+        </span>
+      </label>
+      <label class="share-row" id="share-coreader-row">
+        <span>Co-reader / statkeeper link</span>
+        <span class="copy-field">
+          <input id="share-coreader" readonly />
+          <button class="copy-btn ghost tiny" data-target="share-coreader">Copy</button>
+        </span>
+      </label>
+      <p class="hint">Players just need the room code <strong id="share-code"></strong> on the
+        home page, or the link above. The co-reader link grants buzzer control.</p>
+    </section>
+
+    <!-- Game options (staff only) -->
+    <section id="options-panel" class="panel hidden">
+      <h3>Game options</h3>
+      <label class="toggle"><input type="checkbox" id="opt-queue" /> Buzzer queue mode</label>
+      <label class="toggle hidden" id="opt-withdraw-row"><input type="checkbox" id="opt-withdraw" /> Allow players to withdraw</label>
+      <label class="toggle"><input type="checkbox" id="opt-autoclear" /> Auto-clear buzzer 5s after a buzz</label>
+      <label class="toggle"><input type="checkbox" id="opt-disconnect-sound" /> Play a sound when a player disconnects</label>
+    </section>
+
+    <!-- Sound settings (everyone) -->
+    <section id="sound-panel" class="panel">
+      <h3>Sound</h3>
+      <div class="sound-row">
+        <button id="mute-btn" class="ghost tiny" aria-pressed="false">Mute</button>
+        <select id="sound-pick" aria-label="Buzz sound"></select>
+        <label class="vol">Vol <input type="range" id="sound-vol" min="0" max="1" step="0.05" /></label>
+        <button id="test-sound" class="ghost tiny">Test</button>
+      </div>
+    </section>
+
+    <!-- Tournament strip -->
+    <section id="tournament-strip" class="tournament hidden">
+      <h3>Tournament <span id="t-code"></span></h3>
+      <div id="t-next"></div>
+      <div id="t-rooms" class="t-rooms"></div>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/js/room.js"></script>
+</body>
+</html>
