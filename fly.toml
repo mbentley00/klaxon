@@ -3,11 +3,21 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'buzz-online-mjb'
+app = 'klaxon-buzz'
 primary_region = 'iad'
 
 [build]
   dockerfile = 'Dockerfile'
+
+# Durable storage for MODAQ-mode artifacts (rosters, round packets, exported
+# match QBJ, errata). The realtime buzzer core stays in-memory; only these
+# tournament records are persisted here so they survive restarts/redeploys.
+[env]
+  KLAXON_DATA_DIR = '/data'
+
+[[mounts]]
+  source = 'klaxon_data'
+  destination = '/data'
 
 [http_service]
   internal_port = 3000

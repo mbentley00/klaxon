@@ -4,6 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#f3efe6" />
+  <link rel="icon" href="/favicon.ico" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <title>Tournament — Klaxon</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -54,6 +58,108 @@
       <h3>Rooms <span id="room-count" class="muted-count"></span></h3>
       <div id="rooms-list" class="rooms-list"></div>
       <p id="rooms-empty" class="hint">No rooms yet — add some above.</p>
+    </section>
+
+    <!-- MODAQ mode: roster / packets / exports / errata (director only) -->
+    <section class="panel" id="modaq-panel">
+      <h3>MODAQ reader</h3>
+      <p class="hint">Rooms in MODAQ mode give moderators the MODAQ read-question
+        view beside the buzzer. They default to the roster below, moderators load
+        each round's packet, and completed matches are exported here.</p>
+
+      <div class="modaq-block">
+        <h4>Roster <span id="roster-status" class="muted-count"></span></h4>
+        <div class="sound-row">
+          <input type="file" id="roster-file" accept=".qbj,.json,application/json" />
+          <button id="roster-upload" class="primary tiny">Upload roster</button>
+        </div>
+        <p class="hint">A registration QBJ (teams + players). MODAQ rooms in this
+          tournament use it to prefill teams.</p>
+      </div>
+
+      <div class="modaq-block">
+        <h4>Round packets <span id="packets-count" class="muted-count"></span></h4>
+        <div class="sound-row">
+          <input type="file" id="packet-files" accept=".json,application/json" multiple />
+          <label class="vol"><input type="checkbox" id="packet-tiebreaker" /> tiebreaker</label>
+          <button id="packet-upload" class="primary tiny">Upload packets</button>
+        </div>
+        <p class="hint">Each file's name becomes the round label. New rounds are hidden from moderators —
+          toggle a round visible to release it. Tiebreaker packets are a pool moderators can sub in.</p>
+        <ul id="packets-list" class="players"></ul>
+      </div>
+
+      <div class="modaq-block">
+        <h4>Tiebreakers used <span id="tb-count" class="muted-count"></span>
+          <button id="tb-refresh" class="tiny ghost">Refresh</button></h4>
+        <p class="hint">Which tiebreaker questions have been read, and the teams that have heard them.</p>
+        <ul id="tb-list" class="players"></ul>
+        <p id="tb-empty" class="hint">No tiebreaker packets released yet.</p>
+      </div>
+
+      <div class="modaq-block">
+        <h4>Match stats <span id="exports-count" class="muted-count"></span>
+          <button id="exports-download-all" class="tiny primary">Download all stats</button>
+          <button id="exports-refresh" class="tiny ghost">Refresh</button></h4>
+        <p class="hint">Moderators' MODAQ stats sync here live as they read. One QBJ per match, always current.</p>
+        <ul id="exports-list" class="players"></ul>
+        <p id="exports-empty" class="hint">No matches synced yet.</p>
+      </div>
+
+      <div class="modaq-block">
+        <h4>Errata <span id="errata-count" class="muted-count"></span>
+          <button id="errata-refresh" class="tiny ghost">Refresh</button></h4>
+        <ul id="errata-list" class="players"></ul>
+        <p id="errata-empty" class="hint">No errata reported.</p>
+      </div>
+
+      <div class="modaq-block" id="members-block">
+        <h4>Reader accounts <span id="members-count" class="muted-count"></span>
+          <button id="members-refresh" class="tiny ghost">Refresh</button></h4>
+        <p class="hint">Readers who requested access. Approve to let them read this tournament's centralized
+          packets (only enforced if the tournament requires reader accounts).</p>
+        <ul id="members-list" class="players"></ul>
+        <p id="members-empty" class="hint">No access requests yet.</p>
+      </div>
+      <p id="modaq-msg" class="msg"></p>
+    </section>
+
+    <!-- Tournament structure: phases + divisions (director only) -->
+    <section class="panel" id="structure-panel">
+      <h3>Tournament structure</h3>
+      <p class="hint">Group rounds into phases (Prelims, Playoffs…) and teams into divisions/tiers so the
+        stat report is split like YellowFruit. Optional — without it, all games are one phase.</p>
+      <div class="modaq-block">
+        <h4>Phases</h4>
+        <p class="hint">One per line as <code>Phase name: rounds</code> — e.g. <code>Prelims: 1,2,3,4</code></p>
+        <textarea id="phases-text" class="tsv-preview" rows="4" spellcheck="false"
+          placeholder="Prelims: 1,2,3,4,5,6,7&#10;Playoffs: 8,9,10,11"></textarea>
+      </div>
+      <div class="modaq-block">
+        <h4>Divisions / tiers <span id="div-count" class="muted-count"></span>
+          <button id="div-add" class="tiny ghost">Add division</button></h4>
+        <p class="hint">Assign teams to a division within a phase (e.g. Playoffs → 1st bracket).</p>
+        <div id="div-rows"></div>
+      </div>
+      <button id="structure-save" class="primary tiny">Save structure</button>
+      <p id="structure-msg" class="msg"></p>
+      <datalist id="phase-names"></datalist>
+    </section>
+
+    <!-- Public live stats + YellowFruit report (no token needed to view) -->
+    <section class="panel" id="stats-panel">
+      <h3>Live stats</h3>
+      <p class="hint">A public YellowFruit-style stat report, built live from moderators' MODAQ games.
+        Anyone with this link can view standings, individuals, and box scores — packet answers stay private.</p>
+      <label class="share-row">
+        <span>Public stats link</span>
+        <span class="copy-field">
+          <input id="stats-link" readonly />
+          <button id="stats-copy" class="copy-btn ghost tiny">Copy</button>
+          <a id="stats-open" class="btnlink tiny" target="_blank" rel="noopener">Open</a>
+        </span>
+      </label>
+      <button id="stats-download" class="primary tiny">Download YellowFruit report (.zip)</button>
     </section>
   </main>
 

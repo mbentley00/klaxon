@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <link rel="icon" href="/favicon.ico" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <title>Account — Klaxon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="landing">
+  <main class="card">
+    <h1 class="wordmark">Klaxon</h1>
+    <p class="tag">Reader account</p>
+
+    <!-- Logged-in view -->
+    <section id="signed-in" class="hidden">
+      <h2>Signed in as <span id="who" class="room-code"></span></h2>
+      <p class="hint">You can now request access to tournaments that require approved readers,
+        straight from the reader page.</p>
+      <p class="hint">Your name prefills the "Your name" box when you join a room —
+        it doesn't have to match your username.</p>
+      <div class="row">
+        <input id="acct-display" placeholder="Your name" maxlength="40" autocomplete="name" />
+        <button id="save-display">Save</button>
+      </div>
+      <div class="row">
+        <a class="btnlink" href="/">Home</a>
+        <button id="logout" class="ghost">Sign out</button>
+      </div>
+    </section>
+
+    <!-- Signed-out view -->
+    <section id="signed-out" class="hidden">
+      <p class="hint">An account is only needed to read at a tournament that requires
+        director-approved readers. Otherwise you don't need one.</p>
+      <div class="row" role="tablist">
+        <button id="tab-login" class="tab">Log in</button>
+        <button id="tab-register" class="tab ghost">Create account</button>
+      </div>
+      <form id="account-form" class="stack">
+        <input id="acct-username" placeholder="Username" autocapitalize="none" autocomplete="username" />
+        <input id="acct-password" type="password" placeholder="Password" autocomplete="current-password" />
+        <input id="acct-display-reg" class="hidden" placeholder="Your name (optional — shown to players)"
+          maxlength="40" autocomplete="name" />
+        <button type="submit" id="acct-submit">Log in</button>
+      </form>
+    </section>
+
+    <p id="msg" class="msg" role="status"></p>
+  </main>
+
+  <footer class="site-foot">
+    <a href="/">Home</a> · <a href="/about">About</a>
+  </footer>
+  <script type="module" src="/js/account.js"></script>
+</body>
+</html>

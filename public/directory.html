@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <link rel="icon" href="/favicon.ico" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <title>Tournaments — Klaxon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="room">
+  <header class="bar">
+    <nav class="bar-left crumbs" aria-label="Breadcrumb">
+      <a class="crumb crumb-mark" href="/">Klaxon</a>
+      <span class="crumb-sep">›</span>
+      <span class="crumb">Tournaments</span>
+    </nav>
+    <div class="bar-right">
+      <a class="pill pill-btn" href="/account" id="account-pill">Log in</a>
+    </div>
+  </header>
+
+  <main class="stage">
+    <section class="panel hidden" id="mine-panel">
+      <h3>Your tournaments</h3>
+      <p class="hint">Created from this browser — you hold the director key.</p>
+      <ul id="mine-list" class="players"></ul>
+    </section>
+
+    <section class="panel">
+      <h3>Tournaments</h3>
+      <p class="hint">Public tournaments. To read at one that requires approved readers,
+        <a href="/account">create an account</a> then request to join — the director approves you.</p>
+      <ul id="dir-list" class="players"></ul>
+      <p id="dir-empty" class="hint">No public tournaments right now.</p>
+      <p id="dir-msg" class="msg"></p>
+    </section>
+  </main>
+
+  <script type="module" src="/js/directory.js"></script>
+</body>
+</html>

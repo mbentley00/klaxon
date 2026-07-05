@@ -45,7 +45,9 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
       reconcileWindowMs: clampNum(eff.reconcileWindowMs, 50, 1000, DEFAULTS.reconcileWindowMs),
       queueMode: !!eff.queueMode,        // accumulate a buzz queue vs lock to first
       allowWithdraw: !!eff.allowWithdraw, // (queue mode) players may remove themselves
-      autoClear: !!eff.autoClear          // auto-reset the buzzer a few seconds after a buzz
+      autoClear: !!eff.autoClear,         // auto-reset the buzzer a few seconds after a buzz
+      modaqMode: !!eff.modaqMode,         // reader gets the embedded MODAQ reader + buzz panel
+      modaqLite: !!eff.modaqLite          // lightweight MODAQ: reader + buzzer only, no tournament artifacts
     },
     phase: 'open',          // open | locked  — buzzers are live by default
     cycleNo: 1,
@@ -66,21 +68,50 @@ export function getRoom(code) {
   return rooms.get((code || '').toUpperCase());
 }
 
-export function createTournament({ name, schedule = [], defaults = {} }) {
+// Which artifact bucket a room's MODAQ files live in: the tournament's, if the
+// room belongs to one (so a whole tournament shares rosters/packets/exports),
+// otherwise the room's own bucket (a standalone MODAQ room still works).
+export function bucketForRoom(room) {
+  if (room?.tournamentCode && tournaments.has(room.tournamentCode)) {
+    return { kind: 't', code: room.tournamentCode };
+  }
+  return { kind: 'r', code: room.code };
+}
+
+export function createTournament({ name, schedule = [], defaults = {}, format = {}, requireReaderAccounts = false, date = '', listed = false }) {
   let code;
   do { code = roomCode(5); } while (tournaments.has(code));
   const t = {
     code,
     name: (name || `Tournament ${code}`).slice(0, 80),
     createdAt: Date.now(),
+    // Tournament date (YYYY-MM-DD, as supplied by the client).
+    date: String(date || '').slice(0, 10),
+    // If true, appears in the public tournament directory so moderators can find
+    // it and request to join.
+    listed: !!listed,
     directorToken: secretToken(),
     roomCodes: new Set(),
     // Settings every room created in this tournament starts with (see createRoom).
     roomDefaults: normalizeRoomDefaults(defaults),
+    // Scoring format the moderators read with (tossup point scheme + bonuses).
+    format: normalizeFormat(format),
+    // If true, readers must have a director-approved account to access the
+    // tournament's centralized packets.
+    requireReaderAccounts: !!requireReaderAccounts,
     schedule: normalizeSchedule(schedule)
   };
   tournaments.set(code, t);
   return t;
+}
+
+// The three supported tossup point schemes.
+export const TOSSUP_SCHEMES = ['15/10/-5', '20/15/10/-5', '20/10/0'];
+function normalizeFormat(f = {}) {
+  return {
+    hasBonuses: f.hasBonuses !== false, // default: bonuses on
+    tossupScheme: TOSSUP_SCHEMES.includes(f.tossupScheme) ? f.tossupScheme : '15/10/-5'
+  };
 }
 
 // Whitelist + coerce the per-room defaults a tournament director can set.
@@ -89,11 +120,25 @@ function normalizeRoomDefaults(d = {}) {
   if (typeof d.queueMode === 'boolean') out.queueMode = d.queueMode;
   if (typeof d.allowWithdraw === 'boolean') out.allowWithdraw = d.allowWithdraw;
   if (typeof d.autoClear === 'boolean') out.autoClear = d.autoClear;
+  if (typeof d.modaqMode === 'boolean') out.modaqMode = d.modaqMode;
+  if (typeof d.modaqLite === 'boolean') out.modaqLite = d.modaqLite;
   return out;
 }
 
 export function getTournament(code) {
   return tournaments.get((code || '').toUpperCase());
+}
+
+// Public directory of tournaments the director opted to list. Sorted by date
+// (soonest first), then name.
+export function listTournaments() {
+  return [...tournaments.values()]
+    .filter((t) => t.listed)
+    .map((t) => ({
+      code: t.code, name: t.name, date: t.date || '',
+      requireReaderAccounts: !!t.requireReaderAccounts
+    }))
+    .sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || a.name.localeCompare(b.name));
 }
 
 // schedule: [{ round, room, teams:[..] }] -> we keep it loose on purpose so a
@@ -239,6 +284,8 @@ export function setOptions(room, opts = {}) {
   if (typeof opts.queueMode === 'boolean') room.settings.queueMode = opts.queueMode;
   if (typeof opts.allowWithdraw === 'boolean') room.settings.allowWithdraw = opts.allowWithdraw;
   if (typeof opts.autoClear === 'boolean') room.settings.autoClear = opts.autoClear;
+  if (typeof opts.modaqMode === 'boolean') room.settings.modaqMode = opts.modaqMode;
+  if (typeof opts.modaqLite === 'boolean') room.settings.modaqLite = opts.modaqLite;
   // Leaving queue mode collapses any queue back to the standard locked state.
   if (!room.settings.queueMode && room.queue.length) room.phase = 'locked';
   pushLog(room, { type: 'set_options', settings: room.settings });

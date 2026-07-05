@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <link rel="icon" href="/favicon.ico" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <title>New tournament — Klaxon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="room">
+  <header class="bar">
+    <nav class="bar-left crumbs" aria-label="Breadcrumb">
+      <a class="crumb crumb-mark" href="/">Klaxon</a>
+      <span class="crumb-sep">›</span>
+      <span class="crumb">New tournament</span>
+    </nav>
+  </header>
+
+  <main class="stage">
+    <section class="panel">
+      <h3>Create a tournament</h3>
+      <p class="hint">A tournament links rooms together, holds a schedule, and (with MODAQ mode)
+        collects rosters, packets, live stats, and errata.</p>
+      <label class="select-label" for="tournament-name">Tournament name</label>
+      <input id="tournament-name" placeholder="e.g. Fall Invitational" />
+      <label class="select-label" for="t-date">Date</label>
+      <input id="t-date" type="date" />
+      <label class="toggle"><input type="checkbox" id="t-listed" checked /> List in the public tournament
+        directory (moderators can find it and request to join)</label>
+    </section>
+
+    <section class="panel">
+      <h3>Scoring format</h3>
+      <label class="select-label" for="fmt-scheme">Tossup point scheme</label>
+      <select id="fmt-scheme">
+        <option value="15/10/-5">15 / 10 / −5 &nbsp;(power, get, neg)</option>
+        <option value="20/15/10/-5">20 / 15 / 10 / −5 &nbsp;(superpower, power, get, neg)</option>
+        <option value="20/10/0">20 / 10 / 0 &nbsp;(20 power, get, no negs)</option>
+      </select>
+      <label class="toggle"><input type="checkbox" id="fmt-bonuses" checked /> Tournament has bonuses</label>
+      <p class="hint">Moderators reading in MODAQ mode will score with this format by default.</p>
+    </section>
+
+    <section class="panel">
+      <h3>Round packets <span class="muted-count">optional</span></h3>
+      <p class="hint">Upload several <code>.json</code> packets at once — each file's name becomes the round
+        label. Rounds start hidden from moderators; release them from the director console.</p>
+      <input type="file" id="t-packet-files" accept=".json,application/json" multiple />
+      <label class="toggle"><input type="checkbox" id="t-require-accounts" /> Require readers to have a
+        director-approved account to access these packets</label>
+    </section>
+
+    <section class="panel">
+      <h3>Roster <span class="muted-count">optional</span></h3>
+      <p class="hint">A registration QBJ (teams + players). MODAQ rooms default to it.</p>
+      <input type="file" id="t-roster-file" accept=".qbj,.json,application/json" />
+    </section>
+
+    <section class="panel">
+      <h3>Default room settings</h3>
+      <fieldset class="opt-defaults">
+        <legend>Every room created in this tournament starts with</legend>
+        <label class="select-label" for="t-def-modaq-mode">Moderator view</label>
+        <select id="t-def-modaq-mode">
+          <option value="off">Standard buzzer</option>
+          <option value="lite">MODAQ — lite (reader + buzzer)</option>
+          <option value="full">MODAQ — with roster / packets / exports</option>
+        </select>
+        <label class="toggle"><input type="checkbox" id="t-def-queue" /> Buzzer queue mode</label>
+        <label class="toggle"><input type="checkbox" id="t-def-withdraw" /> Allow players to withdraw</label>
+        <label class="toggle"><input type="checkbox" id="t-def-autoclear" /> Auto-clear buzzer 5s after a buzz</label>
+      </fieldset>
+    </section>
+
+    <section class="panel">
+      <button id="create-tournament" class="primary">Create tournament</button>
+      <p id="msg" class="msg" role="status"></p>
+    </section>
+  </main>
+
+  <script type="module" src="/js/new-tournament.js"></script>
+</body>
+</html>

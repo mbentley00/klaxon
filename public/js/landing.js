@@ -22,9 +22,15 @@ $('#join-form').addEventListener('submit', (e) => {
 $('#create-room').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
+    const modaqMode = $('#room-modaq-mode').value; // off | lite | full
+    const settings =
+      modaqMode === 'lite' ? { modaqMode: true, modaqLite: true }
+        : modaqMode === 'full' ? { modaqMode: true }
+          : undefined;
     const body = {
       name: $('#room-name').value.trim() || undefined,
-      tournamentCode: $('#room-tournament').value.trim().toUpperCase() || undefined
+      tournamentCode: $('#room-tournament').value.trim().toUpperCase() || undefined,
+      settings
     };
     const r = await api('POST', '/api/rooms', body);
     // Persist the capabilities for this room: the reader token authorizes us as
@@ -38,22 +44,15 @@ $('#create-room').addEventListener('submit', async (e) => {
   }
 });
 
-$('#create-tournament').addEventListener('submit', async (e) => {
-  e.preventDefault();
+// Tournament creation lives on its own page (/new-tournament).
+
+// Reflect signed-in state on the account link.
+(async () => {
+  const s = localStorage.getItem('bz_sessionToken');
+  const link = $('#account-link');
+  if (!s || !link) return;
   try {
-    const defaults = {
-      queueMode: $('#t-def-queue').checked,
-      allowWithdraw: $('#t-def-withdraw').checked,
-      autoClear: $('#t-def-autoclear').checked
-    };
-    const r = await api('POST', '/api/tournaments', {
-      name: $('#tournament-name').value.trim() || undefined,
-      defaults
-    });
-    remember('directorToken:' + r.code, r.directorToken);
-    say(`Tournament ${r.code} created. Opening director console…`);
-    location.href = '/t/' + r.code;
-  } catch (err) {
-    say('Could not create tournament: ' + err.message, false);
-  }
-});
+    const { account } = await api('GET', `/api/accounts/me?sessionToken=${encodeURIComponent(s)}`);
+    link.textContent = `Account · ${account.username}`;
+  } catch { localStorage.removeItem('bz_sessionToken'); }
+})();

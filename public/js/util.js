@@ -25,6 +25,19 @@ export async function api(method, url, body) {
   return res.json();
 }
 
+// Read the text of the file currently chosen in a <input type="file">, or null
+// if nothing is selected. Shared by the roster/packet upload flows.
+export function readFileText(input) {
+  const file = input?.files?.[0];
+  if (!file) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result || ''));
+    fr.onerror = () => reject(new Error('could not read file'));
+    fr.readAsText(file);
+  });
+}
+
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const el = (tag, props = {}, ...kids) => {
   const node = Object.assign(document.createElement(tag), props);

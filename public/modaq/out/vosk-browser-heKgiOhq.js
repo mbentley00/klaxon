@@ -1,0 +1,1 @@
+function e(e){return Promise.reject(Error(`Speech recognition is disabled in the Klaxon moderator build.`))}export{e as createModel};

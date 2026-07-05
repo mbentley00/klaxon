@@ -4,6 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#f3efe6" />
+  <link rel="icon" href="/favicon.ico" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <title>Klaxon — room</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -19,9 +23,10 @@
       <span class="crumb-sep">›</span>
       <span class="room-code" id="room-code">····</span>
       <span class="room-name" id="room-name"></span>
-      <span id="role-badge" class="badge"></span>
     </nav>
     <div class="bar-right">
+      <button id="compact-toggle" class="pill pill-btn hidden" title="Toggle compact view" aria-pressed="false">Compact</button>
+      <button id="copy-link" class="pill pill-btn" title="Copy the player join link for this room">Copy link</button>
       <span id="conn" class="pill" title="Connection">connecting…</span>
       <span id="latency" class="pill" title="Your latency"></span>
     </div>
@@ -107,6 +112,12 @@
       <label class="toggle"><input type="checkbox" id="opt-queue" /> Buzzer queue mode</label>
       <label class="toggle hidden" id="opt-withdraw-row"><input type="checkbox" id="opt-withdraw" /> Allow players to withdraw</label>
       <label class="toggle"><input type="checkbox" id="opt-autoclear" /> Auto-clear buzzer 5s after a buzz</label>
+      <label class="select-label" for="opt-modaq-mode">Moderator view</label>
+      <select id="opt-modaq-mode">
+        <option value="off">Standard buzzer</option>
+        <option value="lite">MODAQ — lite (reader + buzzer)</option>
+        <option value="full">MODAQ — with roster / packets / exports</option>
+      </select>
       <label class="toggle"><input type="checkbox" id="opt-disconnect-sound" /> Play a sound when a player disconnects</label>
     </section>
 
@@ -128,6 +139,10 @@
       <div id="t-rooms" class="t-rooms"></div>
     </section>
   </main>
+
+  <footer id="role-footer" class="role-footer hidden">
+    You're in this room as <span id="role-badge" class="badge"></span>
+  </footer>
 
   <script src="/socket.io/socket.io.js"></script>
   <script type="module" src="/js/room.js"></script>

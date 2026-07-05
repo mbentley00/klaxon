@@ -133,6 +133,15 @@ $('#gate-join').onclick = () => {
 $('#gate-spectate').onclick = () => doJoin('spectator', $('#gate-name').value.trim() || 'Spectator');
 
 function enterStage(snapshot) {
+  // MODAQ rooms send staff to the embedded MODAQ reader + buzz panel instead of
+  // the plain reader view. Players/spectators stay on the normal buzzer here.
+  // `?plain=1` bypasses the redirect so a MODAQ moderator can still reach the
+  // normal reader controls (buzzer options, invite links) from the MODAQ view.
+  const plain = params.get('plain') === '1';
+  if (!plain && isStaffRole(state.role) && snapshot?.settings?.modaqMode) {
+    location.replace(`/modaq?room=${code}`);
+    return;
+  }
   $('#loading').classList.add('hidden');
   $('#gate').classList.add('hidden');
   $('#stage').classList.remove('hidden');
@@ -143,12 +152,43 @@ function enterStage(snapshot) {
   $('#player-hint').classList.toggle('hidden', state.role !== 'player');
   $('#reader-hint').classList.toggle('hidden', !staff);
   $('#role-badge').textContent = staff ? (state.role === 'reader' ? 'Reader' : 'Co-reader')
-    : state.role === 'spectator' ? 'Spectator' : '';
+    : state.role === 'spectator' ? 'Spectator' : 'Player';
+  $('#role-footer').classList.remove('hidden');
   if (staff) buildShareLinks();
+  // Compact view is staff-only: a reader squeezing the window beside Zoom + the
+  // question doc wants just the buzzer and the buzz order. Restore their choice.
+  $('#compact-toggle').classList.toggle('hidden', !staff);
+  if (staff) applyCompact(recall('compactView') === '1');
   applySoundPrefs();
   ensureAudio();          // try to unlock sound on join; shows a warning if blocked
   applyState(snapshot);
 }
+
+// ---- compact view (staff) ----
+function applyCompact(on) {
+  document.body.classList.toggle('compact', on);
+  const btn = $('#compact-toggle');
+  btn.textContent = on ? 'Full view' : 'Compact';
+  btn.classList.toggle('active', on);
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+$('#compact-toggle').onclick = () => {
+  const on = !document.body.classList.contains('compact');
+  if (on) remember('compactView', '1'); else forget('compactView');
+  applyCompact(on);
+};
+
+// ---- copy player join link (everyone) ----
+$('#copy-link').onclick = async (e) => {
+  const url = `${location.origin}/r/${code}`;
+  try { await navigator.clipboard.writeText(url); }
+  catch { prompt('Copy this player link:', url); }
+  const btn = e.currentTarget;
+  const old = btn.textContent;
+  btn.textContent = 'Copied!';
+  btn.blur(); // don't let the button keep focus and intercept Space-to-buzz/reset
+  setTimeout(() => { btn.textContent = old; }, 1200);
+};
 
 // ---- realtime state ----
 socket.on('state', applyState);
@@ -291,11 +331,25 @@ function fireBuzz() {
 buzzer.addEventListener('click', buzzerAction);
 buzzer.addEventListener('touchstart', (e) => { e.preventDefault(); buzzerAction(); }, { passive: false });
 
-// Space: players buzz, staff reset. Never while typing in a field.
-const isTyping = (n) => n && (/^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName) || n.isContentEditable);
+// Space: players buzz, staff reset. Never while genuinely typing in a field.
+// Note: a readonly/disabled input (e.g. the invite-link boxes) can't be typed
+// into, so it must NOT swallow Space — otherwise clicking an invite link would
+// leave the reader unable to reset with the spacebar.
+const isTyping = (n) => {
+  if (!n) return false;
+  if (n.isContentEditable) return true;
+  const tag = n.tagName;
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (tag === 'INPUT') return !(n.readOnly || n.disabled);
+  return false;
+};
 document.addEventListener('keydown', (e) => {
   if ((e.code === 'Space' || e.key === ' ') && !e.repeat && !isTyping(document.activeElement)) {
     e.preventDefault();
+    // Space is the universal buzz/reset key. Drop focus from any button first so
+    // it can't be re-activated by the same keypress in browsers where
+    // preventDefault doesn't suppress the focused-button click.
+    if (document.activeElement instanceof HTMLButtonElement) document.activeElement.blur();
     buzzer.classList.add('pressed');
     buzzerAction();
   }
@@ -336,6 +390,8 @@ function renderOptions(s) {
   $('#opt-withdraw-row').classList.toggle('hidden', !s.settings?.queueMode);
   // Auto-clear only applies in lock-to-first mode (server ignores it otherwise).
   $('#opt-autoclear').closest('.toggle').classList.toggle('hidden', !!s.settings?.queueMode);
+  const modaq = $('#opt-modaq-mode');
+  if (modaq) modaq.value = s.settings?.modaqLite ? 'lite' : s.settings?.modaqMode ? 'full' : 'off';
 }
 $('#opt-queue').onchange = (e) =>
   socket.emit('reader_action', { action: 'set_options', options: { queueMode: e.target.checked } });
@@ -343,6 +399,15 @@ $('#opt-withdraw').onchange = (e) =>
   socket.emit('reader_action', { action: 'set_options', options: { allowWithdraw: e.target.checked } });
 $('#opt-autoclear').onchange = (e) =>
   socket.emit('reader_action', { action: 'set_options', options: { autoClear: e.target.checked } });
+// Switching to a MODAQ mode moves this staff view over to the MODAQ reader.
+$('#opt-modaq-mode')?.addEventListener('change', (e) => {
+  const v = e.target.value; // off | lite | full
+  const options = v === 'lite' ? { modaqMode: true, modaqLite: true }
+    : v === 'full' ? { modaqMode: true, modaqLite: false }
+      : { modaqMode: false, modaqLite: false };
+  socket.emit('reader_action', { action: 'set_options', options });
+  if (v !== 'off') location.replace(`/modaq?room=${code}`);
+});
 
 // ---- share / invite links ----
 function buildShareLinks() {
@@ -478,7 +543,7 @@ function applyMuteUI() {
   b.classList.toggle('active', m);
   const vol = $('#sound-vol'); if (vol) vol.disabled = m;
 }
-$('#sound-pick')?.addEventListener('change', (e) => { remember('sound', e.target.value); playSound(soundName(), volume(), true); });
+$('#sound-pick')?.addEventListener('change', (e) => { remember('sound', e.target.value); playSound(soundName(), volume(), true); e.target.blur(); /* don't let the select keep focus and swallow Space-to-reset */ });
 $('#sound-vol')?.addEventListener('input', (e) => remember('volume', e.target.value));
 $('#sound-vol')?.addEventListener('change', () => playSound(soundName(), volume(), true));
 $('#test-sound')?.addEventListener('click', () => playSound(soundName(), volume(), true));

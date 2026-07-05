@@ -4,6 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#f3efe6" />
+  <link rel="icon" href="/favicon.ico" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <title>Klaxon — online quizbowl buzzing system</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -32,26 +36,32 @@
         <input id="room-name" placeholder="Room name (optional)" />
         <input id="room-tournament" placeholder="Tournament code (optional)"
                maxlength="5" autocapitalize="characters" />
+        <label class="select-label" for="room-modaq-mode">Moderator view</label>
+        <select id="room-modaq-mode">
+          <option value="off">Standard buzzer</option>
+          <option value="lite">MODAQ — lite (reader + buzzer, no setup)</option>
+          <option value="full">MODAQ — with roster / packets / exports</option>
+        </select>
         <button type="submit">Create room &amp; read</button>
       </form>
     </section>
 
-    <details>
-      <summary>Create a tournament</summary>
-      <form id="create-tournament" class="stack">
-        <input id="tournament-name" placeholder="Tournament name" />
-        <fieldset class="opt-defaults">
-          <legend>Default settings for every room</legend>
-          <label class="toggle"><input type="checkbox" id="t-def-queue" /> Buzzer queue mode</label>
-          <label class="toggle"><input type="checkbox" id="t-def-withdraw" /> Allow players to withdraw</label>
-          <label class="toggle"><input type="checkbox" id="t-def-autoclear" /> Auto-clear buzzer 5s after a buzz</label>
-        </fieldset>
-        <button type="submit">Create tournament</button>
-      </form>
-      <p class="hint">A tournament links rooms together and can hold a schedule
-        so teams jump between rooms each round. Rooms you add start with the
-        defaults above (each reader can still change them in their room).</p>
-    </details>
+    <section>
+      <h2>Run a tournament</h2>
+      <p class="hint">Group rooms under a tournament with a schedule, a scoring format,
+        rosters, packets, live stats, and MODAQ moderator mode.</p>
+      <a class="btnlink" href="/new-tournament">Create a tournament →</a>
+    </section>
+
+    <section>
+      <h2>Moderators</h2>
+      <p class="hint">Reading at a tournament that requires approved readers? Create an
+        account, then browse tournaments and request to join.</p>
+      <div class="row">
+        <a class="btnlink" href="/account" id="account-link">Create account / Log in</a>
+        <a class="btnlink ghost" href="/tournaments">Browse tournaments →</a>
+      </div>
+    </section>
 
     <p id="msg" class="msg" role="status"></p>
   </main>
