@@ -85,6 +85,41 @@ export async function getRoster(bucket) {
   return readTextOrNull(path.join(bucketDir(bucket), 'roster.qbj'));
 }
 
+// When a moderator plays someone who isn't on the roster (MODAQ's add-player),
+// fold them into the stored registration QBJ so every other room's player pool
+// picks them up. Players are only added to teams the roster already knows —
+// an ad-hoc team a moderator typed in doesn't invent roster entries.
+export async function addMatchPlayersToRoster(bucket, match) {
+  const text = await getRoster(bucket);
+  if (!text) return 0;
+  let roster;
+  try { roster = JSON.parse(text); } catch { return 0; }
+  const registrations = Array.isArray(roster?.registrations) ? roster.registrations : [];
+  const teamPlayers = new Map(); // team name -> live reference to its players array
+  for (const reg of registrations) {
+    for (const team of reg?.teams || []) {
+      if (team?.name == null) continue;
+      if (!Array.isArray(team.players)) team.players = [];
+      teamPlayers.set(String(team.name), team.players);
+    }
+  }
+  let added = 0;
+  for (const mt of match?.match_teams || []) {
+    const players = teamPlayers.get(String(mt?.team?.name ?? ''));
+    if (!players) continue;
+    const have = new Set(players.map((p) => String(p?.name ?? '').trim().toLowerCase()));
+    for (const mp of mt?.match_players || []) {
+      const name = String(mp?.player?.name ?? '').trim();
+      if (!name || have.has(name.toLowerCase())) continue;
+      players.push({ name });
+      have.add(name.toLowerCase());
+      added++;
+    }
+  }
+  if (added > 0) await saveRoster(bucket, JSON.stringify(roster, null, 2));
+  return added;
+}
+
 // --- round packets ---------------------------------------------------------
 // A moderator uploads the JSON packet for a round; it's keyed by a round label
 // so the whole tournament can share round packets and every room in that round
@@ -215,7 +250,7 @@ export async function getPacket(bucket, round) {
 // per-change sync) overwrites the same file, so the tournament ends up with one
 // current QBJ per match instead of hundreds of timestamped duplicates. The file
 // mtime records when it was last synced.
-export async function saveExport(bucket, { room, round, qbj, inProgress = false }) {
+export async function saveExport(bucket, { room, round, qbj, inProgress = false, currentQuestion, at }) {
   const roomPart = safeName(room, 'room');
   const roundPart = safeName(round, 'r');
   const filename = `${roomPart}-${roundPart}.qbj`;
@@ -231,6 +266,10 @@ export async function saveExport(bucket, { room, round, qbj, inProgress = false 
     // from an earlier question index) must not flip it back to "live".
     if (inProgress && !(await wasFinalizedForSameTeams(file, obj))) {
       obj._inProgress = true;
+      // Which question the reader is on, plus when the game first went live, so
+      // the live stats view can show progress and elapsed time.
+      if (Number.isFinite(currentQuestion) && currentQuestion > 0) obj._currentQuestion = currentQuestion;
+      obj._startedAt = (await liveStartedAt(file, obj)) ?? at ?? Date.now();
     }
   }
   const text = JSON.stringify(obj, null, 2);
@@ -239,7 +278,20 @@ export async function saveExport(bucket, { room, round, qbj, inProgress = false 
 }
 
 const matchTeamNames = (m) =>
-  (Array.isArray(m?.match_teams) ? m.match_teams : []).map((mt) => mt?.team?.name || '?').sort().join(' ');
+  (Array.isArray(m?.match_teams) ? m.match_teams : []).map((mt) => mt?.team?.name || '?').sort().join(' ');
+
+// Keep the original "went live" time across re-syncs of the same game, so the
+// live view can show how long a game has been running. A different matchup in
+// the same slot starts its own clock.
+async function liveStartedAt(file, incoming) {
+  const text = await readTextOrNull(file);
+  if (text == null) return null;
+  try {
+    const prev = JSON.parse(text);
+    if (prev._inProgress !== true || matchTeamNames(prev) !== matchTeamNames(incoming)) return null;
+    return Number.isFinite(prev._startedAt) ? prev._startedAt : null;
+  } catch { return null; }
+}
 
 async function wasFinalizedForSameTeams(file, incoming) {
   const text = await readTextOrNull(file);
@@ -249,6 +301,43 @@ async function wasFinalizedForSameTeams(file, incoming) {
     // Different teams = a new game reusing the slot; its status starts fresh.
     return prev._inProgress !== true && matchTeamNames(prev) === matchTeamNames(incoming);
   } catch { return false; }
+}
+
+// --- protest rulings ---------------------------------------------------------
+// The director's ruling on a protest lives inside the match's stored QBJ under
+// _protestRulings, keyed by the protest's identity, so it survives restarts and
+// travels with the game. An upheld ruling carries per-team point adjustments
+// the stats engine folds into that game's totals.
+
+export const protestKey = ({ type, question, part, team }) =>
+  `${type === 'bonus' ? 'bonus' : 'tossup'}|${Number(question) || 0}|${Number(part) || 0}|${String(team ?? '')}`;
+
+export async function setProtestRuling(bucket, { room, round, type, question, part, team, status, note, adjustments }) {
+  const file = path.join(bucketDir(bucket), 'exports', `${safeName(room, 'room')}-${safeName(round, 'r')}.qbj`);
+  const text = await readTextOrNull(file);
+  if (text == null) return null;
+  let obj;
+  try { obj = JSON.parse(text); } catch { return null; }
+  const rulings = obj._protestRulings && typeof obj._protestRulings === 'object' ? obj._protestRulings : {};
+  const key = protestKey({ type, question, part, team });
+  const st = status === 'upheld' ? 'upheld' : status === 'denied' ? 'denied' : null;
+  if (st == null) {
+    delete rulings[key]; // clear the ruling: the protest is open again
+  } else {
+    rulings[key] = {
+      status: st,
+      note: String(note ?? '').slice(0, 500),
+      adjustments: st === 'upheld'
+        ? (Array.isArray(adjustments) ? adjustments : [])
+          .map((a) => ({ team: String(a?.team ?? ''), points: Number(a?.points) || 0 }))
+          .filter((a) => a.team && a.points !== 0)
+        : [],
+      at: Date.now(),
+    };
+  }
+  obj._protestRulings = rulings;
+  await writeAtomic(file, JSON.stringify(obj, null, 2));
+  return rulings[key] ?? { cleared: true };
 }
 
 // Read and parse every exported match in a bucket — used to hand the TD all the
@@ -352,6 +441,41 @@ export async function saveStructure(bucket, structure) {
   const obj = { phases, divisions };
   await writeAtomic(path.join(bucketDir(bucket), 'structure.json'), JSON.stringify(obj, null, 2));
   return obj;
+}
+
+// --- tournament + room records (restart survival) ---------------------------
+// The in-memory store (store.js) is authoritative while running, but tournament
+// records and room identities are written here so a restart/deploy doesn't
+// orphan every director console and reader link. Live buzz state is NOT saved.
+
+export async function saveTournamentRecord(record) {
+  const file = path.join(bucketDir({ kind: 't', code: record.code }), 'tournament.json');
+  await writeAtomic(file, JSON.stringify(record, null, 2));
+}
+
+export async function loadTournamentRecords() {
+  const dir = path.join(DATA_DIR, 't');
+  let codes;
+  try { codes = await fs.readdir(dir); }
+  catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+  const out = [];
+  for (const code of codes) {
+    if (!CODE_RE.test(code)) continue;
+    const text = await readTextOrNull(path.join(dir, code, 'tournament.json'));
+    if (!text) continue; // pre-persistence bucket (artifacts only); nothing to restore
+    try { out.push(JSON.parse(text)); } catch { /* skip a corrupt record */ }
+  }
+  return out;
+}
+
+export async function saveRoomRecords(records) {
+  await writeAtomic(path.join(DATA_DIR, 'rooms.json'), JSON.stringify(records, null, 2));
+}
+
+export async function loadRoomRecords() {
+  const text = await readTextOrNull(path.join(DATA_DIR, 'rooms.json'));
+  if (!text) return [];
+  try { const a = JSON.parse(text); return Array.isArray(a) ? a : []; } catch { return []; }
 }
 
 // --- reader memberships (account approval per tournament) ------------------

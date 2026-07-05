@@ -27,6 +27,22 @@ function foldAnswerCounts(answerCounts, into) {
   return { points, positives };
 }
 
+// Points a director's upheld protest rulings add to (or subtract from) a
+// team's total in this match. Player-level stats stay as read — like a real
+// TD's protest correction, only the game score moves.
+function rulingAdjustment(qbj, teamName) {
+  const rulings = qbj?._protestRulings;
+  if (!rulings || typeof rulings !== 'object') return 0;
+  let sum = 0;
+  for (const r of Object.values(rulings)) {
+    if (r?.status !== 'upheld') continue;
+    for (const a of r.adjustments || []) {
+      if (String(a?.team) === teamName) sum += num(a.points);
+    }
+  }
+  return sum;
+}
+
 const blankTeam = (name) => ({
   name, games: 0, wins: 0, losses: 0, ties: 0,
   tuh: 0, tossupPoints: 0, totalPoints: 0, bonusPoints: 0, bonusesHeard: 0,
@@ -76,7 +92,8 @@ function aggregate(matches) {
         playerRows.push({ name: pName, tuh: pTuh, ac: pAc, points: folded.points });
       }
       const bonusPoints = num(mt?.bonus_points);
-      return { teamName, teamAc, tossupPoints, positives, bonusPoints, total: tossupPoints + bonusPoints, playerRows };
+      const total = tossupPoints + bonusPoints + rulingAdjustment(qbj, teamName);
+      return { teamName, teamAc, tossupPoints, positives, bonusPoints, total, playerRows };
     });
 
     let winnerIndex = -1;
@@ -171,7 +188,145 @@ function groupTeams(teamStats, phaseName, structure) {
   return groups.filter((g) => g.teams.length > 0);
 }
 
-export function computeStats(matches, structure) {
+// Rows for the Live Games view: current score, question progress, elapsed time.
+// Kept out of aggregate() so half-played games never touch the real stats.
+export function liveGameRows(liveMatches) {
+  return liveMatches.map((m) => {
+    const qbj = m?.qbj || m;
+    const teams = (Array.isArray(qbj.match_teams) ? qbj.match_teams : []).map((mt) => {
+      let tossupPoints = 0;
+      for (const mp of mt?.match_players || []) {
+        for (const ac of mp?.answer_counts || []) tossupPoints += num(ac?.answer?.value) * num(ac?.number);
+      }
+      const name = mt?.team?.name || '?';
+      return { name, total: tossupPoints + num(mt?.bonus_points) + rulingAdjustment(qbj, name) };
+    });
+    return {
+      round: String(qbj._round ?? ''),
+      room: String(qbj._room ?? ''),
+      currentQuestion: num(qbj._currentQuestion) || 0,
+      tuh: num(qbj.tossups_read),
+      startedAt: num(qbj._startedAt) || 0,
+      updatedAt: num(m?.savedAt) || 0,
+      teams,
+    };
+  }).sort((a, b) => {
+    const na = Number(a.round), nb = Number(b.round);
+    const byRound = Number.isFinite(na) && Number.isFinite(nb) ? na - nb : a.round.localeCompare(b.round);
+    return byRound || a.room.localeCompare(b.room);
+  });
+}
+
+// --- protests ----------------------------------------------------------------
+// MODAQ records protests as structured sentences in the match notes:
+//   Tossup protest on tossup #4. Team "X" protested because of this reason: "R".
+//   Bonus protest on bonus #4. Team "X" protested part 2 because of this reason: "R".
+// Parse them back out and judge each one: while the game is live it's pending;
+// once final, a protest by the winner can't change the result (moot), and a
+// protest by the loser matters only if a generous best-case swing could still
+// tie or flip the game.
+const TOSSUP_PROTEST_RE = /^Tossup protest on tossup #(\d+)\. Team "(.*)" protested because of this reason: "([\s\S]*)"\.$/;
+const BONUS_PROTEST_RE = /^Bonus protest on bonus #(\d+)\. Team "(.*)" protested part (\d+) because of this reason: "([\s\S]*)"\.$/;
+
+function matchTeamTotals(qbj) {
+  return (Array.isArray(qbj.match_teams) ? qbj.match_teams : []).map((mt) => {
+    let tossupPoints = 0;
+    for (const mp of mt?.match_players || []) {
+      for (const ac of mp?.answer_counts || []) tossupPoints += num(ac?.answer?.value) * num(ac?.number);
+    }
+    const name = mt?.team?.name || '?';
+    return { name, total: tossupPoints + num(mt?.bonus_points) + rulingAdjustment(qbj, name) };
+  });
+}
+
+// Best-case points a single protest could swing, erring toward "still matters":
+// the protesting team gains the biggest tossup + a full bonus, AND the opponent
+// loses the same if the ruling takes the question away from them.
+function maxSwing(qbj, type) {
+  let maxTossup = 10;
+  let negRefund = 0;
+  let hasBonuses = false;
+  for (const mt of qbj.match_teams || []) {
+    if (num(mt?.bonus_points) > 0) hasBonuses = true;
+    for (const mp of mt?.match_players || []) {
+      for (const ac of mp?.answer_counts || []) {
+        const v = num(ac?.answer?.value);
+        if (v > maxTossup) maxTossup = v;
+        if (v < 0) negRefund = Math.max(negRefund, -v);
+      }
+    }
+  }
+  const bonus = hasBonuses ? 30 : 0;
+  if (type === 'bonus') return bonus;
+  return 2 * (maxTossup + bonus) + negRefund;
+}
+
+export function protestRows(allMatches) {
+  const rows = [];
+  for (const m of allMatches) {
+    const qbj = m?.qbj || m;
+    if (!qbj || typeof qbj.notes !== 'string') continue;
+    const live = qbj._inProgress === true;
+    const teams = matchTeamTotals(qbj);
+    for (const line of qbj.notes.split('\n')) {
+      const tossup = line.match(TOSSUP_PROTEST_RE);
+      const bonusM = tossup ? null : line.match(BONUS_PROTEST_RE);
+      if (!tossup && !bonusM) continue;
+      const type = tossup ? 'tossup' : 'bonus';
+      const [question, team, part, reason] = tossup
+        ? [num(tossup[1]), tossup[2], null, tossup[3]]
+        : [num(bonusM[1]), bonusM[2], num(bonusM[3]), bonusM[4]];
+
+      // A director's ruling settles the protest; otherwise judge it from the
+      // (adjustment-corrected) score.
+      const rulings = qbj._protestRulings && typeof qbj._protestRulings === 'object' ? qbj._protestRulings : {};
+      const ruling = rulings[`${type}|${question}|${part || 0}|${team}`] || null;
+      let status = 'pending'; // game still live: everything is undecided
+      if (ruling) {
+        status = ruling.status; // upheld | denied
+      } else if (!live && teams.length === 2) {
+        const margin = Math.abs(teams[0].total - teams[1].total);
+        const winner = teams[0].total > teams[1].total ? teams[0].name
+          : teams[1].total > teams[0].total ? teams[1].name : null;
+        if (winner === null) status = 'matters'; // tied game: any protest matters
+        else if (team === winner) status = 'moot'; // winner's protest can't flip the result
+        else status = margin <= maxSwing(qbj, type) ? 'matters' : 'moot';
+      }
+
+      rows.push({
+        round: String(qbj._round ?? ''),
+        room: String(qbj._room ?? ''),
+        live,
+        type,
+        question,
+        part,
+        team,
+        reason,
+        teams,
+        status,
+        ruling,
+      });
+    }
+  }
+  return rows.sort((a, b) => {
+    const order = { pending: 0, matters: 1, upheld: 2, denied: 3, moot: 4 };
+    const na = Number(a.round), nb = Number(b.round);
+    const byRound = Number.isFinite(na) && Number.isFinite(nb) ? na - nb : a.round.localeCompare(b.round);
+    return (order[a.status] - order[b.status]) || byRound || a.question - b.question;
+  });
+}
+
+export function computeStats(allMatches, structure) {
+  // Half-played games (live syncs) get their own view; every regular report —
+  // the YellowFruit-style set — sees only final games.
+  const matches = [];
+  const liveMatches = [];
+  for (const m of allMatches) {
+    const qbj = m?.qbj || m;
+    if (qbj?._inProgress === true) liveMatches.push(m);
+    else matches.push(m);
+  }
+
   const global = aggregate(matches);
   const answerValues = [...global.answerValues].sort((a, b) => b - a);
   const positiveValues = [...global.answerValues].filter((v) => v > 0).sort((a, b) => a - b);
@@ -219,6 +374,7 @@ export function computeStats(matches, structure) {
   return {
     answerValues, getValue, isPower, anyTies,
     phases, rounds, scoreboard,
+    liveGames: liveGameRows(liveMatches),
     teamsGlobal: [...global.teams.values()],
     playersGlobal: [...global.players.values()],
     roundToPhase: (r) => roundToPhase.get(String(r)),

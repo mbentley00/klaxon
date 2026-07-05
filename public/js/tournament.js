@@ -17,11 +17,22 @@ const saveRooms = (list) => remember(ROOMS_KEY, JSON.stringify(list));
 const msg = $('#t-msg');
 const say = (t, ok = true) => { msg.textContent = t; msg.className = 'msg ' + (ok ? 'good' : 'bad'); };
 
+// Remember every tournament this browser opens (director or not) so the
+// landing page and directory can list "your tournaments" without an account.
+function rememberVisit(name, date) {
+  try {
+    const list = JSON.parse(recall('recentTournaments') || '[]').filter((e) => e && e.code !== code);
+    list.unshift({ code, name: name || code, date: date || '', at: Date.now() });
+    remember('recentTournaments', JSON.stringify(list.slice(0, 20)));
+  } catch { /* localStorage may be unavailable */ }
+}
+
 async function init() {
   try {
     const t = await api('GET', `/api/tournaments/${code}`);
     $('#t-name').textContent = t.name || '';
     document.title = `${t.name || code} — Klaxon`;
+    rememberVisit(t.name, t.date);
     // Merge any rooms that exist server-side but aren't in our local list
     // (created elsewhere): we can still offer the player link for those.
     const known = loadRooms();
@@ -30,6 +41,8 @@ async function init() {
       if (!knownCodes.has(rc)) known.push({ code: rc, name: '', readerToken: null, coReaderToken: null });
     }
     saveRooms(known);
+    initLinks(t);
+    initAutoRelease(t);
   } catch {
     say('Tournament not found.', false);
   }
@@ -37,6 +50,57 @@ async function init() {
   initModaq();
   initPublicStats();
   initStructure();
+}
+
+// Auto-release: when every room's game in a round is final, the server makes
+// the next hidden packet visible without the director clicking anything.
+function initAutoRelease(t) {
+  const cb = $('#auto-release');
+  if (!cb) return;
+  cb.checked = t.autoRelease === true;
+  cb.onchange = async () => {
+    try {
+      await api('PUT', `/api/tournaments/${code}/auto-release`, { directorToken, enabled: cb.checked });
+      msay(cb.checked
+        ? 'Auto-release on: the next packet is released as soon as a round finishes everywhere.'
+        : 'Auto-release off.');
+    } catch (e) {
+      msay('Could not change auto-release: ' + e.message, false);
+      cb.checked = !cb.checked;
+    }
+  };
+}
+
+// Player-facing links (schedule + Discord). Anyone sees the current values;
+// only the director can save.
+function initLinks(t) {
+  const sched = $('#link-schedule');
+  const disc = $('#link-discord');
+  const save = $('#links-save');
+  if (!sched || !disc || !save) return;
+  sched.value = t.links?.schedule || '';
+  disc.value = t.links?.discord || '';
+  const lmsg = $('#links-msg');
+  if (!directorToken) {
+    sched.disabled = disc.disabled = save.disabled = true;
+    return;
+  }
+  save.onclick = async () => {
+    try {
+      const sent = { schedule: sched.value.trim(), discord: disc.value.trim() };
+      const { links } = await api('PUT', `/api/tournaments/${code}/links`, { directorToken, links: sent });
+      const rejected = Object.keys(sent).filter((k) => sent[k] && !links[k]);
+      sched.value = links.schedule;
+      disc.value = links.discord;
+      lmsg.textContent = rejected.length
+        ? `Saved, but the ${rejected.join(' and ')} link was dropped — links must start with http(s)://`
+        : 'Saved. Players see these links in every room.';
+      lmsg.className = 'msg ' + (rejected.length ? 'bad' : 'good');
+    } catch (e) {
+      lmsg.textContent = 'Could not save links: ' + e.message;
+      lmsg.className = 'msg bad';
+    }
+  };
 }
 
 // --- Tournament structure editor (phases + divisions), director only -------
@@ -138,6 +202,34 @@ function initPublicStats() {
   };
   const dl = $('#stats-download');
   if (dl) dl.onclick = () => { window.location = `/t/${code}/stats.zip`; };
+
+  // Games in progress: which rooms are still playing, the score, where they are
+  // in the packet, and how long they've been going. Public data; refreshes live.
+  refreshLive();
+  setInterval(refreshLive, 15000);
+}
+
+async function refreshLive() {
+  try {
+    const { games, now } = await api('GET', `/api/tournaments/${code}/live`);
+    $('#live-count').textContent = games.length ? `(${games.length})` : '';
+    $('#live-empty').classList.toggle('hidden', games.length > 0);
+    const ul = $('#live-list');
+    ul.innerHTML = '';
+    for (const g of games) {
+      const li = el('li', {});
+      const col = el('span', { className: 'pcol' });
+      const score = [...g.teams].sort((a, b) => b.total - a.total).map((t) => `${t.name} ${t.total}`).join(', ');
+      col.append(el('span', { className: 'pname' }, `Round ${g.round} · ${score}`));
+      const bits = [];
+      if (g.currentQuestion) bits.push(`on question ${g.currentQuestion}${g.tuh ? ` of ${g.tuh}` : ''}`);
+      if (g.startedAt) bits.push(`running ${Math.max(0, Math.round((now - g.startedAt) / 60000))} min`);
+      if (g.room) bits.push(`room ${g.room}`);
+      col.append(el('span', { className: 'pjoined' }, bits.join(' · ')));
+      li.append(col);
+      ul.append(li);
+    }
+  } catch { /* stats may not exist yet; leave the panel as-is */ }
 }
 
 // --- MODAQ management (director only) --------------------------------------
@@ -159,6 +251,8 @@ function initModaq() {
   refreshPackets();
   refreshExports();
   refreshErrata();
+  refreshProtests();
+  $('#protests-refresh').onclick = refreshProtests;
 
   $('#roster-upload').onclick = async () => {
     const text = await readFileText($('#roster-file'));
@@ -192,11 +286,38 @@ function initModaq() {
     refreshPackets();
   };
 
+  $('#yf-import').onclick = async () => {
+    const text = await readFileText($('#yf-file'));
+    if (!text) return msay('Choose your YellowFruit (.yft) file first.', false);
+    try {
+      const yft = JSON.parse(text);
+      const { updated, added } = await api('POST', `/api/tournaments/${code}/yf-import`, { directorToken, yft });
+      msay(`YellowFruit import: ${updated} game${updated === 1 ? '' : 's'} updated, ${added} added.`);
+      $('#yf-file').value = '';
+      refreshExports();
+      refreshProtests();
+    } catch (e) { msay('YellowFruit import failed: ' + e.message, false); }
+  };
+
   $('#exports-refresh').onclick = refreshExports;
   $('#errata-refresh').onclick = refreshErrata;
   $('#tb-refresh').onclick = refreshTiebreakers;
   refreshTiebreakers();
   $('#members-refresh').onclick = refreshMembers;
+  $('#member-add').onclick = async () => {
+    const identifier = $('#member-add-id').value.trim();
+    if (!identifier) return msay('Enter the email or username of a registered account.', false);
+    try {
+      const { member } = await api('POST', `/api/tournaments/${code}/members`, { directorToken, identifier });
+      msay(`${member.username} added as an approved moderator.`);
+      $('#member-add-id').value = '';
+      refreshMembers();
+    } catch (e) {
+      msay(e.message === 'account_not_found'
+        ? 'No registered account with that email or username — ask them to create one at /account first.'
+        : 'Could not add moderator: ' + e.message, false);
+    }
+  };
   refreshMembers();
   setInterval(refreshMembers, 20000);
   $('#exports-download-all').onclick = () => {
@@ -204,9 +325,10 @@ function initModaq() {
     window.location = `/api/tournaments/${code}/stats?directorToken=${qt(directorToken)}`;
   };
 
-  // Stats sync live from moderators, so keep the exports + errata lists fresh
-  // without the director having to click Refresh.
-  setInterval(() => { refreshExports(); refreshErrata(); }, 15000);
+  // Stats sync live from moderators, so keep the exports + errata + protest
+  // lists fresh without the director having to click Refresh. Packets refresh
+  // too, so an auto-release shows up in the list and on the release button.
+  setInterval(() => { refreshExports(); refreshErrata(); refreshProtests(); refreshPackets(); }, 15000);
 }
 
 async function refreshRoster() {
@@ -221,6 +343,7 @@ async function refreshPackets() {
     const { packets } = await api('GET', `/api/tournaments/${code}/packets?directorToken=${qt(directorToken)}`);
     const visibleCount = packets.filter((p) => p.visible).length;
     $('#packets-count').textContent = packets.length ? `(${visibleCount}/${packets.length} visible)` : '';
+    updateReleaseNext(packets);
     const ul = $('#packets-list');
     ul.innerHTML = '';
     if (!packets.length) { ul.append(el('li', { className: 'empty' }, 'No round packets yet')); return; }
@@ -237,6 +360,39 @@ async function refreshPackets() {
       ul.append(li);
     }
   } catch { /* ignore */ }
+}
+
+// One-click release of the next round: the button always names exactly which
+// packet it will make visible to moderators, so mid-tournament it's a single
+// unambiguous action.
+function updateReleaseNext(packets) {
+  const btn = $('#release-next');
+  if (!btn) return;
+  const unreleased = packets.filter((p) => !p.visible && !p.tiebreaker);
+  unreleased.sort((a, b) => {
+    const na = Number(a.round), nb = Number(b.round);
+    return Number.isFinite(na) && Number.isFinite(nb) ? na - nb : String(a.round).localeCompare(String(b.round));
+  });
+  const next = unreleased[0];
+  if (!next) {
+    btn.disabled = true;
+    btn.textContent = packets.some((p) => !p.tiebreaker) ? 'All packets released' : 'Release next packet';
+    return;
+  }
+  btn.disabled = false;
+  btn.textContent = `Release "Round ${next.round}" packet`;
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      await api('PUT', `/api/tournaments/${code}/packets/${qt(next.round)}/visibility`, { directorToken, visible: true });
+      msay(`Released the Round ${next.round} packet — moderators can load it now.`);
+      refreshPackets();
+      refreshTiebreakers();
+    } catch (e) {
+      msay('Could not release: ' + e.message, false);
+      btn.disabled = false;
+    }
+  };
 }
 
 // A labeled checkbox that flips one flag (visibility/tiebreaker) on a round.
@@ -358,6 +514,85 @@ async function refreshErrata() {
       ul.append(li);
     }
   } catch { /* ignore */ }
+}
+
+async function refreshProtests() {
+  try {
+    const { protests } = await api('GET', `/api/tournaments/${code}/protests?directorToken=${qt(directorToken)}`);
+    const open = protests.filter((p) => p.status === 'pending' || p.status === 'matters').length;
+    $('#protests-count').textContent = protests.length ? `(${open} open / ${protests.length})` : '';
+    $('#protests-empty').classList.toggle('hidden', protests.length > 0);
+    const ul = $('#protests-list');
+    ul.innerHTML = '';
+    const statusLabel = {
+      pending: 'game in progress', matters: 'COULD CHANGE RESULT', moot: 'moot',
+      upheld: 'UPHELD', denied: 'denied',
+    };
+    for (const p of protests) {
+      const settled = p.status === 'moot' || p.status === 'denied';
+      const li = el('li', { className: settled ? 'gone' : '' });
+      const col = el('span', { className: 'pcol' });
+      const what = p.type === 'bonus' ? `Bonus ${p.question}${p.part ? ` part ${p.part}` : ''}` : `Tossup ${p.question}`;
+      const nameRow = el('span', { className: 'pname-wrap' });
+      nameRow.append(el('span', { className: 'pname' }, `${what} — Round ${p.round} · Room ${p.room} · ${p.team}`));
+      if (p.status === 'matters') nameRow.append(el('span', { className: 'offline-badge' }, 'DECIDES GAME'));
+      col.append(nameRow);
+      const score = p.teams.map((t) => `${t.name} ${t.total}`).join(', ');
+      let detail = `${statusLabel[p.status] || p.status} · ${score}${p.reason ? ` · "${p.reason}"` : ''}`;
+      if (p.ruling) {
+        const adj = (p.ruling.adjustments || []).map((a) => `${a.points > 0 ? '+' : ''}${a.points} ${a.team}`).join(', ');
+        detail = `${statusLabel[p.status]}${adj ? ` (${adj})` : ''}${p.ruling.note ? ` · "${p.ruling.note}"` : ''} · ${score}`;
+      }
+      col.append(el('span', { className: 'pjoined' }, detail));
+      li.append(col);
+      // Ruling controls: rule an open protest, or clear an existing ruling.
+      const actions = el('span', { className: 'sound-row' });
+      if (p.ruling) {
+        actions.append(mkBtn('Clear ruling', 'tiny ghost', () => ruleProtest(p, null, '', [])));
+      } else if (!p.live) {
+        actions.append(mkBtn('Rule…', 'tiny primary', () => toggleRuleForm(li, p)));
+      }
+      li.append(actions);
+      ul.append(li);
+    }
+  } catch { /* ignore */ }
+}
+
+// Inline ruling form: per-team point adjustments (applied only on Uphold, as a
+// score correction to that game in stats) plus an optional note.
+function toggleRuleForm(li, p) {
+  const existing = li.querySelector('.rule-form');
+  if (existing) { existing.remove(); return; }
+  const form = el('div', { className: 'sound-row rule-form' });
+  const inputs = p.teams.map((t) => {
+    const inp = el('input', { type: 'number', value: '0' });
+    inp.style.width = '64px';
+    const wrap = el('label', { className: 'vol' });
+    wrap.append(document.createTextNode(t.name + ' '), inp);
+    form.append(wrap);
+    return { name: t.name, inp };
+  });
+  const note = el('input', { placeholder: 'Ruling note (optional)' });
+  form.append(note);
+  form.append(mkBtn('Uphold', 'tiny primary', () => ruleProtest(p, 'upheld', note.value,
+    inputs.map((x) => ({ team: x.name, points: Number(x.inp.value) || 0 })))));
+  form.append(mkBtn('Deny', 'tiny ghost', () => ruleProtest(p, 'denied', note.value, [])));
+  // Stack the form under the protest text rather than beside the buttons.
+  (li.querySelector('.pcol') || li).append(form);
+}
+
+async function ruleProtest(p, status, note, adjustments) {
+  try {
+    await api('PUT', `/api/tournaments/${code}/protests/ruling`, {
+      directorToken,
+      room: p.room, round: p.round, type: p.type, question: p.question, part: p.part, team: p.team,
+      status, note, adjustments,
+    });
+    msay(status == null ? 'Ruling cleared — the protest is open again.'
+      : status === 'upheld' ? 'Protest upheld — the score correction is live in the stats.'
+        : 'Protest denied.');
+    refreshProtests();
+  } catch (e) { msay('Could not save ruling: ' + e.message, false); }
 }
 
 $('#add-rooms').onclick = async () => {

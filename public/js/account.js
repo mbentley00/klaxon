@@ -14,6 +14,7 @@ let mode = 'login'; // 'login' | 'register'
 function showSignedIn(account) {
   $('#who').textContent = account.username;
   $('#acct-display').value = account.displayName || '';
+  $('#acct-email').value = account.email || '';
   $('#signed-in').classList.remove('hidden');
   $('#signed-out').classList.add('hidden');
 }
@@ -33,6 +34,7 @@ function setMode(next) {
   $('#acct-submit').textContent = mode === 'register' ? 'Create account' : 'Log in';
   $('#acct-password').setAttribute('autocomplete', mode === 'register' ? 'new-password' : 'current-password');
   $('#acct-display-reg').classList.toggle('hidden', mode !== 'register');
+  $('#acct-email-reg').classList.toggle('hidden', mode !== 'register');
   say('');
 }
 
@@ -41,6 +43,8 @@ const friendly = (e) => ({
   bad_credentials: 'Wrong username or password.',
   bad_password: 'Password must be at least 6 characters.',
   bad_username: 'Username must be 3–30 letters, numbers, or _ . -',
+  bad_email: "That doesn't look like an email address.",
+  email_taken: 'That email is already on another account.',
   not_logged_in: 'Please log in.'
 }[e] || e);
 
@@ -66,7 +70,10 @@ $('#account-form').addEventListener('submit', async (e) => {
   try {
     const path = mode === 'register' ? '/api/accounts/register' : '/api/accounts/login';
     const body = { username, password };
-    if (mode === 'register') body.displayName = $('#acct-display-reg').value.trim() || undefined;
+    if (mode === 'register') {
+      body.displayName = $('#acct-display-reg').value.trim() || undefined;
+      body.email = $('#acct-email-reg').value.trim() || undefined;
+    }
     const r = await api('POST', path, body);
     setSession(r.sessionToken);
     syncName(r.account);
@@ -84,6 +91,17 @@ $('#save-display').onclick = async () => {
     $('#acct-display').value = account.displayName;
     syncName(account);
     say('Name saved.');
+  } catch (err) {
+    say('Could not save: ' + friendly(err.message), false);
+  }
+};
+
+$('#save-email').onclick = async () => {
+  try {
+    const { account } = await api('PATCH', '/api/accounts/me',
+      { sessionToken: session(), email: $('#acct-email').value.trim() });
+    $('#acct-email').value = account.email;
+    say(account.email ? 'Email saved — directors can add you as a moderator with it.' : 'Email removed.');
   } catch (err) {
     say('Could not save: ' + friendly(err.message), false);
   }

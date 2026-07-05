@@ -7,10 +7,11 @@ import { Server } from 'socket.io';
 import { PORT, DEFAULTS } from './config.js';
 import * as store from './store.js';
 import * as artifacts from './artifacts.js';
-import { computeStats } from './stats.js';
+import { computeStats, liveGameRows, protestRows } from './stats.js';
 import { renderReport, PAGES } from './yellowfruit.js';
 import { buildZip } from './zip.js';
 import * as accounts from './accounts.js';
+import { parseYellowFruit, planImport } from './yfimport.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -86,13 +87,15 @@ app.get('/api/tournaments/:code', (req, res) => {
   if (!t) return res.status(404).json({ error: 'not_found' });
   res.json({
     code: t.code, name: t.name, date: t.date || '', schedule: t.schedule, rooms: [...t.roomCodes],
-    defaults: t.roomDefaults, format: t.format, requireReaderAccounts: !!t.requireReaderAccounts
+    defaults: t.roomDefaults, format: t.format, requireReaderAccounts: !!t.requireReaderAccounts,
+    links: t.links || { schedule: '', discord: '' },
+    autoRelease: t.autoRelease === true
   });
 });
 
 // --- reader accounts (optional) --------------------------------------------
 app.post('/api/accounts/register', (req, res) => {
-  const r = accounts.register(req.body?.username, req.body?.password, req.body?.displayName);
+  const r = accounts.register(req.body?.username, req.body?.password, req.body?.displayName, req.body?.email);
   if (r.error) return res.status(400).json({ error: r.error });
   res.json({ sessionToken: r.sessionToken, account: accounts.publicAccount(r.account) });
 });
@@ -109,11 +112,16 @@ app.get('/api/accounts/me', (req, res) => {
   res.json({ account: accounts.publicAccount(account) });
 });
 
-// Update the display name — the name players see, distinct from the username.
+// Update the display name (the name players see, distinct from the username)
+// and/or the email a director can add the reader to a tournament by.
 app.patch('/api/accounts/me', (req, res) => {
   const account = accounts.accountForSession(req.body?.sessionToken);
   if (!account) return res.status(401).json({ error: 'not_logged_in' });
-  accounts.setDisplayName(account, req.body?.displayName);
+  if (req.body?.displayName !== undefined) accounts.setDisplayName(account, req.body.displayName);
+  if (req.body?.email !== undefined) {
+    const r = accounts.setEmail(account, req.body.email);
+    if (r.error) return res.status(400).json({ error: r.error });
+  }
   res.json({ account: accounts.publicAccount(account) });
 });
 
@@ -143,6 +151,19 @@ app.get('/api/tournaments/:code/members', ah(async (req, res) => {
   res.json({ members: await artifacts.getMembers({ kind: 't', code: t.code }) });
 }));
 
+// Director adds a moderator directly by the email (or username) of a
+// registered account — pre-approved, no request/approve round-trip.
+app.post('/api/tournaments/:code/members', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const account = accounts.findByIdentifier(req.body?.identifier);
+  if (!account) return res.status(404).json({ error: 'account_not_found' });
+  const bucket = { kind: 't', code: t.code };
+  await artifacts.requestMembership(bucket, account.id, account.username);
+  const member = await artifacts.setMemberStatus(bucket, account.id, 'approved');
+  res.json({ member });
+}));
+
 app.put('/api/tournaments/:code/members/:accountId', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
@@ -159,6 +180,20 @@ app.put('/api/tournaments/:code/schedule', (req, res) => {
   }
   const schedule = store.setSchedule(t, req.body?.schedule || []);
   res.json({ schedule });
+});
+
+// Player-facing links (schedule page, Discord server), shown in every room.
+app.put('/api/tournaments/:code/links', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  res.json({ links: store.setLinks(t, req.body?.links || {}) });
+});
+
+// Toggle automatic packet release (see maybeAutoRelease).
+app.put('/api/tournaments/:code/auto-release', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  res.json({ autoRelease: store.setAutoRelease(t, req.body?.enabled === true) });
 });
 
 // --- MODAQ artifacts: tournament-scoped (director console) ------------------
@@ -249,6 +284,58 @@ app.get('/api/tournaments/:code/errata', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
   res.json({ errata: await artifacts.getErrata({ kind: 't', code: t.code }) });
+}));
+
+// Import a YellowFruit file: games the director fixed locally in YF override
+// the matching synced exports (same round + same teams); games we've never
+// seen are added under a synthetic "YF" room.
+app.post('/api/tournaments/:code/yf-import', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  let fileObj = req.body?.yft;
+  if (typeof fileObj === 'string') {
+    try { fileObj = JSON.parse(fileObj); } catch { return res.status(400).json({ error: 'not_json' }); }
+  }
+  let games;
+  try { games = parseYellowFruit(fileObj); }
+  catch { return res.status(400).json({ error: 'bad_yf_file' }); }
+  if (games.length === 0) return res.status(400).json({ error: 'no_games_in_file' });
+
+  const bucket = { kind: 't', code: t.code };
+  const existing = await artifacts.readAllExports(bucket);
+  const plan = planImport(games, existing);
+  let updated = 0, added = 0;
+  for (const step of plan) {
+    await artifacts.saveExport(bucket, {
+      room: step.room, round: step.round,
+      qbj: { ...step.match, _yfImported: true },
+      inProgress: false, at: Date.now()
+    });
+    if (step.action === 'update') updated++; else added++;
+  }
+  res.json({ updated, added });
+}));
+
+// Protests lodged in MODAQ, with whether each can still change its game's
+// result (pending while live, then matters/moot once the game is final,
+// or the director's upheld/denied ruling).
+app.get('/api/tournaments/:code/protests', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const matches = await artifacts.readAllExports({ kind: 't', code: t.code });
+  res.json({ protests: protestRows(matches) });
+}));
+
+// The director rules on a protest: upheld (with per-team point adjustments
+// that correct the game score in stats), denied, or cleared (status null).
+app.put('/api/tournaments/:code/protests/ruling', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const { room, round, type, question, part, team, status, note, adjustments } = req.body || {};
+  const ruling = await artifacts.setProtestRuling({ kind: 't', code: t.code },
+    { room, round, type, question, part, team, status, note, adjustments });
+  if (ruling == null) return res.status(404).json({ error: 'match_not_found' });
+  res.json({ ruling });
 }));
 
 // One-click "download all stats": every match's QBJ plus errata, bundled into a
@@ -356,10 +443,54 @@ app.post('/api/rooms/:code/export', ah(async (req, res) => {
   if (req.body?.qbj == null) return res.status(400).json({ error: 'missing_qbj' });
   const saved = await artifacts.saveExport(store.bucketForRoom(room), {
     room: room.code, round: req.body?.round, qbj: req.body.qbj,
-    inProgress: req.body?.inProgress === true, at: Date.now()
+    inProgress: req.body?.inProgress === true,
+    currentQuestion: Number(req.body?.currentQuestion) || undefined,
+    at: Date.now()
   });
+  // Anyone the moderator added mid-game joins the shared roster (best-effort).
+  try {
+    const match = typeof req.body.qbj === 'string' ? JSON.parse(req.body.qbj) : req.body.qbj;
+    await artifacts.addMatchPlayersToRoster(store.bucketForRoom(room), match);
+  } catch { /* roster sync must never fail the export */ }
+  // A final sync may complete its round; auto-release the next packet if the
+  // director opted in (best-effort).
+  if (req.body?.inProgress !== true) {
+    try { await maybeAutoRelease(room, String(req.body?.round ?? '')); } catch { /* ignore */ }
+  }
   res.json(saved);
 }));
+
+// If every expected room's game in `round` is final, make the next hidden
+// (non-tiebreaker) packet visible to moderators. "Expected" comes from the
+// schedule when it lists rooms for the round, otherwise every room that has
+// synced any match so far.
+async function maybeAutoRelease(room, round) {
+  const t = room.tournamentCode ? store.getTournament(room.tournamentCode) : null;
+  if (!t || t.autoRelease !== true) return;
+  const bucket = { kind: 't', code: t.code };
+  const matches = await artifacts.readAllExports(bucket);
+  const roundMatches = matches.filter((m) => String(m.qbj?._round ?? '') === round);
+  if (roundMatches.length === 0 || roundMatches.some((m) => m.qbj?._inProgress === true)) return;
+  const played = new Set(roundMatches.map((m) => String(m.qbj?._room || '').toUpperCase()));
+  let expected = t.schedule
+    .filter((s) => String(s.round) === round && s.room)
+    .map((s) => s.room.toUpperCase());
+  if (expected.length === 0) {
+    expected = [...new Set(matches.map((m) => String(m.qbj?._room || '').toUpperCase()))].filter(Boolean);
+  }
+  if (!expected.every((rc) => played.has(rc))) return;
+
+  const packets = await artifacts.listPackets(bucket);
+  const next = packets
+    .filter((p) => !p.visible && !p.tiebreaker)
+    .sort((a, b) => {
+      const na = Number(a.round), nb = Number(b.round);
+      return Number.isFinite(na) && Number.isFinite(nb) ? na - nb : String(a.round).localeCompare(String(b.round));
+    })[0];
+  if (!next) return;
+  await artifacts.setPacketVisibility(bucket, next.round, true);
+  console.log(`auto-released packet "${next.round}" for tournament ${t.code} (round ${round} complete)`);
+}
 
 app.get('/api/rooms/:code/exports', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
@@ -433,6 +564,19 @@ app.put('/api/tournaments/:code/structure', ah(async (req, res) => {
   res.json({ structure: saved });
 }));
 
+// Games currently being read: score so far, question progress, elapsed time.
+// Public, like the rest of the live stats — no token needed.
+app.get('/api/tournaments/:code/live', ah(async (req, res) => {
+  const upper = String(req.params.code || '').toUpperCase();
+  const t = store.getTournament(upper);
+  const bucket = { kind: 't', code: t ? t.code : upper };
+  let matches = [];
+  try { matches = await artifacts.readAllExports(bucket); } catch { matches = []; }
+  if (!t && matches.length === 0) return res.status(404).json({ error: 'not_found' });
+  const live = matches.filter((m) => m?.qbj?._inProgress === true);
+  res.json({ games: liveGameRows(live), now: Date.now() });
+}));
+
 // Links between the served report pages (relative to /t/CODE/stats/).
 const servedLink = (page, hash) => `${page}${hash ? '#' + hash : ''}`;
 
@@ -444,9 +588,10 @@ app.get('/t/:code/stats/:page', ah(async (req, res) => {
   const data = await statsFor(req.params.code);
   if (!data) return res.status(404).send('Tournament not found.');
   // Served pages are the live view: auto-refresh so a projected standings stays
-  // current as moderators sync. The downloaded zip keeps the pristine YF format.
+  // current as moderators sync (the Live Games page refreshes faster). The
+  // downloaded zip keeps the pristine YF format.
   const html = renderReport(page, data.stats, servedLink)
-    .replace('<HEAD>', '<HEAD>\n<meta http-equiv="refresh" content="60">');
+    .replace('<HEAD>', `<HEAD>\n<meta http-equiv="refresh" content="${page === 'live' ? 20 : 60}">`);
   res.type('html').send(html);
 }));
 
@@ -456,7 +601,8 @@ app.get('/t/:code/stats.zip', ah(async (req, res) => {
   if (!data) return res.status(404).send('Tournament not found.');
   const base = (data.t.name || data.t.code).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || data.t.code;
   const zipLink = (page, hash) => `${base}_${page}.html${hash ? '#' + hash : ''}`;
-  const files = PAGES.map((p) => ({ name: `${base}_${p.key}.html`, data: renderReport(p.key, data.stats, zipLink) }));
+  const zipPages = PAGES.filter((p) => !p.servedOnly);
+  const files = zipPages.map((p) => ({ name: `${base}_${p.key}.html`, data: renderReport(p.key, data.stats, zipLink, zipPages) }));
   const zip = buildZip(files);
   res.setHeader('Content-Disposition', `attachment; filename="${base}_stats.zip"`);
   res.type('application/zip').send(zip);
@@ -724,6 +870,30 @@ io.on('connection', (socket) => {
     }
     sock.delete(socket.id);
   });
+});
+
+// Rehydrate tournaments and room identities from the data volume BEFORE
+// accepting traffic, so director consoles and reader links survive restarts.
+// Rooms older than the TTL are dropped at boot (they age out of rooms.json on
+// its next rewrite); tournaments are kept indefinitely — their stats live on
+// the same volume.
+const ROOM_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+try {
+  const [tournamentRecords, roomRecords] = await Promise.all([
+    artifacts.loadTournamentRecords(),
+    artifacts.loadRoomRecords()
+  ]);
+  const freshRooms = roomRecords.filter((r) => Date.now() - (r.createdAt || 0) < ROOM_TTL_MS);
+  store.hydrate({ tournaments: tournamentRecords, rooms: freshRooms });
+  if (tournamentRecords.length || freshRooms.length) {
+    console.log(`rehydrated ${tournamentRecords.length} tournament(s), ${freshRooms.length} room(s)`);
+  }
+} catch (e) {
+  console.error('rehydration failed (continuing with empty store):', e);
+}
+store.setPersistence({
+  tournament: (record) => artifacts.saveTournamentRecord(record).catch((e) => console.error('persist tournament failed:', e)),
+  rooms: (records) => artifacts.saveRoomRecords(records).catch((e) => console.error('persist rooms failed:', e))
 });
 
 httpServer.listen(PORT, () => {

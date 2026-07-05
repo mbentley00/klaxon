@@ -14,8 +14,9 @@ import { DATA_DIR } from './artifacts.js';
 
 const accountsFile = path.join(DATA_DIR, 'accounts.json');
 
-const accounts = new Map();       // id -> { id, username, usernameLower, salt, hash, createdAt }
+const accounts = new Map();       // id -> { id, username, usernameLower, email, salt, hash, createdAt }
 const byUsername = new Map();     // usernameLower -> id
+const byEmail = new Map();        // email (lowercased) -> id
 const sessions = new Map();       // sessionToken -> accountId
 
 function loadFromDisk() {
@@ -26,6 +27,7 @@ function loadFromDisk() {
         if (!a?.id || !a?.username) continue;
         accounts.set(a.id, a);
         byUsername.set(a.username.toLowerCase(), a.id);
+        if (a.email) byEmail.set(a.email, a.id);
       }
     }
   } catch { /* no accounts yet */ }
@@ -58,19 +60,34 @@ const USERNAME_RE = /^[A-Za-z0-9_.-]{3,30}$/;
 // username. Empty means "fall back to the username".
 const cleanDisplayName = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
 
-export function register(username, password, displayName) {
+// Emails are optional and stored lowercased; a director can add a moderator to
+// a tournament directly by email (see findByIdentifier). '' clears the email;
+// null means "invalid input".
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function cleanEmail(v) {
+  const s = String(v ?? '').trim().toLowerCase().slice(0, 80);
+  if (s === '') return '';
+  return EMAIL_RE.test(s) ? s : null;
+}
+
+export function register(username, password, displayName, email) {
   const name = String(username || '').trim();
   if (!USERNAME_RE.test(name)) return { error: 'bad_username' };
   if (String(password || '').length < 6) return { error: 'bad_password' };
   if (byUsername.has(name.toLowerCase())) return { error: 'username_taken' };
+  const cleanedEmail = cleanEmail(email);
+  if (cleanedEmail == null) return { error: 'bad_email' };
+  if (cleanedEmail && byEmail.has(cleanedEmail)) return { error: 'email_taken' };
   const salt = crypto.randomBytes(16).toString('hex');
   const account = {
     id: id(), username: name, usernameLower: name.toLowerCase(),
     displayName: cleanDisplayName(displayName),
+    email: cleanedEmail,
     salt, hash: hash(password, salt), createdAt: Date.now()
   };
   accounts.set(account.id, account);
   byUsername.set(account.usernameLower, account.id);
+  if (account.email) byEmail.set(account.email, account.id);
   saveToDisk();
   return { account, sessionToken: startSession(account.id) };
 }
@@ -79,6 +96,26 @@ export function setDisplayName(account, displayName) {
   account.displayName = cleanDisplayName(displayName);
   saveToDisk();
   return account;
+}
+
+export function setEmail(account, email) {
+  const cleaned = cleanEmail(email);
+  if (cleaned == null) return { error: 'bad_email' };
+  if (cleaned && byEmail.get(cleaned) && byEmail.get(cleaned) !== account.id) return { error: 'email_taken' };
+  if (account.email) byEmail.delete(account.email);
+  account.email = cleaned;
+  if (cleaned) byEmail.set(cleaned, account.id);
+  saveToDisk();
+  return { account };
+}
+
+// Look an account up the way a director types it: an email address (anything
+// with an @) or a username.
+export function findByIdentifier(identifier) {
+  const s = String(identifier || '').trim().toLowerCase();
+  if (!s) return null;
+  const accountId = s.includes('@') ? byEmail.get(s) : byUsername.get(s);
+  return accountId ? accounts.get(accountId) || null : null;
 }
 
 export function login(username, password) {
@@ -107,7 +144,7 @@ export function getAccount(accountId) {
 // clients fall back to the username where a name must be shown.
 export function publicAccount(account) {
   return account
-    ? { id: account.id, username: account.username, displayName: account.displayName || '' }
+    ? { id: account.id, username: account.username, displayName: account.displayName || '', email: account.email || '' }
     : null;
 }
 

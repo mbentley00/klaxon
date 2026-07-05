@@ -30,6 +30,12 @@
         <input id="acct-display" placeholder="Your name" maxlength="40" autocomplete="name" />
         <button id="save-display">Save</button>
       </div>
+      <p class="hint">Your email lets a tournament director add you as a moderator directly,
+        without you having to request access.</p>
+      <div class="row">
+        <input id="acct-email" type="email" placeholder="Email (optional)" maxlength="80" autocomplete="email" />
+        <button id="save-email">Save</button>
+      </div>
       <div class="row">
         <a class="btnlink" href="/">Home</a>
         <button id="logout" class="ghost">Sign out</button>
@@ -49,6 +55,8 @@
         <input id="acct-password" type="password" placeholder="Password" autocomplete="current-password" />
         <input id="acct-display-reg" class="hidden" placeholder="Your name (optional — shown to players)"
           maxlength="40" autocomplete="name" />
+        <input id="acct-email-reg" class="hidden" type="email" maxlength="80" autocomplete="email"
+          placeholder="Email (optional — lets directors add you as a moderator)" />
         <button type="submit" id="acct-submit">Log in</button>
       </form>
     </section>

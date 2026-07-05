@@ -21,13 +21,26 @@ async function init() {
 // Tournaments created from this browser: we still hold their director tokens,
 // so link straight to the console — even for unlisted tournaments, which the
 // public directory below never shows.
-function myCodes() {
+function directorCodes() {
   const codes = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     if (k && k.startsWith('bz_directorToken:')) codes.push(k.slice('bz_directorToken:'.length));
   }
   return codes;
+}
+
+// Tournaments this browser has opened via a link (recorded by the tournament
+// page) — shown alongside the ones we direct, no account needed.
+function visitedCodes() {
+  try {
+    const list = JSON.parse(localStorage.getItem('bz_recentTournaments') || '[]');
+    return list.map((e) => e && e.code).filter(Boolean);
+  } catch { return []; }
+}
+
+function myCodes() {
+  return [...new Set([...directorCodes(), ...visitedCodes()])];
 }
 
 const byDateThenName = (a, b) =>
@@ -42,13 +55,15 @@ async function renderMine() {
   $('#mine-panel').classList.toggle('hidden', !mine.length);
   const ul = $('#mine-list');
   ul.innerHTML = '';
+  const directed = new Set(directorCodes());
   for (const t of mine) {
     const li = el('li', {});
     const col = el('span', { className: 'pcol' });
     col.append(el('span', { className: 'pname' }, t.name));
     col.append(el('span', { className: 'pjoined' }, `${t.date || 'Date TBD'} · code ${t.code}`));
     li.append(col);
-    li.append(el('a', { className: 'btnlink tiny', href: '/t/' + t.code }, 'Director console'));
+    li.append(el('a', { className: 'btnlink tiny', href: '/t/' + t.code },
+      directed.has(t.code) ? 'Director console' : 'Open'));
     ul.append(li);
   }
   return new Set(mine.map((t) => t.code));

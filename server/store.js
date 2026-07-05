@@ -16,6 +16,63 @@ import { roomCode, secretToken, uuid } from './ids.js';
 const rooms = new Map();        // code -> room
 const tournaments = new Map();  // code -> tournament
 
+// --- persistence -----------------------------------------------------------
+// Tournament records and room IDENTITIES (codes, tokens, settings — not live
+// buzz state) must survive restarts/deploys, or every director console link
+// and reader link dies with the process. index.js injects the actual disk
+// writers (artifacts.js) at boot; this module stays fs-free.
+let persistence = null; // { tournament(record), rooms(records) }
+
+export function setPersistence(p) {
+  persistence = p;
+}
+
+const serializeTournament = (t) => ({ ...t, roomCodes: [...t.roomCodes] });
+const serializeRoom = (r) => ({
+  code: r.code,
+  name: r.name,
+  tournamentCode: r.tournamentCode,
+  createdAt: r.createdAt,
+  readerToken: r.readerToken,
+  coReaderToken: r.coReaderToken,
+  settings: r.settings
+});
+
+const persistTournament = (t) => persistence?.tournament(serializeTournament(t));
+const persistRooms = () => persistence?.rooms([...rooms.values()].map(serializeRoom));
+
+// Reload persisted records at boot (before setPersistence, so hydration never
+// triggers writes). Rooms come back with fresh runtime state: an interrupted
+// buzz cycle doesn't survive a restart, but the links and settings do.
+export function hydrate({ tournaments: tournamentRecords = [], rooms: roomRecords = [] } = {}) {
+  for (const t of tournamentRecords) {
+    if (!t?.code || !t.directorToken) continue;
+    tournaments.set(t.code, {
+      ...t,
+      roomCodes: new Set(Array.isArray(t.roomCodes) ? t.roomCodes : []),
+      roomDefaults: normalizeRoomDefaults(t.roomDefaults),
+      format: normalizeFormat(t.format),
+      schedule: normalizeSchedule(t.schedule),
+      links: normalizeLinks(t.links),
+      autoRelease: t.autoRelease === true
+    });
+  }
+  for (const r of roomRecords) {
+    if (!r?.code || !r.readerToken) continue;
+    rooms.set(r.code, {
+      ...r,
+      coReaderToken: r.coReaderToken || secretToken(),
+      settings: { ...(r.settings || {}) },
+      phase: 'open',
+      cycleNo: 1,
+      cycle: freshCycle(1),
+      queue: [],
+      members: new Map(),
+      log: []
+    });
+  }
+}
+
 function freshCycle(cycleNo) {
   return {
     cycleNo,
@@ -60,7 +117,9 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
 
   if (tournamentCode && tournaments.has(tournamentCode)) {
     tournaments.get(tournamentCode).roomCodes.add(code);
+    persistTournament(tournaments.get(tournamentCode));
   }
+  persistRooms();
   return room;
 }
 
@@ -99,9 +158,16 @@ export function createTournament({ name, schedule = [], defaults = {}, format = 
     // If true, readers must have a director-approved account to access the
     // tournament's centralized packets.
     requireReaderAccounts: !!requireReaderAccounts,
-    schedule: normalizeSchedule(schedule)
+    schedule: normalizeSchedule(schedule),
+    // Player-facing links the director can set (shown in every room's
+    // tournament strip): the tournament schedule and its Discord server.
+    links: normalizeLinks(),
+    // When true, the next hidden packet is released automatically as soon as
+    // every expected room's game in the current round goes final.
+    autoRelease: false
   };
   tournaments.set(code, t);
+  persistTournament(t);
   return t;
 }
 
@@ -156,7 +222,29 @@ function normalizeSchedule(schedule) {
 
 export function setSchedule(tournament, schedule) {
   tournament.schedule = normalizeSchedule(schedule);
+  persistTournament(tournament);
   return tournament.schedule;
+}
+
+// Only http(s) URLs make it through — these render as links for players.
+function normalizeLinks(l = {}) {
+  const clean = (u) => {
+    const s = String(u || '').trim().slice(0, 400);
+    return /^https?:\/\//i.test(s) ? s : '';
+  };
+  return { schedule: clean(l.schedule), discord: clean(l.discord) };
+}
+
+export function setLinks(tournament, links) {
+  tournament.links = normalizeLinks(links);
+  persistTournament(tournament);
+  return tournament.links;
+}
+
+export function setAutoRelease(tournament, enabled) {
+  tournament.autoRelease = enabled === true;
+  persistTournament(tournament);
+  return tournament.autoRelease;
 }
 
 // --- membership -----------------------------------------------------------
@@ -289,6 +377,7 @@ export function setOptions(room, opts = {}) {
   // Leaving queue mode collapses any queue back to the standard locked state.
   if (!room.settings.queueMode && room.queue.length) room.phase = 'locked';
   pushLog(room, { type: 'set_options', settings: room.settings });
+  persistRooms();
 }
 
 function pushLog(room, entry) {

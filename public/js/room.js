@@ -581,6 +581,15 @@ function renderTournament() {
   if (!t) return;
   $('#tournament-strip').classList.remove('hidden');
   $('#t-code').textContent = t.code;
+  // Director-set player links: the schedule and the tournament's Discord.
+  const linksEl = $('#t-links');
+  linksEl.innerHTML = '';
+  if (t.links?.schedule) {
+    linksEl.append(el('a', { className: 'chip', href: t.links.schedule, target: '_blank', rel: 'noopener noreferrer' }, 'Schedule ↗'));
+  }
+  if (t.links?.discord) {
+    linksEl.append(el('a', { className: 'chip', href: t.links.discord, target: '_blank', rel: 'noopener noreferrer' }, 'Discord ↗'));
+  }
   const myTeam = state.me?.team;
   const next = myTeam && t.schedule.find((row) =>
     row.room !== code && row.teams.some((tm) => tm.toLowerCase() === myTeam.toLowerCase()));

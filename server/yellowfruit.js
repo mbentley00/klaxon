@@ -7,6 +7,8 @@
 // Klaxon has no phase/division structure, so all games are shown as one phase.
 // ---------------------------------------------------------------------------
 
+// servedOnly pages appear on the live site but stay out of the downloadable
+// zip, which keeps the pristine YellowFruit report set.
 const PAGES = [
   { key: 'standings', label: 'Standings' },
   { key: 'individuals', label: 'Individuals' },
@@ -14,6 +16,7 @@ const PAGES = [
   { key: 'teamdetail', label: 'Team Detail' },
   { key: 'playerdetail', label: 'Player Detail' },
   { key: 'rounds', label: 'Round Report' },
+  { key: 'live', label: 'Live Games', servedOnly: true },
 ];
 
 // YellowFruit's exact stylesheet (from its generated reports).
@@ -127,9 +130,10 @@ const td = (content, { align, width } = {}) => {
 };
 
 // `link(page, anchor)` differs between the served pages (route paths) and the
-// downloadable zip (YellowFruit-style filenames); the caller supplies it.
-function navBar(link, title) {
-  const cells = PAGES.map((p) => `<td    ><a HREF=${link(p.key)}>${p.label}</a></td>`).join('\n');
+// downloadable zip (YellowFruit-style filenames); the caller supplies it, along
+// with the page set its navigation should offer (the zip omits servedOnly ones).
+function navBar(link, title, pages) {
+  const cells = pages.map((p) => `<td    ><a HREF=${link(p.key)}>${p.label}</a></td>`).join('\n');
   return `<table border=0  width=100%>
 <tr>
 ${cells}
@@ -140,7 +144,7 @@ ${title}
 </h1>`;
 }
 
-function pageShell(title, link, body) {
+function pageShell(title, link, body, pages = PAGES) {
   return `<HTML>
 <HEAD>
 <title>
@@ -148,7 +152,7 @@ ${title}
 </title>
 </HEAD>
 <BODY>
-${navBar(link, title)}
+${navBar(link, title, pages)}
 ${STYLE}
 <div style="font-size: 11pt; text-size-adjust: none;">
 ${body}
@@ -229,7 +233,7 @@ ${rows}
 </table>`;
 }
 
-export function renderStandings(stats, link) {
+export function renderStandings(stats, link, pages) {
   const body = stats.phases.map((phase) => {
     const groups = phase.groups.map((g) => {
       const divHeader = g.division ? `<h3>\n${esc(g.division)}\n</h3>` : '';
@@ -239,11 +243,11 @@ ${standingsTable(g.teams, stats, link)}`;
     return `${sectionHeader(phase.name)}
 ${groups}`;
   }).join('\n');
-  return pageShell('Standings', link, body);
+  return pageShell('Standings', link, body, pages);
 }
 
 // --- Individuals -----------------------------------------------------------
-export function renderIndividuals(stats, link) {
+export function renderIndividuals(stats, link, pages) {
   const valueCols = stats.answerValues;
   const header = `<tr>
 ${th('Rank')}
@@ -272,11 +276,11 @@ ${header}
 ${rows}
 </table>`;
   }).join('\n');
-  return pageShell('Individuals', link, body);
+  return pageShell('Individuals', link, body, pages);
 }
 
 // --- Round Report ----------------------------------------------------------
-export function renderRounds(stats, link) {
+export function renderRounds(stats, link, pages) {
   const rounds = stats.rounds;
   const hasPhases = stats.phases.length > 1 || (stats.phases[0] && stats.phases[0].name !== 'All Games');
   const header = `<tr>
@@ -326,11 +330,11 @@ ${header}
 ${rows}
 ${total}
 </table>`;
-  return pageShell('Round Report', link, body);
+  return pageShell('Round Report', link, body, pages);
 }
 
 // --- Scoreboard (games) ----------------------------------------------------
-export function renderScoreboard(stats, link) {
+export function renderScoreboard(stats, link, pages) {
   const multiPhase = stats.scoreboard.length > 1 || (stats.scoreboard[0] && stats.scoreboard[0].name !== 'All Games');
 
   // TOC grouped by phase.
@@ -418,11 +422,11 @@ ${gamesHtml}`;
 <div>
 ${sections}
 </div>`;
-  return pageShell('Scoreboard', link, body);
+  return pageShell('Scoreboard', link, body, pages);
 }
 
 // --- Team Detail -----------------------------------------------------------
-export function renderTeamDetail(stats, link) {
+export function renderTeamDetail(stats, link, pages) {
   const teams = [...stats.teamsGlobal].sort((a, b) => a.name.localeCompare(b.name));
   const valueCols = stats.answerValues;
 
@@ -466,11 +470,11 @@ ${foot}
 </table>`;
   }).join('\n');
 
-  return pageShell('Team Detail', link, sections);
+  return pageShell('Team Detail', link, sections, pages);
 }
 
 // --- Player Detail ---------------------------------------------------------
-export function renderPlayerDetail(stats, link) {
+export function renderPlayerDetail(stats, link, pages) {
   const players = [...stats.playersGlobal].sort((a, b) => a.team.localeCompare(b.team) || a.name.localeCompare(b.name));
   const valueCols = stats.answerValues;
 
@@ -505,7 +509,54 @@ ${foot}
 </table>`;
   }).join('\n');
 
-  return pageShell('Player Detail', link, sections);
+  return pageShell('Player Detail', link, sections, pages);
+}
+
+// --- Live Games --------------------------------------------------------------
+// Games currently being read (live syncs): score so far, question progress and
+// how long they've been going. These games are excluded from every other page.
+const mins = (ms) => Math.max(0, Math.round(ms / 60000));
+function agoLabel(ms) {
+  if (ms < 90 * 1000) return 'just now';
+  return `${mins(ms)} min ago`;
+}
+
+export function renderLive(stats, link, pages) {
+  const games = stats.liveGames || [];
+  const now = Date.now();
+  let body;
+  if (games.length === 0) {
+    body = `<p>
+No games in progress.
+</p>`;
+  } else {
+    const header = `<tr>
+${th('Round', { width: '8%' })}
+${th('Room', { width: '10%' })}
+${th('Score', { width: '40%' })}
+${th('On question', { align: true, width: '14%' })}
+${th('Running for', { align: true, width: '14%', abbr: 'Time since this game started syncing' })}
+${th('Last update', { align: true, width: '14%' })}
+</tr>`;
+    const rows = games.map((g) => {
+      const score = [...g.teams].sort((a, b) => b.total - a.total)
+        .map((t) => `${esc(t.name)} ${t.total}`).join(', ');
+      const progress = g.currentQuestion ? `${g.currentQuestion}${g.tuh ? ` of ${g.tuh}` : ''}` : '—';
+      return `<tr>
+${td(esc(g.round))}
+${td(esc(g.room))}
+${td(score)}
+${td(progress, { align: true })}
+${td(g.startedAt ? `${mins(now - g.startedAt)} min` : '—', { align: true })}
+${td(g.updatedAt ? agoLabel(now - g.updatedAt) : '—', { align: true })}
+</tr>`;
+    }).join('\n');
+    body = `<table  class=fwBelow1000px >
+${header}
+${rows}
+</table>`;
+  }
+  return pageShell('Live Games', link, body, pages);
 }
 
 const RENDERERS = {
@@ -515,11 +566,12 @@ const RENDERERS = {
   teamdetail: renderTeamDetail,
   playerdetail: renderPlayerDetail,
   rounds: renderRounds,
+  live: renderLive,
 };
 
-export function renderReport(page, stats, link) {
+export function renderReport(page, stats, link, pages = PAGES) {
   const fn = RENDERERS[page];
-  return fn ? fn(stats, link) : null;
+  return fn ? fn(stats, link, pages) : null;
 }
 
 export { PAGES };

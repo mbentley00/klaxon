@@ -86,6 +86,11 @@
         </div>
         <p class="hint">Each file's name becomes the round label. New rounds are hidden from moderators —
           toggle a round visible to release it. Tiebreaker packets are a pool moderators can sub in.</p>
+        <div class="sound-row">
+          <button id="release-next" class="primary tiny" disabled>Release next packet</button>
+          <label class="vol"><input type="checkbox" id="auto-release" />
+            auto-release when a round finishes</label>
+        </div>
         <ul id="packets-list" class="players"></ul>
       </div>
 
@@ -104,6 +109,12 @@
         <p class="hint">Moderators' MODAQ stats sync here live as they read. One QBJ per match, always current.</p>
         <ul id="exports-list" class="players"></ul>
         <p id="exports-empty" class="hint">No matches synced yet.</p>
+        <div class="sound-row">
+          <input type="file" id="yf-file" accept=".yft,.json,application/json" />
+          <button id="yf-import" class="ghost tiny">Import YellowFruit file</button>
+        </div>
+        <p class="hint">Fixed games in YellowFruit? Upload your .yft file — games matching a synced
+          match (same round, same teams) replace it; games we've never seen are added.</p>
       </div>
 
       <div class="modaq-block">
@@ -113,11 +124,24 @@
         <p id="errata-empty" class="hint">No errata reported.</p>
       </div>
 
+      <div class="modaq-block">
+        <h4>Protests <span id="protests-count" class="muted-count"></span>
+          <button id="protests-refresh" class="tiny ghost">Refresh</button></h4>
+        <p class="hint">Protests moderators recorded in MODAQ. While the game is live a protest is
+          pending; once it's final, a protest either could still change the result or is moot.</p>
+        <ul id="protests-list" class="players"></ul>
+        <p id="protests-empty" class="hint">No protests lodged.</p>
+      </div>
+
       <div class="modaq-block" id="members-block">
         <h4>Reader accounts <span id="members-count" class="muted-count"></span>
           <button id="members-refresh" class="tiny ghost">Refresh</button></h4>
         <p class="hint">Readers who requested access. Approve to let them read this tournament's centralized
           packets (only enforced if the tournament requires reader accounts).</p>
+        <div class="sound-row">
+          <input id="member-add-id" placeholder="Email or username of a registered account" />
+          <button id="member-add" class="primary tiny">Add moderator</button>
+        </div>
         <ul id="members-list" class="players"></ul>
         <p id="members-empty" class="hint">No access requests yet.</p>
       </div>
@@ -146,9 +170,29 @@
       <datalist id="phase-names"></datalist>
     </section>
 
+    <!-- Player-facing links (director only to edit; players see them in rooms) -->
+    <section class="panel" id="links-panel">
+      <h3>Player links</h3>
+      <p class="hint">Shown to players in every room of this tournament — point them at the
+        schedule and your Discord server.</p>
+      <div class="sound-row">
+        <input id="link-schedule" placeholder="Schedule link (https://…)" />
+      </div>
+      <div class="sound-row">
+        <input id="link-discord" placeholder="Discord invite (https://discord.gg/…)" />
+      </div>
+      <button id="links-save" class="primary tiny">Save player links</button>
+      <p id="links-msg" class="msg"></p>
+    </section>
+
     <!-- Public live stats + YellowFruit report (no token needed to view) -->
     <section class="panel" id="stats-panel">
       <h3>Live stats</h3>
+      <div class="modaq-block">
+        <h4>Games in progress <span id="live-count" class="muted-count"></span></h4>
+        <ul id="live-list" class="players"></ul>
+        <p id="live-empty" class="hint">No games in progress right now.</p>
+      </div>
       <p class="hint">A public YellowFruit-style stat report, built live from moderators' MODAQ games.
         Anyone with this link can view standings, individuals, and box scores — packet answers stay private.</p>
       <label class="share-row">
