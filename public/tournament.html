@@ -26,7 +26,17 @@
   </header>
 
   <main class="stage">
-    <section class="panel">
+    <nav class="tabbar" id="tabbar" role="tablist">
+      <button class="tab" data-tab="rooms">Rooms</button>
+      <button class="tab" data-tab="packets">Packets &amp; roster</button>
+      <button class="tab" data-tab="results">Results</button>
+      <button class="tab" data-tab="stats">Stats</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+    <p id="modaq-msg" class="msg"></p>
+
+    <!-- ============================== ROOMS ============================== -->
+    <section class="panel" data-tab="rooms">
       <h3>Add rooms</h3>
       <div class="sound-row">
         <input id="room-base" value="Room" placeholder="Room name prefix (e.g. Round 1 Room)" />
@@ -39,7 +49,7 @@
       <p id="t-msg" class="msg"></p>
     </section>
 
-    <section class="panel" id="bulk-panel">
+    <section class="panel" id="bulk-panel" data-tab="rooms">
       <h3>Copy for spreadsheet</h3>
       <p class="hint">Tab-separated — paste into Google Sheets / Excel and each room fills a
         row across columns. Or grab a single column of links.</p>
@@ -54,18 +64,48 @@
         aria-label="Spreadsheet preview" spellcheck="false"></textarea>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-tab="rooms">
       <h3>Rooms <span id="room-count" class="muted-count"></span></h3>
       <div id="rooms-list" class="rooms-list"></div>
       <p id="rooms-empty" class="hint">No rooms yet — add some above.</p>
     </section>
 
-    <!-- MODAQ mode: roster / packets / exports / errata (director only) -->
-    <section class="panel" id="modaq-panel">
-      <h3>MODAQ reader</h3>
-      <p class="hint">Rooms in MODAQ mode give moderators the MODAQ read-question
-        view beside the buzzer. They default to the roster below, moderators load
-        each round's packet, and completed matches are exported here.</p>
+    <!-- Player landing page (secret link, director only to fetch) -->
+    <section class="panel" id="player-page-panel" data-tab="rooms">
+      <h3>Player landing page</h3>
+      <p class="hint">One link for players with everything: the rooms and their join codes, live
+        stats, and your schedule/Discord links. It's a secret link — the tournament code alone
+        doesn't unlock it — so share it only with your teams.</p>
+      <label class="share-row">
+        <span>Player link</span>
+        <span class="copy-field">
+          <input id="player-link" readonly />
+          <button id="player-link-copy" class="copy-btn ghost tiny">Copy</button>
+          <a id="player-link-open" class="btnlink tiny" target="_blank" rel="noopener">Open</a>
+        </span>
+      </label>
+    </section>
+
+    <!-- Message readers (director only) -->
+    <section class="panel" id="message-panel" data-tab="rooms">
+      <h3>Message readers</h3>
+      <p class="hint">Pops up in the moderator's MODAQ view — e.g. an erratum announcement or
+        "hold for the last room". Players never see it.</p>
+      <div class="sound-row">
+        <select id="msg-target" aria-label="Which rooms">
+          <option value="ALL">All rooms</option>
+        </select>
+        <input id="msg-text" placeholder="Message to readers" maxlength="500" />
+        <button id="msg-send" class="primary tiny">Send</button>
+      </div>
+      <p id="msg-status" class="msg"></p>
+    </section>
+
+    <!-- ========================= PACKETS & ROSTER ========================= -->
+    <section class="panel" id="packets-panel" data-tab="packets">
+      <h3>Packets &amp; roster</h3>
+      <p class="hint" id="modaq-gate-hint">Moderators load each round's packet in their MODAQ view;
+        rooms prefill teams from the roster below.</p>
 
       <div class="modaq-block">
         <h4>Roster <span id="roster-status" class="muted-count"></span></h4>
@@ -101,13 +141,19 @@
         <ul id="tb-list" class="players"></ul>
         <p id="tb-empty" class="hint">No tiebreaker packets released yet.</p>
       </div>
+    </section>
+
+    <!-- ============================== RESULTS ============================== -->
+    <section class="panel" id="results-panel" data-tab="results">
+      <h3>Results</h3>
 
       <div class="modaq-block">
         <h4>Match stats <span id="exports-count" class="muted-count"></span>
           <button id="exports-download-all" class="tiny primary">Download all stats</button>
           <button id="exports-refresh" class="tiny ghost">Refresh</button></h4>
-        <p class="hint">Moderators' MODAQ stats sync here live as they read. One QBJ per match, always current.</p>
-        <ul id="exports-list" class="players"></ul>
+        <p class="hint">Moderators' MODAQ stats sync here live as they read — one QBJ per match, always
+          current. Grouped by round; click a room to download that match.</p>
+        <ul id="exports-list" class="players export-rounds"></ul>
         <p id="exports-empty" class="hint">No matches synced yet.</p>
         <div class="sound-row">
           <input type="file" id="yf-file" accept=".yft,.json,application/json" />
@@ -120,8 +166,15 @@
       <div class="modaq-block">
         <h4>Errata <span id="errata-count" class="muted-count"></span>
           <button id="errata-refresh" class="tiny ghost">Refresh</button></h4>
+        <p class="hint">Corrections moderators noted while reading.</p>
         <ul id="errata-list" class="players"></ul>
         <p id="errata-empty" class="hint">No errata reported.</p>
+      </div>
+
+      <div class="modaq-block">
+        <h4>Thrown-out questions <span id="thrown-count" class="muted-count"></span></h4>
+        <ul id="thrown-list" class="players"></ul>
+        <p id="thrown-empty" class="hint">No questions thrown out.</p>
       </div>
 
       <div class="modaq-block">
@@ -132,24 +185,10 @@
         <ul id="protests-list" class="players"></ul>
         <p id="protests-empty" class="hint">No protests lodged.</p>
       </div>
-
-      <div class="modaq-block" id="members-block">
-        <h4>Reader accounts <span id="members-count" class="muted-count"></span>
-          <button id="members-refresh" class="tiny ghost">Refresh</button></h4>
-        <p class="hint">Readers who requested access. Approve to let them read this tournament's centralized
-          packets (only enforced if the tournament requires reader accounts).</p>
-        <div class="sound-row">
-          <input id="member-add-id" placeholder="Email or username of a registered account" />
-          <button id="member-add" class="primary tiny">Add moderator</button>
-        </div>
-        <ul id="members-list" class="players"></ul>
-        <p id="members-empty" class="hint">No access requests yet.</p>
-      </div>
-      <p id="modaq-msg" class="msg"></p>
     </section>
 
     <!-- Tournament structure: phases + divisions (director only) -->
-    <section class="panel" id="structure-panel">
+    <section class="panel" id="structure-panel" data-tab="stats">
       <h3>Tournament structure</h3>
       <p class="hint">Group rounds into phases (Prelims, Playoffs…) and teams into divisions/tiers so the
         stat report is split like YellowFruit. Optional — without it, all games are one phase.</p>
@@ -170,8 +209,9 @@
       <datalist id="phase-names"></datalist>
     </section>
 
+    <!-- ============================== SETTINGS ============================== -->
     <!-- Player-facing links (director only to edit; players see them in rooms) -->
-    <section class="panel" id="links-panel">
+    <section class="panel" id="links-panel" data-tab="settings">
       <h3>Player links</h3>
       <p class="hint">Shown to players in every room of this tournament — point them at the
         schedule and your Discord server.</p>
@@ -185,8 +225,22 @@
       <p id="links-msg" class="msg"></p>
     </section>
 
+    <!-- Reader accounts (director only) -->
+    <section class="panel" id="accounts-panel" data-tab="settings">
+      <h3>Reader accounts <span id="members-count" class="muted-count"></span>
+        <button id="members-refresh" class="tiny ghost">Refresh</button></h3>
+      <p class="hint">Readers who requested access. Approve to let them read this tournament's centralized
+        packets (only enforced if the tournament requires reader accounts).</p>
+      <div class="sound-row">
+        <input id="member-add-id" placeholder="Email or username of a registered account" />
+        <button id="member-add" class="primary tiny">Add moderator</button>
+      </div>
+      <ul id="members-list" class="players"></ul>
+      <p id="members-empty" class="hint">No access requests yet.</p>
+    </section>
+
     <!-- Public live stats + YellowFruit report (no token needed to view) -->
-    <section class="panel" id="stats-panel">
+    <section class="panel" id="stats-panel" data-tab="stats">
       <h3>Live stats</h3>
       <div class="modaq-block">
         <h4>Games in progress <span id="live-count" class="muted-count"></span></h4>

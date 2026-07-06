@@ -38,6 +38,23 @@ function roomStaffOk(room, token) {
   return false;
 }
 
+// A logged-in account that a director approved for the room's tournament is a
+// moderator credential in its own right — no reader-token link required.
+// Returns true, or why not: 'no_tournament' | 'not_logged_in' | 'not_approved'.
+async function accountModeratorOk(room, sessionToken) {
+  if (!room.tournamentCode) return 'no_tournament';
+  const account = accounts.accountForSession(sessionToken);
+  if (!account) return 'not_logged_in';
+  const status = await artifacts.memberStatus({ kind: 't', code: room.tournamentCode }, account.id);
+  return status === 'approved' ? true : 'not_approved';
+}
+
+// Room-scoped MODAQ artifact calls take either credential.
+async function roomModOk(room, token, sessionToken) {
+  if (roomStaffOk(room, token)) return true;
+  return (await accountModeratorOk(room, sessionToken)) === true;
+}
+
 const publicDir = path.join(__dirname, '..', 'public');
 
 // The MODAQ moderator bundle (built from the MODAQ repo into public/modaq/).
@@ -134,14 +151,18 @@ app.post('/api/tournaments/:code/access', ah(async (req, res) => {
   res.json({ status: m.status });
 }));
 
-// A reader checks their own access status for a tournament.
+// A reader checks their own access status for a tournament. `status` answers
+// "may I read the packets?" (auto-approved when the tournament doesn't gate
+// readers); `memberStatus` is the actual membership, which is what account-
+// based moderation (joining a room without a reader link) requires.
 app.get('/api/tournaments/:code/access', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
-  if (!t.requireReaderAccounts) return res.json({ required: false, status: 'approved' });
   const account = accounts.accountForSession(req.query.sessionToken);
-  if (!account) return res.json({ required: true, status: null });
-  const status = await artifacts.memberStatus({ kind: 't', code: t.code }, account.id);
-  res.json({ required: true, status });
+  const memberStatus = account
+    ? await artifacts.memberStatus({ kind: 't', code: t.code }, account.id)
+    : null;
+  if (!t.requireReaderAccounts) return res.json({ required: false, status: 'approved', memberStatus });
+  res.json({ required: true, status: account ? memberStatus : null, memberStatus });
 }));
 
 // Director lists / approves / denies reader accounts.
@@ -187,6 +208,59 @@ app.put('/api/tournaments/:code/links', (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
   res.json({ links: store.setLinks(t, req.body?.links || {}) });
+});
+
+// The director fetches (and thereby mints) the player landing-page link — a
+// secret URL players can be given without making the tournament public.
+app.get('/api/tournaments/:code/player-link', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  res.json({ url: `/tp/${t.code}?key=${store.ensurePlayerKey(t)}` });
+});
+
+// Everything the player landing page shows, gated by the secret key.
+app.get('/api/tournaments/:code/player-view', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!t.playerKey || String(req.query.key || '') !== t.playerKey) {
+    return res.status(403).json({ error: 'bad_key' });
+  }
+  const rooms = [...t.roomCodes]
+    .map((rc) => store.getRoom(rc))
+    .filter(Boolean)
+    .map((r) => ({ code: r.code, name: r.name }));
+  res.json({
+    code: t.code,
+    name: t.name,
+    date: t.date || '',
+    links: t.links || { schedule: '', discord: '' },
+    schedule: t.schedule,
+    rooms,
+    statsPath: `/t/${t.code}/stats/standings`,
+  });
+});
+
+// Director sends a message to the readers of one room (or every room). It
+// reaches STAFF sockets only — players never see it — and the last few are
+// kept on each room so a moderator who connects later still gets them.
+app.post('/api/tournaments/:code/message', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const text = String(req.body?.text ?? '').trim().slice(0, 500);
+  if (!text) return res.status(400).json({ error: 'empty_message' });
+  const target = String(req.body?.room ?? 'ALL').toUpperCase();
+  const targets = target === 'ALL' ? [...t.roomCodes] : [target];
+  const message = { text, at: Date.now() };
+  let rooms = 0;
+  let delivered = 0;
+  for (const rc of targets) {
+    const room = store.getRoom(rc);
+    if (!room || room.tournamentCode !== t.code) continue;
+    rooms++;
+    room.directorMessages = [...(room.directorMessages || []), message].slice(-5);
+    delivered += emitToStaff(room.code, 'director_message', message);
+  }
+  if (rooms === 0) return res.status(404).json({ error: 'no_matching_rooms' });
+  res.json({ ok: true, rooms, delivered });
 });
 
 // Toggle automatic packet release (see maybeAutoRelease).
@@ -383,7 +457,7 @@ const ACCESS_DENIED = { error: 'account_not_approved' };
 
 app.get('/api/rooms/:code/roster', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!roomStaffOk(room, reqToken(req))) return res.status(403).json({ error: 'forbidden' });
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
   res.json({ roster: await artifacts.getRoster(store.bucketForRoom(room)) });
 }));
@@ -391,7 +465,7 @@ app.get('/api/rooms/:code/roster', ah(async (req, res) => {
 // Moderators only see rounds the director has made visible.
 app.get('/api/rooms/:code/packets', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!roomStaffOk(room, reqToken(req))) return res.status(403).json({ error: 'forbidden' });
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
   const list = await artifacts.listPackets(store.bucketForRoom(room));
   res.json({ packets: list.filter((p) => p.visible).map((p) => p.round) });
@@ -399,7 +473,7 @@ app.get('/api/rooms/:code/packets', ah(async (req, res) => {
 
 app.post('/api/rooms/:code/packets', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!roomStaffOk(room, reqToken(req))) return res.status(403).json({ error: 'forbidden' });
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   const packet = typeof req.body?.packet === 'string' ? req.body.packet : JSON.stringify(req.body?.packet);
   // A moderator uploading their own round makes it usable (visible) right away.
   const saved = await artifacts.savePacket(store.bucketForRoom(room), req.body?.round, packet, { visible: true });
@@ -408,7 +482,7 @@ app.post('/api/rooms/:code/packets', ah(async (req, res) => {
 
 app.get('/api/rooms/:code/packets/:round', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!roomStaffOk(room, reqToken(req))) return res.status(403).json({ error: 'forbidden' });
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
   const bucket = store.bucketForRoom(room);
   // Enforce visibility: a moderator can only fetch a round the director released.
@@ -421,7 +495,7 @@ app.get('/api/rooms/:code/packets/:round', ah(async (req, res) => {
 // Released tiebreaker questions the moderator can sub in.
 app.get('/api/rooms/:code/tiebreakers', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!roomStaffOk(room, reqToken(req))) return res.status(403).json({ error: 'forbidden' });
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
   res.json({ tiebreakers: await artifacts.getTiebreakerTossups(store.bucketForRoom(room)) });
 }));
@@ -429,7 +503,7 @@ app.get('/api/rooms/:code/tiebreakers', ah(async (req, res) => {
 // Moderator reports that a tiebreaker question was read (and to which teams).
 app.post('/api/rooms/:code/tiebreaker-used', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!roomStaffOk(room, reqToken(req))) return res.status(403).json({ error: 'forbidden' });
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   await artifacts.addTiebreakerUsage(store.bucketForRoom(room), {
     tbRound: req.body?.tbRound, questionNumber: req.body?.questionNumber,
     room: room.code, gameRound: req.body?.gameRound, teams: req.body?.teams,
@@ -439,7 +513,7 @@ app.post('/api/rooms/:code/tiebreaker-used', ah(async (req, res) => {
 
 app.post('/api/rooms/:code/export', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!roomStaffOk(room, reqToken(req))) return res.status(403).json({ error: 'forbidden' });
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   if (req.body?.qbj == null) return res.status(400).json({ error: 'missing_qbj' });
   const saved = await artifacts.saveExport(store.bucketForRoom(room), {
     room: room.code, round: req.body?.round, qbj: req.body.qbj,
@@ -494,13 +568,13 @@ async function maybeAutoRelease(room, round) {
 
 app.get('/api/rooms/:code/exports', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!roomStaffOk(room, reqToken(req))) return res.status(403).json({ error: 'forbidden' });
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   res.json({ exports: await artifacts.listExports(store.bucketForRoom(room)) });
 }));
 
 app.get('/api/rooms/:code/exports/:filename', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!roomStaffOk(room, reqToken(req))) return res.status(403).json({ error: 'forbidden' });
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   const text = await artifacts.getExport(store.bucketForRoom(room), req.params.filename);
   if (text == null) return res.status(404).json({ error: 'not_found' });
   res.type('application/json').send(text);
@@ -508,13 +582,13 @@ app.get('/api/rooms/:code/exports/:filename', ah(async (req, res) => {
 
 app.get('/api/rooms/:code/errata', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!roomStaffOk(room, reqToken(req))) return res.status(403).json({ error: 'forbidden' });
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   res.json({ errata: await artifacts.getErrata(store.bucketForRoom(room)) });
 }));
 
 app.put('/api/rooms/:code/errata', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!roomStaffOk(room, reqToken(req))) return res.status(403).json({ error: 'forbidden' });
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   const merged = await artifacts.replaceErrataForScope(
     store.bucketForRoom(room),
     { room: room.code, round: req.body?.round },
@@ -624,6 +698,9 @@ app.get('/tournaments', (_req, res) => res.sendFile(path.join(publicDir, 'direct
 // tournament director console
 app.get('/t/:code', (_req, res) => res.sendFile(path.join(publicDir, 'tournament.html')));
 
+// Player landing page for a whole tournament (content is key-gated by the API).
+app.get('/tp/:code', (_req, res) => res.sendFile(path.join(publicDir, 'player-tournament.html')));
+
 // room.html serves any /r/CODE deep link
 app.get('/r/:code', (_req, res) => res.sendFile(path.join(publicDir, 'room.html')));
 
@@ -644,6 +721,19 @@ const sock = new Map(); // socket.id -> { roomCode, playerId, minRtt }
 
 function emitState(room) {
   io.to(room.code).emit('state', store.publicState(room));
+}
+
+// Deliver an event to a room's staff sockets only (reader/co-reader) — used
+// for director messages, which players must never receive.
+function emitToStaff(roomCode, event, payload) {
+  let delivered = 0;
+  for (const [sid, ctx] of sock) {
+    if (ctx.roomCode === roomCode && ctx.staffRole) {
+      const sk = io.sockets.sockets.get(sid);
+      if (sk) { sk.emit(event, payload); delivered++; }
+    }
+  }
+  return delivered;
 }
 
 // Eject a player's live socket(s) from a room (after the reader removes them).
@@ -695,24 +785,32 @@ io.on('connection', (socket) => {
   const rttTimer = setInterval(probeRtt, 15000);
 
   // --- join --------------------------------------------------------------
-  socket.on('join', (payload, ack) => {
+  socket.on('join', async (payload, ack) => {
     const room = store.getRoom(payload?.roomCode);
     if (!room) return ack?.({ error: 'no_room' });
 
-    // The presented token determines the ACTUAL authority, not the requested
-    // role — so a co-reader link can never grant full-reader powers, and a bad
-    // token silently downgrades to spectator.
+    // The presented credential determines the ACTUAL authority, not the
+    // requested role — so a co-reader link can never grant full-reader powers,
+    // and a bad token silently downgrades to spectator. Besides the room's
+    // staff tokens, a logged-in account the director approved for the room's
+    // tournament also authorizes as reader (denyReason says why when not).
     const requested = payload?.role;
     const token = payload?.staffToken;
     let role = 'player';
     let staffRole = null;
     let staffDenied = false;
+    let denyReason = null;
     if (requested === 'spectator') {
       role = 'spectator';
     } else if (requested === 'reader' || requested === 'co-reader') {
       if (token && token === room.readerToken) role = staffRole = 'reader';
       else if (token && token === room.coReaderToken) role = staffRole = 'co-reader';
-      else { role = 'spectator'; staffDenied = true; }
+      else {
+        let viaAccount = 'error';
+        try { viaAccount = await accountModeratorOk(room, payload?.sessionToken); } catch { /* fall through */ }
+        if (viaAccount === true) role = staffRole = 'reader';
+        else { role = 'spectator'; staffDenied = true; denyReason = viaAccount; }
+      }
     }
 
     const member = store.joinRoom(room, {
@@ -735,12 +833,22 @@ io.on('connection', (socket) => {
       playerId: member.id,
       role: member.role,
       staffDenied,
+      denyReason,
       // Only a full reader is trusted to mint co-reader invite links.
       coReaderToken: staffRole === 'reader' ? room.coReaderToken : undefined,
       state: store.publicState(room),
       serverTime: Date.now()
     });
     emitState(room);
+
+    // Replay recent director messages to a (re)joining staff member, so a
+    // moderator who connects after the director sent one still sees it.
+    if (staffRole && Array.isArray(room.directorMessages)) {
+      const cutoff = Date.now() - 2 * 60 * 60 * 1000;
+      for (const m of room.directorMessages) {
+        if (m.at >= cutoff) socket.emit('director_message', m);
+      }
+    }
   });
 
   // --- buzz (the latency-fair core) -------------------------------------

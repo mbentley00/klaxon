@@ -291,3 +291,34 @@ button.active { background: var(--accent); color: #fff; }
   .toggle { padding: 10px 0; }
   .copy-field input, .link-row input { font-size: 16px; } /* avoid iOS focus-zoom */
 }
+
+/* --- tournament console tabs -------------------------------------------- */
+.tabbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.tabbar .tab {
+  font: inherit;
+  font-weight: 600;
+  padding: .45em 1em;
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+.tabbar .tab.ghost {
+  background: transparent;
+  color: var(--ink);
+}
+
+/* Compact per-round match-stats rows (Results tab). */
+.export-rounds li { flex-wrap: wrap; }
+.export-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.export-chips .chip { font-size: .78rem; padding: .2em .55em; }

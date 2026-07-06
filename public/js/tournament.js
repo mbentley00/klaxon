@@ -17,6 +17,28 @@ const saveRooms = (list) => remember(ROOMS_KEY, JSON.stringify(list));
 const msg = $('#t-msg');
 const say = (t, ok = true) => { msg.textContent = t; msg.className = 'msg ' + (ok ? 'good' : 'bad'); };
 
+// The console is organized into tabs (sections carry data-tab). Selection is
+// mirrored into the hash so a refresh stays on the same tab. Tab switching
+// uses style.display so the .hidden class (director gating) still wins.
+const TAB_NAMES = ['rooms', 'packets', 'results', 'stats', 'settings'];
+function initTabs() {
+  const bar = $('#tabbar');
+  const show = (name) => {
+    for (const b of bar.querySelectorAll('.tab')) b.classList.toggle('ghost', b.dataset.tab !== name);
+    for (const s of document.querySelectorAll('main > section[data-tab]')) {
+      s.style.display = s.dataset.tab === name ? '' : 'none';
+    }
+    try { history.replaceState(null, '', '#' + name); } catch { /* ignore */ }
+  };
+  bar.addEventListener('click', (e) => {
+    const b = e.target.closest('.tab');
+    if (b) show(b.dataset.tab);
+  });
+  const initial = (location.hash || '').slice(1);
+  show(TAB_NAMES.includes(initial) ? initial : 'rooms');
+}
+initTabs();
+
 // Remember every tournament this browser opens (director or not) so the
 // landing page and directory can list "your tournaments" without an account.
 function rememberVisit(name, date) {
@@ -43,6 +65,8 @@ async function init() {
     saveRooms(known);
     initLinks(t);
     initAutoRelease(t);
+    initMessaging(t);
+    initPlayerPage();
   } catch {
     say('Tournament not found.', false);
   }
@@ -50,6 +74,59 @@ async function init() {
   initModaq();
   initPublicStats();
   initStructure();
+}
+
+// The secret player landing-page link (fetching it mints the key server-side).
+// Director only; the panel hides entirely without the token.
+async function initPlayerPage() {
+  const panel = $('#player-page-panel');
+  if (!panel) return;
+  if (!directorToken) { panel.classList.add('hidden'); return; }
+  try {
+    const { url } = await api('GET', `/api/tournaments/${code}/player-link?directorToken=${qt(directorToken)}`);
+    const full = location.origin + url;
+    const input = $('#player-link');
+    input.value = full;
+    $('#player-link-open').href = full;
+    $('#player-link-copy').onclick = async () => {
+      try { await navigator.clipboard.writeText(full); } catch { input.select(); document.execCommand('copy'); }
+      const b = $('#player-link-copy');
+      const o = b.textContent; b.textContent = 'Copied!'; setTimeout(() => { b.textContent = o; }, 1200);
+    };
+  } catch { panel.classList.add('hidden'); }
+}
+
+// Send a note to the readers of one room (or all of them); it appears as a
+// banner in their MODAQ view. Director only.
+function initMessaging(t) {
+  const panel = $('#message-panel');
+  if (!panel) return;
+  if (!directorToken) { panel.classList.add('hidden'); return; }
+  const sel = $('#msg-target');
+  const named = new Map(loadRooms().map((r) => [r.code, r.name]));
+  for (const rc of t.rooms || []) {
+    const label = named.get(rc) ? `${rc} — ${named.get(rc)}` : rc;
+    sel.append(el('option', { value: rc }, `Room ${label}`));
+  }
+  const status = $('#msg-status');
+  $('#msg-send').onclick = async () => {
+    const text = $('#msg-text').value.trim();
+    if (!text) { status.textContent = 'Type a message first.'; status.className = 'msg bad'; return; }
+    try {
+      const r = await api('POST', `/api/tournaments/${code}/message`, {
+        directorToken, room: sel.value, text,
+      });
+      status.textContent = r.delivered > 0
+        ? `Sent to ${r.delivered} reader${r.delivered === 1 ? '' : 's'} in ${r.rooms} room${r.rooms === 1 ? '' : 's'}.`
+        : `Sent to ${r.rooms} room${r.rooms === 1 ? '' : 's'} — no readers connected right now; they'll see it when they open the room.`;
+      status.className = 'msg good';
+      $('#msg-text').value = '';
+    } catch (e) {
+      status.textContent = 'Could not send: ' + e.message;
+      status.className = 'msg bad';
+    }
+  };
+  $('#msg-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#msg-send').click(); });
 }
 
 // Auto-release: when every room's game in a round is final, the server makes
@@ -238,13 +315,16 @@ const msay = (t, ok = true) => { mmsg.textContent = t; mmsg.className = 'msg ' +
 const qt = (s) => encodeURIComponent(s);
 
 function initModaq() {
-  const panel = $('#modaq-panel');
-  if (!panel) return;
+  const panels = ['#packets-panel', '#results-panel', '#accounts-panel'].map((s) => $(s)).filter(Boolean);
+  if (panels.length === 0) return;
   if (!directorToken) {
     // Without the director token this browser can't manage MODAQ artifacts.
-    panel.querySelector('.hint').textContent =
+    const gate = $('#modaq-gate-hint');
+    if (gate) gate.textContent =
       'MODAQ management is only available in the browser that created this tournament (it holds the director token).';
-    panel.querySelectorAll('button, input').forEach((n) => { n.disabled = true; });
+    for (const panel of panels) {
+      panel.querySelectorAll('button, input, select').forEach((n) => { n.disabled = true; });
+    }
     return;
   }
   refreshRoster();
@@ -483,13 +563,34 @@ async function refreshExports() {
     $('#exports-empty').classList.toggle('hidden', exports.length > 0);
     const ul = $('#exports-list');
     ul.innerHTML = '';
+    // One compact row per round: the round label plus a chip per room that
+    // downloads that match's QBJ (filenames are ROOM-ROUND.qbj).
+    const byRound = new Map();
     for (const x of exports) {
+      const base = x.filename.replace(/\.qbj$/, '');
+      const dash = base.lastIndexOf('-');
+      const room = dash > 0 ? base.slice(0, dash) : base;
+      const round = dash > 0 ? base.slice(dash + 1) : '?';
+      if (!byRound.has(round)) byRound.set(round, []);
+      byRound.get(round).push({ room, x });
+    }
+    const rounds = [...byRound.keys()].sort((a, b) => {
+      const na = Number(a), nb = Number(b);
+      return Number.isFinite(na) && Number.isFinite(nb) ? na - nb : a.localeCompare(b);
+    });
+    for (const round of rounds) {
+      const games = byRound.get(round).sort((a, b) => a.room.localeCompare(b.room));
       const li = el('li', {});
-      li.append(el('span', { className: 'pcol' },
-        el('span', { className: 'pname' }, x.filename),
-        el('span', { className: 'pjoined' }, `${(x.size / 1024).toFixed(1)} KB · ${new Date(x.savedAt).toLocaleString()}`)));
-      const url = `/api/tournaments/${code}/exports/${qt(x.filename)}?directorToken=${qt(directorToken)}`;
-      li.append(el('a', { className: 'btnlink tiny', href: url, download: x.filename }, 'Download'));
+      li.append(el('span', { className: 'pname' }, `Round ${round}`));
+      const chips = el('span', { className: 'export-chips' });
+      for (const { room, x } of games) {
+        const url = `/api/tournaments/${code}/exports/${qt(x.filename)}?directorToken=${qt(directorToken)}`;
+        chips.append(el('a', {
+          className: 'chip', href: url, download: x.filename,
+          title: `${x.filename} · ${(x.size / 1024).toFixed(1)} KB · ${new Date(x.savedAt).toLocaleString()}`,
+        }, room));
+      }
+      li.append(chips);
       ul.append(li);
     }
   } catch { /* ignore */ }
@@ -498,21 +599,33 @@ async function refreshExports() {
 async function refreshErrata() {
   try {
     const { errata } = await api('GET', `/api/tournaments/${code}/errata?directorToken=${qt(directorToken)}`);
-    $('#errata-count').textContent = errata.length ? `(${errata.length})` : '';
-    $('#errata-empty').classList.toggle('hidden', errata.length > 0);
-    const ul = $('#errata-list');
-    ul.innerHTML = '';
-    // Newest first, grouped visually by the room/round that reported them.
-    for (const e of [...errata].sort((a, b) => (b.at || 0) - (a.at || 0))) {
-      const li = el('li', { className: e.thrownOut ? 'gone' : '' });
+    // Errata proper (a plain, static list of corrections) and thrown-out
+    // questions are different things — render them in separate lists.
+    const sorted = [...errata].sort((a, b) => (b.at || 0) - (a.at || 0));
+    const corrections = sorted.filter((e) => !e.thrownOut);
+    const thrown = sorted.filter((e) => e.thrownOut);
+
+    const row = (e) => {
+      const li = el('li', {});
       const col = el('span', { className: 'pcol' });
       col.append(el('span', { className: 'pname' },
         `${e.questionType === 'bonus' ? 'Bonus' : 'Tossup'} ${e.questionNumber} — Round ${e.round} · Room ${e.room}`));
-      const detail = `${e.thrownOut ? 'THROWN OUT. ' : ''}${e.text || ''}`.trim();
-      if (detail) col.append(el('span', { className: 'pjoined' }, detail));
+      if (e.text) col.append(el('span', { className: 'pjoined' }, e.text));
       li.append(col);
-      ul.append(li);
-    }
+      return li;
+    };
+
+    $('#errata-count').textContent = corrections.length ? `(${corrections.length})` : '';
+    $('#errata-empty').classList.toggle('hidden', corrections.length > 0);
+    const ul = $('#errata-list');
+    ul.innerHTML = '';
+    for (const e of corrections) ul.append(row(e));
+
+    $('#thrown-count').textContent = thrown.length ? `(${thrown.length})` : '';
+    $('#thrown-empty').classList.toggle('hidden', thrown.length > 0);
+    const tul = $('#thrown-list');
+    tul.innerHTML = '';
+    for (const e of thrown) tul.append(row(e));
   } catch { /* ignore */ }
 }
 

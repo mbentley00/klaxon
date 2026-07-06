@@ -9,6 +9,11 @@ const clearSession = () => localStorage.removeItem(SESSION_KEY);
 const msg = $('#msg');
 const say = (t, ok = true) => { msg.textContent = t; msg.className = 'msg ' + (ok ? 'good' : 'bad'); };
 
+// "?return=/r/CODE": sent here to sign in (e.g. a moderator joining a room by
+// account); go straight back once a session exists. Same-origin paths only.
+const returnParam = new URLSearchParams(location.search).get('return');
+const returnTo = returnParam && returnParam.startsWith('/') && !returnParam.startsWith('//') ? returnParam : null;
+
 let mode = 'login'; // 'login' | 'register'
 
 function showSignedIn(account) {
@@ -52,11 +57,13 @@ async function init() {
   if (session()) {
     try {
       const { account } = await api('GET', `/api/accounts/me?sessionToken=${encodeURIComponent(session())}`);
+      if (returnTo) return void location.assign(returnTo); // already signed in: head back
       return showSignedIn(account);
     } catch { clearSession(); }
   }
   showSignedOut();
   setMode('login');
+  if (returnTo) say('Sign in and you\'ll be sent back to where you came from.');
 }
 
 $('#tab-login').onclick = () => setMode('login');
@@ -77,6 +84,7 @@ $('#account-form').addEventListener('submit', async (e) => {
     const r = await api('POST', path, body);
     setSession(r.sessionToken);
     syncName(r.account);
+    if (returnTo) return void location.assign(returnTo);
     showSignedIn(r.account);
     say('');
   } catch (err) {

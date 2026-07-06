@@ -247,6 +247,17 @@ export function setAutoRelease(tournament, enabled) {
   return tournament.autoRelease;
 }
 
+// Secret key for the player landing page (/tp/CODE?key=...): shareable by the
+// director, not guessable from the tournament code. Minted on first use so
+// tournaments created before this feature get one too.
+export function ensurePlayerKey(tournament) {
+  if (!tournament.playerKey) {
+    tournament.playerKey = roomCode(12);
+    persistTournament(tournament);
+  }
+  return tournament.playerKey;
+}
+
 // --- membership -----------------------------------------------------------
 
 const ROLES = new Set(['reader', 'co-reader', 'spectator', 'player']);

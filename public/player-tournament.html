@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <link rel="icon" href="/favicon.ico" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <title>Tournament — Klaxon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="landing">
+  <main class="card">
+    <h1 class="wordmark" id="tp-name">Tournament</h1>
+    <p class="tag" id="tp-date"></p>
+
+    <div id="tp-locked" class="hidden">
+      <p class="hint">This page needs the link your tournament director shared — the plain
+        tournament code isn't enough. Ask them for the player link.</p>
+      <p><a class="btnlink" href="/">Home</a></p>
+    </div>
+
+    <div id="tp-body" class="hidden">
+      <section>
+        <div class="row">
+          <a id="tp-stats" class="btnlink" target="_blank" rel="noopener">Live standings &amp; stats →</a>
+          <a id="tp-schedule" class="btnlink ghost hidden" target="_blank" rel="noopener noreferrer">Schedule ↗</a>
+          <a id="tp-discord" class="btnlink ghost hidden" target="_blank" rel="noopener noreferrer">Discord ↗</a>
+        </div>
+      </section>
+
+      <section>
+        <h2>Rooms</h2>
+        <p class="hint">Join the room you're assigned to — the code is what you'd type on the
+          home page, or just tap it here.</p>
+        <ul id="tp-rooms" class="players"></ul>
+      </section>
+
+      <section id="tp-sched-section" class="hidden">
+        <h2>Round schedule</h2>
+        <ul id="tp-sched" class="players"></ul>
+      </section>
+    </div>
+
+    <p id="tp-msg" class="msg" role="status"></p>
+  </main>
+
+  <footer class="site-foot">
+    <a href="/about">About</a>
+  </footer>
+  <script type="module" src="/js/player-tournament.js"></script>
+</body>
+</html>

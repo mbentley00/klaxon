@@ -91,6 +91,12 @@ function showGate(mode, staffRole) {
   $('#gate-team').classList.toggle('hidden', staff);
   $('#gate-spectate').classList.toggle('hidden', staff);
   $('#gate-join').textContent = staff ? 'Start reading' : 'Join as player';
+  // Approved tournament moderators can read via their account, no link needed.
+  $('#gate-mod').classList.toggle('hidden', staff);
+  $('#gate-mod').textContent = localStorage.getItem('bz_sessionToken')
+    ? 'Moderator? Start reading'
+    : 'Moderator? Sign in to read';
+  $('#gate-request').classList.add('hidden'); // only offered after an unapproved join attempt
   $('#gate-name').focus();
 }
 
@@ -98,9 +104,18 @@ function showGate(mode, staffRole) {
 function doJoin(role, name, team) {
   socket.emit('join', {
     roomCode: code, playerId: playerId(), name, team, role,
-    staffToken: isStaffRole(role) ? recall('staffToken:' + code) : undefined
+    staffToken: isStaffRole(role) ? recall('staffToken:' + code) : undefined,
+    // A logged-in account a director approved for this tournament is a
+    // moderator credential too — no reader link needed.
+    sessionToken: isStaffRole(role) ? localStorage.getItem('bz_sessionToken') || undefined : undefined
   }, (resp) => {
-    if (!resp?.ok) { showGate('player'); $('#gate-msg').textContent = 'Could not join — try again.'; return; }
+    if (!resp?.ok) {
+      showGate('player');
+      $('#gate-msg').textContent = resp?.error === 'no_room'
+        ? `Room ${code} doesn't exist — it may have expired. Check the code or ask for a new link.`
+        : 'Could not join — try again.';
+      return;
+    }
     state.me = { id: resp.playerId, name, team };
     state.role = resp.role;
     remember('joined:' + code, '1');
@@ -109,8 +124,26 @@ function doJoin(role, name, team) {
     if (team) remember('team', team);
     if (resp.coReaderToken) remember('coReaderToken:' + code, resp.coReaderToken);
     if (resp.staffDenied) {
+      // Don't drop them into the room as a silent spectator: explain what's
+      // missing and reopen the gate so they can sign in or join as a player.
       forget('staffRole:' + code);
-      $('#gate-msg').textContent = 'Staff token invalid — joined as spectator.';
+      forget('joined:' + code);
+      forget('role:' + code);
+      state.role = null;
+      showGate('player');
+      $('#gate-msg').textContent = {
+        not_logged_in: 'Moderators: sign in with your reader account below, then try again.',
+        not_approved: "Your account isn't approved for this tournament yet — request access below, or ask the director to add you (they can use your email).",
+        no_tournament: "This room isn't part of a tournament, so only its reader link grants control.",
+      }[resp.denyReason] || 'Staff credentials invalid — open the room from your reader link.';
+      // Not approved (but logged in): offer the access request right here.
+      const tcode = resp.state?.tournamentCode;
+      if (resp.denyReason === 'not_approved' && tcode) {
+        const btn = $('#gate-request');
+        btn.dataset.tcode = tcode;
+        btn.classList.remove('hidden');
+      }
+      return;
     }
     enterStage(resp.state);
   });
@@ -131,6 +164,38 @@ $('#gate-join').onclick = () => {
   }
 };
 $('#gate-spectate').onclick = () => doJoin('spectator', $('#gate-name').value.trim() || 'Spectator');
+
+// Request tournament access from the gate itself (shown after an unapproved
+// moderator join attempt). If the director already approved meanwhile, join.
+$('#gate-request').onclick = async () => {
+  const tcode = $('#gate-request').dataset.tcode;
+  const sessionToken = localStorage.getItem('bz_sessionToken');
+  if (!tcode || !sessionToken) return;
+  try {
+    const { status } = await api('POST', `/api/tournaments/${tcode}/access`, { sessionToken });
+    if (status === 'approved') {
+      $('#gate-msg').textContent = "You're approved — joining…";
+      doJoin('reader', $('#gate-name').value.trim() || recall('name') || undefined);
+    } else {
+      $('#gate-msg').textContent =
+        'Request sent — pending the director\'s approval. Once approved, click "Moderator? Start reading" again.';
+    }
+  } catch (e) {
+    $('#gate-msg').textContent = 'Could not request access: ' + e.message;
+  }
+};
+
+// Moderator path without a reader link: sign in (round-trips back here), then
+// join as reader on the strength of the approved account.
+$('#gate-mod').onclick = () => {
+  if (!localStorage.getItem('bz_sessionToken')) {
+    location.href = '/account?return=' + encodeURIComponent(location.pathname + location.search);
+    return;
+  }
+  const name = $('#gate-name').value.trim();
+  if (name) remember('name', name);
+  doJoin('reader', name || recall('name') || undefined);
+};
 
 function enterStage(snapshot) {
   // MODAQ rooms send staff to the embedded MODAQ reader + buzz panel instead of
