@@ -62,10 +62,12 @@ export function hydrate({ tournaments: tournamentRecords = [], rooms: roomRecord
     rooms.set(r.code, {
       ...r,
       coReaderToken: r.coReaderToken || secretToken(),
-      settings: { ...(r.settings || {}) },
+      // playerAlerts defaults ON, so rooms persisted before it existed get it.
+      settings: { ...(r.settings || {}), playerAlerts: r.settings?.playerAlerts !== false },
       phase: 'open',
       cycleNo: 1,
       cycle: freshCycle(1),
+      lastBuzzAt: null,
       queue: [],
       members: new Map(),
       log: []
@@ -103,12 +105,15 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
       queueMode: !!eff.queueMode,        // accumulate a buzz queue vs lock to first
       allowWithdraw: !!eff.allowWithdraw, // (queue mode) players may remove themselves
       autoClear: !!eff.autoClear,         // auto-reset the buzzer a few seconds after a buzz
+      requireTeam: !!eff.requireTeam,     // players must supply a team name to join
+      playerAlerts: eff.playerAlerts !== false, // players may flag a stuck buzzer (on by default)
       modaqMode: !!eff.modaqMode,         // reader gets the embedded MODAQ reader + buzz panel
       modaqLite: !!eff.modaqLite          // lightweight MODAQ: reader + buzzer only, no tournament artifacts
     },
     phase: 'open',          // open | locked  — buzzers are live by default
     cycleNo: 1,
     cycle: freshCycle(1),
+    lastBuzzAt: null,        // server time the current queue's first buzz resolved
     queue: [],               // [{ playerId, name, marginMs }] in buzz order
     members: new Map(),      // playerId -> member
     log: []                 // recent events for late joiners / audit
@@ -186,6 +191,8 @@ function normalizeRoomDefaults(d = {}) {
   if (typeof d.queueMode === 'boolean') out.queueMode = d.queueMode;
   if (typeof d.allowWithdraw === 'boolean') out.allowWithdraw = d.allowWithdraw;
   if (typeof d.autoClear === 'boolean') out.autoClear = d.autoClear;
+  if (typeof d.requireTeam === 'boolean') out.requireTeam = d.requireTeam;
+  if (typeof d.playerAlerts === 'boolean') out.playerAlerts = d.playerAlerts;
   if (typeof d.modaqMode === 'boolean') out.modaqMode = d.modaqMode;
   if (typeof d.modaqLite === 'boolean') out.modaqLite = d.modaqLite;
   return out;
@@ -321,6 +328,7 @@ export function resetBuzzer(room) {
   room.cycleNo += 1;
   room.cycle = freshCycle(room.cycleNo);
   room.queue = [];
+  room.lastBuzzAt = null;
   room.phase = 'open';
   pushLog(room, { type: 'reset_buzzer', cycleNo: room.cycleNo });
 }
@@ -328,6 +336,7 @@ export function resetBuzzer(room) {
 // Queue mode: drop the current head so the next buzzer is "on the buzz".
 export function nextBuzz(room) {
   room.queue.shift();
+  if (!room.queue.length) room.lastBuzzAt = null;
   if (!room.settings.queueMode) room.phase = room.queue.length ? 'locked' : 'open';
   pushLog(room, { type: 'next_buzz', head: room.queue[0]?.playerId || null });
 }
@@ -373,6 +382,9 @@ export function resolveWindow(room) {
     });
   }
   room.cycle = freshCycle(room.cycleNo); // ready to collect the next wave
+  // Stamped once per unresolved queue: the "is the buzzer stuck?" clock that
+  // gates player alerts runs from the FIRST buzz still waiting on the reader.
+  if (room.lastBuzzAt == null && room.queue.length) room.lastBuzzAt = Date.now();
   if (!room.settings.queueMode) room.phase = 'locked';
   pushLog(room, { type: 'buzz', cycleNo: room.cycleNo, head: room.queue[0]?.playerId, size: room.queue.length });
   return room.queue;
@@ -383,12 +395,40 @@ export function setOptions(room, opts = {}) {
   if (typeof opts.queueMode === 'boolean') room.settings.queueMode = opts.queueMode;
   if (typeof opts.allowWithdraw === 'boolean') room.settings.allowWithdraw = opts.allowWithdraw;
   if (typeof opts.autoClear === 'boolean') room.settings.autoClear = opts.autoClear;
+  if (typeof opts.requireTeam === 'boolean') room.settings.requireTeam = opts.requireTeam;
+  if (typeof opts.playerAlerts === 'boolean') room.settings.playerAlerts = opts.playerAlerts;
   if (typeof opts.modaqMode === 'boolean') room.settings.modaqMode = opts.modaqMode;
   if (typeof opts.modaqLite === 'boolean') room.settings.modaqLite = opts.modaqLite;
   // Leaving queue mode collapses any queue back to the standard locked state.
   if (!room.settings.queueMode && room.queue.length) room.phase = 'locked';
   pushLog(room, { type: 'set_options', settings: room.settings });
   persistRooms();
+}
+
+// --- "the buzzer isn't clear" alerts --------------------------------------
+// A player whose buzz has sat unjudged can ping the moderator. Deliberately
+// gated: only while a buzz is actually outstanding, only after the buzzer has
+// been stuck for a while, and at most once per player per cooldown — so it
+// can't be turned into a way to spam the reader mid-question.
+export const STUCK_ALERT_DELAY_MS = 10000;
+export const STUCK_ALERT_COOLDOWN_MS = 20000;
+
+export function stuckAlertReady(room, now = Date.now()) {
+  if (!room.settings.playerAlerts) return false;
+  if (!room.queue.length || room.lastBuzzAt == null) return false;
+  return now - room.lastBuzzAt >= STUCK_ALERT_DELAY_MS;
+}
+
+export function raiseStuckAlert(room, playerId) {
+  const member = room.members.get(playerId);
+  if (!member || member.role !== 'player') return { ok: false, reason: 'not_player' };
+  if (!room.settings.playerAlerts) return { ok: false, reason: 'disabled' };
+  const now = Date.now();
+  if (!stuckAlertReady(room, now)) return { ok: false, reason: 'too_soon' };
+  if (now - (member.lastAlertAt || 0) < STUCK_ALERT_COOLDOWN_MS) return { ok: false, reason: 'cooldown' };
+  member.lastAlertAt = now;
+  pushLog(room, { type: 'stuck_alert', playerId });
+  return { ok: true, member };
 }
 
 function pushLog(room, entry) {
@@ -405,6 +445,9 @@ export function publicState(room) {
     phase: room.phase,
     cycleNo: room.cycleNo,
     settings: room.settings,
+    // Server time of the buzz the room is waiting on (null when clear) — the
+    // player's "buzzer isn't clear" button counts down from it.
+    lastBuzzAt: room.lastBuzzAt ?? null,
     queue: room.queue,
     members: [...room.members.values()].map((m) => ({
       id: m.id, name: m.name, role: m.role, team: m.team, connected: m.connected, joinedAt: m.joinedAt

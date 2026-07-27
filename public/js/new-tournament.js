@@ -24,6 +24,8 @@ $('#create-tournament').addEventListener('click', async () => {
       queueMode: $('#t-def-queue').checked,
       allowWithdraw: $('#t-def-withdraw').checked,
       autoClear: $('#t-def-autoclear').checked,
+      requireTeam: $('#t-def-require-team').checked,
+      playerAlerts: $('#t-def-player-alerts').checked,
       modaqMode: modaqMode !== 'off',
       modaqLite: modaqMode === 'lite'
     };

@@ -66,6 +66,10 @@
       <div id="phase-label" class="phase ready">Ready to Buzz</div>
       <button id="buzzer" class="buzzer ready" disabled>BUZZ</button>
       <div id="buzz-feedback" class="feedback"></div>
+      <!-- Staff: a player says the buzzer was never cleared. -->
+      <div id="stuck-banner" class="offline-alert hidden" role="alert" aria-live="assertive"></div>
+      <!-- Players: ping the moderator about a buzzer left un-reset. -->
+      <button id="stuck-alert" class="ghost tiny hidden">Buzzer isn't clear — alert the moderator</button>
       <p id="player-hint" class="hint hidden">Tip: press <kbd>Space</kbd> to buzz.</p>
       <p id="reader-hint" class="hint hidden">Press <kbd>Space</kbd> or tap the buzzer to reset.</p>
     </section>
@@ -116,6 +120,8 @@
       <label class="toggle"><input type="checkbox" id="opt-queue" /> Buzzer queue mode</label>
       <label class="toggle hidden" id="opt-withdraw-row"><input type="checkbox" id="opt-withdraw" /> Allow players to withdraw</label>
       <label class="toggle"><input type="checkbox" id="opt-autoclear" /> Auto-clear buzzer 5s after a buzz</label>
+      <label class="toggle"><input type="checkbox" id="opt-require-team" /> Require team name to join</label>
+      <label class="toggle"><input type="checkbox" id="opt-player-alerts" /> Let players alert me that the buzzer isn't clear</label>
       <label class="select-label" for="opt-modaq-mode">Moderator view</label>
       <select id="opt-modaq-mode">
         <option value="off">Standard buzzer</option>

@@ -210,6 +210,13 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 }
 
 /* Panel-level banner so a drop is obvious even if the list is scrolled. */
+/* Player button: "the buzzer isn't clear" (disabled during its 10s wait). */
+#stuck-alert {
+  display: block;
+  margin: 8px auto 0;
+}
+#stuck-alert:disabled { opacity: .5; cursor: default; }
+
 .offline-alert {
   margin: 6px 0 8px;
   font-family: var(--display); font-weight: 700; font-size: .8rem; letter-spacing: .03em;

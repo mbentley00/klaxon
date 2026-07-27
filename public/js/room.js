@@ -76,6 +76,22 @@ function maybeAutoJoin() {
   showGate('player');
 }
 
+// Room settings the JOIN GATE needs before anyone has joined (currently just
+// "require team name"). Fetched once, best-effort: if it fails the server still
+// enforces the rule on join.
+let roomInfo = null;
+async function loadRoomInfo() {
+  if (!roomInfo) {
+    try { roomInfo = await api('GET', `/api/rooms/${code}`); } catch { roomInfo = {}; }
+  }
+  return roomInfo;
+}
+function applyTeamRequirement(required) {
+  const team = $('#gate-team');
+  team.placeholder = required ? 'Team name (required)' : 'Team (optional)';
+  team.required = !!required;
+}
+
 function showGate(mode, staffRole) {
   $('#loading').classList.add('hidden');
   const gate = $('#gate');
@@ -98,6 +114,7 @@ function showGate(mode, staffRole) {
     : 'Moderator? Sign in to read';
   $('#gate-request').classList.add('hidden'); // only offered after an unapproved join attempt
   $('#gate-name').focus();
+  if (!staff) loadRoomInfo().then((info) => applyTeamRequirement(info.requireTeam));
 }
 
 // ---- join flow ----
@@ -110,10 +127,16 @@ function doJoin(role, name, team) {
     sessionToken: isStaffRole(role) ? localStorage.getItem('bz_sessionToken') || undefined : undefined
   }, (resp) => {
     if (!resp?.ok) {
+      // The reader may have switched "require team name" on since we last
+      // looked (or since this browser last joined) — trust the refusal.
+      if (resp?.error === 'team_required') roomInfo = { ...(roomInfo || {}), requireTeam: true };
       showGate('player');
       $('#gate-msg').textContent = resp?.error === 'no_room'
         ? `Room ${code} doesn't exist — it may have expired. Check the code or ask for a new link.`
-        : 'Could not join — try again.';
+        : resp?.error === 'team_required'
+          ? 'This room requires a team name — enter yours to join.'
+          : 'Could not join — try again.';
+      if (resp?.error === 'team_required') $('#gate-team').focus();
       return;
     }
     state.me = { id: resp.playerId, name, team };
@@ -158,6 +181,11 @@ $('#gate-join').onclick = () => {
     doJoin(gate.dataset.staffRole, name || undefined);
   } else {
     const team = $('#gate-team').value.trim();
+    if (!team && roomInfo?.requireTeam) {
+      $('#gate-msg').textContent = 'This room requires a team name.';
+      $('#gate-team').focus();
+      return;
+    }
     const finalName = name || 'Player';
     remember('name', finalName); if (team) remember('team', team);
     doJoin('player', finalName, team);
@@ -257,7 +285,11 @@ $('#copy-link').onclick = async (e) => {
 
 // ---- realtime state ----
 socket.on('state', applyState);
-socket.on('buzzer_reset', () => { $('#buzz-feedback').textContent = ''; });
+socket.on('buzzer_reset', () => {
+  $('#buzz-feedback').textContent = '';
+  state.stuckSentFor = null;
+  $('#stuck-banner').classList.add('hidden');   // the complaint is resolved
+});
 // The instant a buzz lands, everyone hears it (the state update renders order).
 socket.on('buzz_pending', () => playBuzz());
 
@@ -269,7 +301,9 @@ function applyState(s) {
   renderBuzzer(s);
   renderQueue(s);
   renderOptions(s);
+  renderStuck(s);
   renderPlayers(s);
+  if (roomInfo) roomInfo.requireTeam = !!s.settings?.requireTeam;
   if (s.tournamentCode) loadTournament(s.tournamentCode);
 }
 
@@ -423,6 +457,95 @@ document.addEventListener('keyup', (e) => {
   if (e.code === 'Space' || e.key === ' ') buzzer.classList.remove('pressed');
 });
 
+// ---- "the buzzer isn't clear" ----
+// Players: a buzz that sits unjudged usually means the reader forgot to reset.
+// After the buzzer has been stuck for STUCK_DELAY_MS they can ping the
+// moderator, who gets a sound + a browser notification + a banner. The server
+// re-checks the same gates, so this UI is convenience, not enforcement.
+const STUCK_DELAY_MS = 10000;
+let stuckTick = null;
+
+function renderStuck(s) {
+  const btn = $('#stuck-alert');
+  if (stuckTick) { clearInterval(stuckTick); stuckTick = null; }
+  const live = state.role === 'player'
+    && s.settings?.playerAlerts !== false
+    && (s.queue || []).length > 0
+    && s.lastBuzzAt != null;
+  btn.classList.toggle('hidden', !live);
+  if (!live) return;
+
+  const paint = () => {
+    if (state.stuckSentFor === s.lastBuzzAt) {   // already pinged for this buzz
+      btn.disabled = true;
+      btn.textContent = 'Moderator alerted';
+    } else {
+      const left = Math.ceil((s.lastBuzzAt + STUCK_DELAY_MS - clock.now()) / 1000);
+      btn.disabled = left > 0;
+      btn.textContent = left > 0
+        ? `Buzzer isn't clear — in ${left}s`
+        : "Buzzer isn't clear — alert the moderator";
+    }
+    if (!btn.disabled && stuckTick) { clearInterval(stuckTick); stuckTick = null; }
+  };
+  paint();
+  if (btn.disabled) stuckTick = setInterval(paint, 500);
+}
+
+$('#stuck-alert').onclick = () => {
+  const buzzAt = state.snapshot?.lastBuzzAt ?? null;
+  const btn = $('#stuck-alert');
+  btn.disabled = true;
+  socket.emit('stuck_alert', {}, (resp) => {
+    if (resp?.ok) {
+      state.stuckSentFor = buzzAt;
+      btn.textContent = resp.delivered ? 'Moderator alerted' : 'Alert sent — no moderator connected';
+      return;
+    }
+    // Rejected (too soon / cooling down / disabled) — say so and re-render.
+    $('#buzz-feedback').textContent = {
+      too_soon: 'Give the moderator a moment first.',
+      cooldown: 'You just alerted the moderator — hang tight.',
+      disabled: 'This room has player alerts turned off.'
+    }[resp?.error] || 'Could not alert the moderator.';
+    if (state.snapshot) renderStuck(state.snapshot);
+  });
+};
+
+// Staff: a player is telling us the buzzer never got cleared.
+socket.on('stuck_alert', (a) => {
+  if (!isStaffRole(state.role) || !a) return;
+  const who = `${a.name || 'A player'}${a.team ? ` (${a.team})` : ''}`;
+  const banner = $('#stuck-banner');
+  banner.textContent = `⚠ ${who} says the buzzer isn't clear — ${clockTime(a.at || Date.now())}`;
+  banner.classList.remove('hidden');
+  clearTimeout(state.stuckBannerTimer);
+  state.stuckBannerTimer = setTimeout(() => banner.classList.add('hidden'), 30000);
+  playStuckAlert();
+  notifyStuck(who);
+});
+
+// Browser notification, so a reader who has tabbed away to the packet still
+// sees it. Permission is asked for once, from the staff view only.
+let notifyAsked = false;
+function askNotifyPermission() {
+  if (notifyAsked || !('Notification' in window)) return;
+  if (Notification.permission !== 'default') { notifyAsked = true; return; }
+  notifyAsked = true;
+  try { Notification.requestPermission().catch(() => {}); } catch { /* older API */ }
+}
+function notifyStuck(who) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const n = new Notification(`Room ${code}: buzzer isn't clear`, {
+      body: `${who} is waiting to be recognized.`,
+      tag: 'klaxon-stuck-' + code,   // collapse repeats instead of stacking
+      renotify: true
+    });
+    n.onclick = () => { window.focus(); n.close(); };
+  } catch { /* notifications unavailable */ }
+}
+
 // ---- queue / buzz order ----
 function renderQueue(s) {
   const q = s.queue || [];
@@ -452,6 +575,8 @@ function renderOptions(s) {
   $('#opt-queue').checked = !!s.settings?.queueMode;
   $('#opt-withdraw').checked = !!s.settings?.allowWithdraw;
   $('#opt-autoclear').checked = !!s.settings?.autoClear;
+  $('#opt-require-team').checked = !!s.settings?.requireTeam;
+  $('#opt-player-alerts').checked = s.settings?.playerAlerts !== false;
   $('#opt-withdraw-row').classList.toggle('hidden', !s.settings?.queueMode);
   // Auto-clear only applies in lock-to-first mode (server ignores it otherwise).
   $('#opt-autoclear').closest('.toggle').classList.toggle('hidden', !!s.settings?.queueMode);
@@ -464,6 +589,10 @@ $('#opt-withdraw').onchange = (e) =>
   socket.emit('reader_action', { action: 'set_options', options: { allowWithdraw: e.target.checked } });
 $('#opt-autoclear').onchange = (e) =>
   socket.emit('reader_action', { action: 'set_options', options: { autoClear: e.target.checked } });
+$('#opt-require-team').onchange = (e) =>
+  socket.emit('reader_action', { action: 'set_options', options: { requireTeam: e.target.checked } });
+$('#opt-player-alerts').onchange = (e) =>
+  socket.emit('reader_action', { action: 'set_options', options: { playerAlerts: e.target.checked } });
 // Switching to a MODAQ mode moves this staff view over to the MODAQ reader.
 $('#opt-modaq-mode')?.addEventListener('change', (e) => {
   const v = e.target.value; // off | lite | full
@@ -544,6 +673,22 @@ function playDisconnect() {
   master.connect(ctx.destination);
   note(ctx, master, t, 'sine', 660, 0.22, 0.9);          // higher first...
   note(ctx, master, t + 0.18, 'sine', 415, 0.45, 0.9);   // ...then drop lower
+}
+
+// Insistent rising triple-beep, repeated: a reader who tuned out the buzz sound
+// should still register THIS one. Honors mute and master volume.
+function playStuckAlert() {
+  if (isMuted()) return;
+  const ctx = ensureAudio();
+  if (!ctx || ctx.state !== 'running') return;
+  const t = ctx.currentTime;
+  const master = ctx.createGain();
+  master.gain.value = volume();
+  master.connect(ctx.destination);
+  for (const start of [0, 0.55]) {
+    [[784, 0], [988, 0.13], [1319, 0.26]].forEach(([f, dt]) =>
+      note(ctx, master, t + start + dt, 'square', f, 0.16, 0.8));
+  }
 }
 
 // `force` lets the Test/preview buttons play even while muted.
@@ -632,6 +777,11 @@ function updateSoundWarning() {
 }
 window.addEventListener('pointerdown', ensureAudio, { once: true });
 window.addEventListener('keydown', ensureAudio, { once: true });
+// Notification permission must be asked for from a user gesture (Safari
+// requires it); askNotifyPermission() only ever prompts once.
+const maybeAskNotify = () => { if (isStaffRole(state.role)) askNotifyPermission(); };
+window.addEventListener('pointerdown', maybeAskNotify);
+window.addEventListener('keydown', maybeAskNotify);
 
 // ---- tournament strip ----
 async function loadTournament(tcode) {

@@ -85,7 +85,11 @@ app.post('/api/rooms', (req, res) => {
 app.get('/api/rooms/:code', (req, res) => {
   const room = store.getRoom(req.params.code);
   if (!room) return res.status(404).json({ error: 'not_found' });
-  res.json({ code: room.code, name: room.name, tournamentCode: room.tournamentCode });
+  res.json({
+    code: room.code, name: room.name, tournamentCode: room.tournamentCode,
+    // The join gate needs this before joining, to ask for a team up front.
+    requireTeam: !!room.settings.requireTeam
+  });
 });
 
 app.post('/api/tournaments', (req, res) => {
@@ -813,6 +817,14 @@ io.on('connection', (socket) => {
       }
     }
 
+    // "Require team name": players must identify their team before the room
+    // admits them. Staff and spectators are exempt, and a member who already
+    // has a team on record keeps it across reconnects without resending it.
+    if (role === 'player' && room.settings.requireTeam) {
+      const known = room.members.get(payload?.playerId)?.team;
+      if (!String(payload?.team ?? known ?? '').trim()) return ack?.({ error: 'team_required' });
+    }
+
     const member = store.joinRoom(room, {
       playerId: payload?.playerId,
       name: payload?.name,
@@ -954,6 +966,25 @@ io.on('connection', (socket) => {
     }
     emitState(room);
     ack?.({ ok: true });
+  });
+
+  // --- "the buzzer isn't clear" (players -> staff) ------------------------
+  // A player pings the moderator when their buzz has gone unjudged. The server
+  // re-checks every gate (room option, 10s since the buzz, per-player cooldown)
+  // so a hand-rolled client can't bypass the client-side ones.
+  socket.on('stuck_alert', (_payload, ack) => {
+    const ctx = sock.get(socket.id);
+    const room = ctx && store.getRoom(ctx.roomCode);
+    if (!room || !ctx.playerId) return ack?.({ error: 'no_room' });
+    const res = store.raiseStuckAlert(room, ctx.playerId);
+    if (!res.ok) return ack?.({ error: res.reason });
+    const delivered = emitToStaff(room.code, 'stuck_alert', {
+      playerId: res.member.id,
+      name: res.member.name,
+      team: res.member.team || null,
+      at: Date.now()
+    });
+    ack?.({ ok: true, delivered });
   });
 
   // --- player withdraw (queue mode, only if the room allows it) ----------
