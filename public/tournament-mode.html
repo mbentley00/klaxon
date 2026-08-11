@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <link rel="icon" href="/favicon.ico" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <title>Tournament mode — Klaxon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="room">
+  <header class="bar">
+    <nav class="bar-left crumbs" aria-label="Breadcrumb">
+      <a class="crumb crumb-mark" href="/">Klaxon</a>
+      <span class="crumb-sep">›</span>
+      <span class="crumb">Tournament mode</span>
+    </nav>
+  </header>
+
+  <main class="stage">
+    <section class="panel">
+      <h3>Run a tournament</h3>
+      <p class="hint">A tournament groups rooms together with a schedule, a scoring format,
+        rosters, packets, live stats, and MODAQ moderator mode.</p>
+      <a class="btnlink" href="/new-tournament">Create a tournament →</a>
+    </section>
+
+    <section class="panel">
+      <h3>Open a tournament</h3>
+      <p class="hint">Have a code? Go straight to its console (director tools if this browser
+        created it, the player page otherwise).</p>
+      <form id="open-form" class="row">
+        <input id="open-code" maxlength="5" autocapitalize="characters"
+               placeholder="TOURNAMENT CODE" aria-label="Tournament code" />
+        <button type="submit">Open</button>
+      </form>
+      <p id="msg" class="msg" role="status"></p>
+    </section>
+
+    <section id="my-tournaments" class="panel hidden">
+      <h3>Your tournaments</h3>
+      <ul id="my-tournaments-list" class="players"></ul>
+    </section>
+
+    <section class="panel">
+      <h3>Moderators</h3>
+      <p class="hint">Reading at a tournament that requires approved readers? Create an
+        account, then browse tournaments and request to join.</p>
+      <div class="row">
+        <a class="btnlink" href="/account" id="account-link">Create account / Log in</a>
+        <a class="btnlink" href="/tournaments">Browse tournaments →</a>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/js/tournament-mode.js"></script>
+</body>
+</html>

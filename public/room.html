@@ -64,19 +64,20 @@
          Players press to buzz; staff press (or Space) to reset. -->
     <section id="buzz-area">
       <div id="phase-label" class="phase ready">Ready to Buzz</div>
-      <button id="buzzer" class="buzzer ready" disabled>BUZZ</button>
+      <button id="buzzer" class="buzzer ready" disabled>
+        <span id="buzzer-label" class="bz-label">BUZZ</span>
+        <span id="buzzer-sub" class="bz-sub"></span>
+      </button>
       <div id="buzz-feedback" class="feedback"></div>
       <!-- Staff: a player says the buzzer was never cleared. -->
       <div id="stuck-banner" class="offline-alert hidden" role="alert" aria-live="assertive"></div>
       <!-- Players: ping the moderator about a buzzer left un-reset. -->
       <button id="stuck-alert" class="ghost tiny hidden">Buzzer isn't clear — alert the moderator</button>
-      <p id="player-hint" class="hint hidden">Tip: press <kbd>Space</kbd> to buzz.</p>
-      <p id="reader-hint" class="hint hidden">Press <kbd>Space</kbd> or tap the buzzer to reset.</p>
     </section>
 
-    <!-- Buzz queue / order -->
-    <section id="queue-view" class="order hidden">
-      <h3>Buzz queue</h3>
+    <!-- Buzz queue / order — always on screen so nothing below it jumps -->
+    <section id="queue-view" class="order">
+      <h3 id="queue-title">Buzz queue</h3>
       <ol id="queue-list"></ol>
       <div id="queue-controls" class="row hidden">
         <button id="ctl-next" class="ghost hidden">Next buzzer →</button>
@@ -85,7 +86,7 @@
       <button id="ctl-withdraw" class="ghost hidden">Withdraw my buzz</button>
     </section>
 
-    <!-- Players (staff only) -->
+    <!-- Players — everyone in the room sees who else is here -->
     <section id="players-panel" class="panel hidden">
       <h3>Players <span id="player-count" class="muted-count"></span>
         <button id="remove-all" class="tiny ghost hidden">Remove all</button></h3>
@@ -150,10 +151,6 @@
       <div id="t-rooms" class="t-rooms"></div>
     </section>
   </main>
-
-  <footer id="role-footer" class="role-footer hidden">
-    You're in this room as <span id="role-badge" class="badge"></span>
-  </footer>
 
   <script src="/socket.io/socket.io.js"></script>
   <script type="module" src="/js/room.js"></script>

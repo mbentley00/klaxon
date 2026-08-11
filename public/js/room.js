@@ -240,13 +240,9 @@ function enterStage(snapshot) {
   $('#stage').classList.remove('hidden');
   const staff = isStaffRole(state.role);
   $('#options-panel').classList.toggle('hidden', !staff);
-  $('#players-panel').classList.toggle('hidden', !staff);
+  // Everyone sees who's in the room; only staff get the moderation controls.
+  $('#players-panel').classList.remove('hidden');
   $('#share-panel').classList.toggle('hidden', !staff);
-  $('#player-hint').classList.toggle('hidden', state.role !== 'player');
-  $('#reader-hint').classList.toggle('hidden', !staff);
-  $('#role-badge').textContent = staff ? (state.role === 'reader' ? 'Reader' : 'Co-reader')
-    : state.role === 'spectator' ? 'Spectator' : 'Player';
-  $('#role-footer').classList.remove('hidden');
   if (staff) buildShareLinks();
   // Compact view is staff-only: a reader squeezing the window beside Zoom + the
   // question doc wants just the buzzer and the buzz order. Restore their choice.
@@ -307,9 +303,11 @@ function applyState(s) {
   if (s.tournamentCode) loadTournament(s.tournamentCode);
 }
 
-// ---- players panel (staff): see and remove players ----
+// ---- players panel ----
+// Everyone sees the roster and the head count; staff additionally get the
+// disconnect alert, the join times and the remove buttons.
 function renderPlayers(s) {
-  if (!isStaffRole(state.role)) return;
+  const staff = isStaffRole(state.role);
   const players = (s.members || []).filter((m) => m.role === 'player');
   const offline = players.filter((p) => !p.connected).length;
   // Alert sound on any player that flipped connected -> disconnected since the
@@ -319,22 +317,21 @@ function renderPlayers(s) {
   if (state.offlineIds === null) {
     state.offlineIds = nowOffline;
   } else {
-    if (disconnectSoundOn()) {
+    if (staff && disconnectSoundOn()) {
       for (const id of nowOffline) if (!state.offlineIds.has(id)) { playDisconnect(); break; }
     }
     state.offlineIds = nowOffline;
   }
-  const count = $('#player-count');
-  count.textContent = players.length ? `(${players.length})` : '';
+  $('#player-count').textContent = `(${players.length})`;
   // A loud, separate badge so the reader can't miss that someone dropped.
   const alert = $('#offline-alert');
-  if (offline) {
+  if (staff && offline) {
     alert.textContent = `⚠ ${offline} disconnected`;
     alert.classList.remove('hidden');
   } else {
     alert.classList.add('hidden');
   }
-  $('#remove-all').classList.toggle('hidden', players.length === 0);
+  $('#remove-all').classList.toggle('hidden', !staff || players.length === 0);
   const ul = $('#players-list');
   ul.innerHTML = '';
   if (!players.length) { ul.append(el('li', { className: 'empty' }, 'No players yet')); return; }
@@ -344,18 +341,22 @@ function renderPlayers(s) {
     const li = el('li', { className: p.connected ? '' : 'gone' });
     const col = el('span', { className: 'pcol' });
     const nameRow = el('span', { className: 'pname-wrap' });
-    nameRow.append(el('span', { className: 'pname' }, `${p.name}${p.team ? ` · ${p.team}` : ''}`));
+    const mine = p.id === state.me?.id;
+    nameRow.append(el('span', { className: 'pname' },
+      `${p.name}${p.team ? ` · ${p.team}` : ''}${mine ? ' (you)' : ''}`));
     if (!p.connected) nameRow.append(el('span', { className: 'offline-badge' }, 'OFFLINE'));
     col.append(nameRow);
-    if (p.joinedAt) {
+    if (staff && p.joinedAt) {
       const j = el('span', { className: 'pjoined', title: new Date(p.joinedAt).toLocaleString() });
       j.textContent = `Joined ${clockTime(p.joinedAt)} · ${agoText(p.joinedAt)}`;
       col.append(j);
     }
     li.append(col);
-    const x = el('button', { className: 'tiny ghost' }, 'Remove');
-    x.onclick = () => socket.emit('reader_action', { action: 'remove_player', playerId: p.id });
-    li.append(x);
+    if (staff) {
+      const x = el('button', { className: 'tiny ghost' }, 'Remove');
+      x.onclick = () => socket.emit('reader_action', { action: 'remove_player', playerId: p.id });
+      li.append(x);
+    }
     ul.append(li);
   }
 }
@@ -395,6 +396,14 @@ function renderPhase(s) {
   }
 }
 
+// The keyboard hint lives *inside* the button (second line) rather than as a
+// line of prose under it — same information, no extra vertical space. CSS hides
+// it on touch devices, where there's no Space bar to press.
+function setBuzzer(label, sub = '') {
+  $('#buzzer-label').textContent = label;
+  $('#buzzer-sub').textContent = sub;
+}
+
 function renderBuzzer(s) {
   const q = s.queue || [];
   const has = q.length > 0;
@@ -403,15 +412,16 @@ function renderBuzzer(s) {
 
   if (isStaffRole(state.role)) {
     buzzer.disabled = !has;
-    buzzer.textContent = has ? 'RESET' : 'READY';
+    setBuzzer(has ? 'RESET' : 'READY', has ? 'or press Space' : '');
   } else if (state.role === 'player') {
     const pos = q.findIndex((x) => x.playerId === state.me?.id);
     const canBuzz = s.phase === 'open' && pos < 0;
     buzzer.disabled = !canBuzz;
-    buzzer.textContent = pos === 0 ? 'BUZZED' : pos > 0 ? `#${pos + 1}` : (canBuzz ? 'BUZZ' : 'LOCKED');
+    setBuzzer(pos === 0 ? 'BUZZED' : pos > 0 ? `#${pos + 1}` : (canBuzz ? 'BUZZ' : 'LOCKED'),
+      canBuzz ? 'or press Space' : '');
   } else {
     buzzer.disabled = true;
-    buzzer.textContent = has ? 'BUZZED' : '—';
+    setBuzzer(has ? 'BUZZED' : '—');
   }
 }
 
@@ -549,17 +559,24 @@ function notifyStuck(who) {
 // ---- queue / buzz order ----
 function renderQueue(s) {
   const q = s.queue || [];
-  $('#queue-view').classList.toggle('hidden', q.length === 0);
+  const staff = isStaffRole(state.role);
+  const queueMode = !!s.settings?.queueMode;
+  // The panel never hides: one appearing and disappearing with every buzz shoves
+  // everything below it up and down. Empty state instead, and outside queue mode
+  // there's only ever one name to show.
+  $('#queue-title').textContent = queueMode ? 'Buzz queue' : 'Buzzed in player';
   const list = $('#queue-list');
   list.innerHTML = '';
+  if (!q.length) list.append(el('li', { className: 'empty' }, 'No one has buzzed'));
   q.forEach((o, i) => list.append(
     el('li', { className: i === 0 ? 'head' : '' }, `${o.name}${i ? ` (+${o.marginMs}ms)` : ''}`)
   ));
 
-  const staff = isStaffRole(state.role);
-  const queueMode = !!s.settings?.queueMode;
-  $('#queue-controls').classList.toggle('hidden', !(staff && q.length));
+  $('#queue-controls').classList.toggle('hidden', !staff);
   $('#ctl-next').classList.toggle('hidden', !queueMode); // "next" only meaningful in queue mode
+  $('#ctl-next').disabled = !q.length;
+  $('#ctl-clear').disabled = !q.length;
+  $('#ctl-clear').textContent = queueMode ? 'Clear queue' : 'Clear buzz';
 
   const pos = q.findIndex((x) => x.playerId === state.me?.id);
   const canWithdraw = state.role === 'player' && s.settings?.allowWithdraw && pos >= 0;

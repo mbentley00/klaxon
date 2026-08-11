@@ -690,6 +690,12 @@ app.get('/healthz', (_req, res) => res.json({ ok: true, t: Date.now() }));
 
 app.get('/about', (_req, res) => res.sendFile(path.join(publicDir, 'about.html')));
 
+// advanced room creation (the options the home page leaves out)
+app.get('/advanced', (_req, res) => res.sendFile(path.join(publicDir, 'advanced.html')));
+
+// tournament hub: create / open / browse, plus reader accounts
+app.get('/tournament-mode', (_req, res) => res.sendFile(path.join(publicDir, 'tournament-mode.html')));
+
 // create-tournament page
 app.get('/new-tournament', (_req, res) => res.sendFile(path.join(publicDir, 'new-tournament.html')));
 

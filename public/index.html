@@ -27,46 +27,19 @@
         <input id="join-name" placeholder="Your name" aria-label="Your name" />
         <button type="submit">Join</button>
       </form>
-      <p class="hint">Reading a room? Use the link from when you created it.</p>
     </section>
 
     <section>
       <h2>Create a room</h2>
       <form id="create-room" class="stack">
-        <input id="room-name" placeholder="Room name (optional)" />
-        <input id="room-tournament" placeholder="Tournament code (optional)"
-               maxlength="5" autocapitalize="characters" />
-        <label class="select-label" for="room-modaq-mode">Moderator view</label>
-        <select id="room-modaq-mode">
-          <option value="off">Standard buzzer</option>
-          <option value="lite">MODAQ — lite (reader + buzzer, no setup)</option>
-          <option value="full">MODAQ — with roster / packets / exports</option>
-        </select>
-        <button type="submit">Create room &amp; read</button>
+        <button type="submit" class="primary">Create room &amp; read</button>
       </form>
     </section>
 
-    <section id="my-tournaments" class="hidden">
-      <h2>Your tournaments</h2>
-      <ul id="my-tournaments-list" class="players"></ul>
-    </section>
-
-    <section>
-      <h2>Run a tournament</h2>
-      <p class="hint">Group rooms under a tournament with a schedule, a scoring format,
-        rosters, packets, live stats, and MODAQ moderator mode.</p>
-      <a class="btnlink" href="/new-tournament">Create a tournament →</a>
-    </section>
-
-    <section>
-      <h2>Moderators</h2>
-      <p class="hint">Reading at a tournament that requires approved readers? Create an
-        account, then browse tournaments and request to join.</p>
-      <div class="row">
-        <a class="btnlink" href="/account" id="account-link">Create account / Log in</a>
-        <a class="btnlink ghost" href="/tournaments">Browse tournaments →</a>
-      </div>
-    </section>
+    <nav class="modes" aria-label="Other modes">
+      <a class="btnlink ghost" href="/advanced">Advanced mode →</a>
+      <a class="btnlink ghost" href="/tournament-mode">Tournament mode →</a>
+    </nav>
 
     <p id="msg" class="msg" role="status"></p>
   </main>

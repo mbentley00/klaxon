@@ -78,6 +78,13 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 .msg.bad { color: var(--bad); }
 #join-code { text-transform: uppercase; letter-spacing: .15em; font-family: var(--mono); font-weight: 600; }
 
+/* The two "there's more here" links under the home card's two core actions. */
+.card .modes {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--soft);
+}
+.card .modes .btnlink { font-size: .85rem; }
+
 .site-foot { margin-top: 18px; text-align: center; }
 .site-foot a { color: var(--muted); font-size: .8rem; text-decoration: none; }
 .site-foot a:hover { color: var(--ink); text-decoration: underline; }
@@ -112,6 +119,13 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 
 .gate { display: grid; place-items: center; min-height: 80dvh; padding: 16px; }
 .gate input { margin-bottom: 10px; }
+/* Rows need room for the buttons' drop shadows, or the row above overlaps the
+   one below. One button style throughout, too — a mix of shadowed and flat
+   buttons in the same stack reads as an accident. */
+.gate .row { gap: 10px; margin-bottom: 12px; }
+.gate .row:last-of-type { margin-bottom: 4px; }
+.gate .row button { box-shadow: 3px 3px 0 var(--ink); background: var(--surface); }
+.gate .row button:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--ink); }
 
 .stage {
   max-width: 680px; margin: 0 auto; display: grid; gap: 20px;
@@ -136,6 +150,13 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
   user-select: none; touch-action: manipulation;
   -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
 }
+/* Second line inside the buzzer: the keyboard shortcut, where it costs no
+   vertical space. Pointless on touch, so it's hidden there (see below). */
+.bz-label { display: block; }
+.bz-sub {
+  display: block; font-family: var(--sans); font-weight: 500; text-transform: none;
+  font-size: .32em; letter-spacing: 0; opacity: .7; margin-top: .5em;
+}
 .buzzer.ready { background: var(--surface); color: var(--ink); }
 .buzzer.buzzed { background: var(--accent); color: #fff; }
 .buzzer:not(:disabled) { cursor: pointer; }
@@ -145,12 +166,6 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 .feedback { font-family: var(--display); text-align: center; font-weight: 500; min-height: 1.4em; color: var(--accent-deep); }
 
 .badge { font-family: var(--mono); font-size: .68rem; padding: .12em .5em; border: 1.5px solid var(--ink); border-radius: var(--radius); text-transform: uppercase; }
-
-.role-footer {
-  text-align: center; color: var(--muted); font-size: .8rem;
-  padding: 16px 16px max(18px, env(safe-area-inset-bottom));
-}
-.role-footer .badge { color: var(--ink); }
 
 /* panels / cards inside the room */
 .panel, .share, .order, .tournament {
@@ -178,6 +193,8 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 
 .order ol { padding-left: 1.4em; margin: .4em 0; }
 .order li { padding: 2px 0; }
+/* Placeholder row when nobody has buzzed — no list number, no emphasis. */
+.order li.empty { list-style: none; margin-left: -1.4em; color: var(--muted); }
 #queue-list .head { font-weight: 700; color: var(--accent); }
 
 .muted-count { color: var(--muted); font-weight: 400; font-family: var(--mono); font-size: .8rem; }
@@ -236,8 +253,6 @@ body.compact .panel,
 body.compact .share,
 body.compact #tournament-strip,
 body.compact #sound-warn,
-body.compact #player-hint,
-body.compact #reader-hint,
 body.compact #latency,
 body.compact .room-name,
 body.compact .crumbs .crumb,
@@ -251,6 +266,7 @@ body.compact .buzzer {
 }
 body.compact .buzzer:not(:disabled):active,
 body.compact .buzzer.pressed:not(:disabled) { transform: translate(5px, 5px); box-shadow: 0 0 0 var(--ink); }
+body.compact .bz-sub { display: none; }  /* no room for it at this size */
 body.compact .phase { font-size: .95rem; min-height: auto; }
 body.compact .feedback { min-height: auto; }
 body.compact .order { padding: 10px 12px; box-shadow: 3px 3px 0 var(--ink); }
@@ -294,6 +310,7 @@ button.active { background: var(--accent); color: #fff; }
 
 /* Touch devices: ensure the smaller controls are still an easy, reliable tap. */
 @media (pointer: coarse) {
+  .bz-sub { display: none; }   /* no Space bar to press */
   button.tiny { min-height: 40px; }
   .toggle { padding: 10px 0; }
   .copy-field input, .link-row input { font-size: 16px; } /* avoid iOS focus-zoom */

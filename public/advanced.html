@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <link rel="icon" href="/favicon.ico" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <title>Advanced mode — Klaxon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="room">
+  <header class="bar">
+    <nav class="bar-left crumbs" aria-label="Breadcrumb">
+      <a class="crumb crumb-mark" href="/">Klaxon</a>
+      <span class="crumb-sep">›</span>
+      <span class="crumb">Advanced mode</span>
+    </nav>
+  </header>
+
+  <main class="stage">
+    <section class="panel">
+      <h3>Create a room</h3>
+      <p class="hint">Everything the home page skips: a room name, joining an existing
+        tournament, the moderator view, and the buzzer rules the room starts with.
+        The reader can change any of it later from Game options.</p>
+      <label class="select-label" for="room-name">Room name <span class="muted-count">optional</span></label>
+      <input id="room-name" placeholder="e.g. Round 3 — Room A" />
+      <label class="select-label" for="room-tournament">Tournament code <span class="muted-count">optional</span></label>
+      <input id="room-tournament" placeholder="5-letter code" maxlength="5" autocapitalize="characters" />
+      <p class="hint">With a tournament code the room joins that tournament, inherits its
+        default settings, and feeds its live stats.</p>
+    </section>
+
+    <section class="panel">
+      <h3>Moderator view</h3>
+      <label class="select-label" for="room-modaq-mode">What the reader sees</label>
+      <select id="room-modaq-mode">
+        <option value="off">Standard buzzer</option>
+        <option value="lite">MODAQ — lite (reader + buzzer, no setup)</option>
+        <option value="full">MODAQ — with roster / packets / exports</option>
+      </select>
+    </section>
+
+    <section class="panel">
+      <h3>Buzzer options</h3>
+      <fieldset class="opt-defaults">
+        <legend>This room starts with</legend>
+        <label class="toggle"><input type="checkbox" id="opt-queue" /> Buzzer queue mode</label>
+        <label class="toggle hidden" id="opt-withdraw-row"><input type="checkbox" id="opt-withdraw" /> Allow players to withdraw</label>
+        <label class="toggle" id="opt-autoclear-row"><input type="checkbox" id="opt-autoclear" /> Auto-clear buzzer 5s after a buzz</label>
+        <label class="toggle"><input type="checkbox" id="opt-require-team" /> Require team name to join</label>
+        <label class="toggle"><input type="checkbox" id="opt-player-alerts" checked /> Let players alert the moderator that the buzzer isn't clear</label>
+      </fieldset>
+    </section>
+
+    <section class="panel">
+      <button id="create-room" class="primary">Create room &amp; read</button>
+      <p id="msg" class="msg" role="status"></p>
+    </section>
+  </main>
+
+  <script type="module" src="/js/advanced.js"></script>
+</body>
+</html>
