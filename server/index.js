@@ -775,6 +775,52 @@ const io = new Server(httpServer, {
 // ---------------------------------------------------------------------------
 const sock = new Map(); // socket.id -> { roomCode, playerId, minRtt }
 
+// --- MASSINGER: server-side pick clock --------------------------------------
+// The per-pick timer has to be enforced here, not in the moderator's browser:
+// the teams are picking from their own pages, and a closed laptop must not
+// stall the phase. When the deadline passes the server bans at random for the
+// team on the clock, exactly as the rules require.
+const massingerTimers = new Map();   // room code -> timeout handle
+
+function clearMassingerTimer(code) {
+  const handle = massingerTimers.get(code);
+  if (handle) {
+    clearTimeout(handle);
+    massingerTimers.delete(code);
+  }
+}
+
+function armMassingerTimer(room) {
+  clearMassingerTimer(room.code);
+  const m = room.massinger;
+  if (!m || m.status !== 'active' || !m.deadline) return;
+  const wait = Math.max(0, m.deadline - Date.now());
+  massingerTimers.set(room.code, setTimeout(() => {
+    massingerTimers.delete(room.code);
+    const live = store.getRoom(room.code);
+    if (!live || live.massinger !== m || m.status !== 'active') return;
+    const result = store.massingerRandomBan(live, 'timeout');
+    if (result.error) return;
+    persistMassinger(live);
+    emitState(live);
+    armMassingerTimer(live);          // next team is now on the clock
+  }, wait));
+}
+
+function persistMassinger(room) {
+  const m = room.massinger;
+  if (!m) return;
+  artifacts.saveMassinger(room.code, m.round, m).catch((e) => console.error('persist massinger failed:', e));
+}
+
+// Everything that changes the board funnels through here: persist it, push it
+// to every client, and re-arm the clock for whoever is now picking.
+function afterMassingerChange(room) {
+  persistMassinger(room);
+  armMassingerTimer(room);
+  emitState(room);
+}
+
 function emitState(room) {
   io.to(room.code).emit('state', store.publicState(room));
 }
@@ -883,6 +929,12 @@ io.on('connection', (socket) => {
       role,
       team: payload?.team
     });
+
+    // A player who joins after the teams were set still gets linked to their
+    // MODAQ player, so their buzzes report the right name.
+    if (role === 'player' && room.roster) {
+      try { store.autoLinkRosterPlayers(room); } catch { /* linking is best-effort */ }
+    }
 
     socket.join(room.code);
     sock.set(socket.id, {
@@ -1037,6 +1089,7 @@ io.on('connection', (socket) => {
         if (r.error && payload.resumeOnly === true) return ack?.({ error: 'no_saved' });
         if (r.error) r = store.massingerStart(room, payload);
         if (r.error) return ack?.(r);
+        armMassingerTimer(room);
         break;
       }
       case 'massinger_pick': {
@@ -1064,22 +1117,55 @@ io.on('connection', (socket) => {
         if (r.error) return ack?.(r);
         break;
       }
+      case 'massinger_reset_subcat': {
+        const r = store.massingerResetSubcat(room, payload.label);
+        if (r.error) return ack?.(r);
+        break;
+      }
       case 'massinger_cancel':
         store.massingerCancel(room);
         break;
+      // The teams a moderator entered in MODAQ's New Game dialog become this
+      // room's roster, so every buzz can be reported as a real MODAQ player.
+      case 'set_modaq_teams': {
+        const r = store.setRosterFromGameTeams(room, payload.teams);
+        if (r.error) return ack?.(r);
+        break;
+      }
       default:
         return ack?.({ error: 'unknown_action' });
     }
     // Persist the board so reloads/restarts resume it (cancel deletes it).
     if (String(payload?.action).startsWith('massinger')) {
-      const m = room.massinger;
       if (payload.action === 'massinger_cancel') {
+        clearMassingerTimer(room.code);
         artifacts.deleteMassinger(room.code, payload.round).catch(() => {});
-      } else if (m) {
-        artifacts.saveMassinger(room.code, m.round, m).catch((e) => console.error('persist massinger failed:', e));
       }
+      afterMassingerChange(room);
+      return ack?.({ ok: true });
     }
     emitState(room);
+    ack?.({ ok: true });
+  });
+
+  // --- MASSINGER: a team makes its own pick ------------------------------
+  // Players protect/ban for themselves. Authority is checked server-side: only
+  // a player whose team is the one on the clock can move the board, so a
+  // hand-rolled client can't pick for the opponent or out of turn.
+  socket.on('massinger_pick', (payload, ack) => {
+    const ctx = sock.get(socket.id);
+    const room = ctx && store.getRoom(ctx.roomCode);
+    if (!room || !ctx.playerId) return ack?.({ error: 'no_room' });
+    const member = room.members.get(ctx.playerId);
+    const allowed = store.massingerCanPick(room, member);
+    if (allowed !== true) return ack?.({ error: allowed });
+    const result = store.massingerPick(room, {
+      type: payload?.type,
+      label: payload?.label,
+      by: store.displayName(member)
+    });
+    if (result.error) return ack?.(result);
+    afterMassingerChange(room);
     ack?.({ ok: true });
   });
 

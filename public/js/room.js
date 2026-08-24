@@ -320,6 +320,18 @@ function msCountdownText(m) {
   return left > 0 ? ` — ${left}s` : ' — TIME’S UP';
 }
 
+// The team this browser counts as being on: the roster player the moderator
+// (or auto-linking) tied us to wins over whatever we typed on the join gate.
+function myTeam(s) {
+  const me = (s.members || []).find((x) => x.id === state.me?.id);
+  return me?.rosterTeam || me?.team || '';
+}
+
+const sameTeam = (a, b) => {
+  const norm = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return norm(a) !== '' && norm(a) === norm(b);
+};
+
 function renderMassinger(s) {
   const m = s.massinger;
   const view = $('#massinger-view');
@@ -331,6 +343,17 @@ function renderMassinger(s) {
   view.classList.remove('hidden');
   $('#ms-round').textContent = m.round ? `Round ${m.round}` : '';
 
+  // My turn? Then the board becomes interactive for me: the team on the clock
+  // makes its own protect/ban here, and the server re-checks that it's really
+  // my turn before applying it.
+  const me = (s.members || []).find((x) => x.id === state.me?.id);
+  // A pick rewrites the packet, so the server only accepts one from a buzzer
+  // linked to a MODAQ player (see massingerCanPick). Mirror that here so the
+  // buttons only appear when they'd actually work.
+  const linked = !s.roster || !!me?.rosterPlayer;
+  const myTurn = state.role === 'player' && m.status === 'active' && sameTeam(myTeam(s), m.teams[m.turn]);
+  const mine = myTurn && linked;
+
   const remaining = m.subcats.reduce((sum, sc) => sum + (sc.indexes.length - sc.banned), 0);
   const status = $('#ms-status');
   if (m.status === 'done') {
@@ -338,9 +361,26 @@ function renderMassinger(s) {
     status.textContent = `Pick/ban complete — ${remaining} questions remain.`;
   } else {
     const expired = m.deadline && clock.now() > m.deadline;
-    status.className = 'ms-status' + (expired ? ' expired' : '');
-    status.textContent = `${m.teams[m.turn]} is picking (protect or ban)${msCountdownText(m)} · ` +
+    status.className = 'ms-status' + (expired ? ' expired' : '') + (mine ? ' mine' : '');
+    const who = mine ? 'Your pick' : `${m.teams[m.turn]} is picking`;
+    status.textContent = `${who} (protect or ban)${msCountdownText(m)} · ` +
       `${remaining} questions remain, playing to ${m.target}.`;
+  }
+
+  const hint = $('#ms-hint');
+  if (m.status === 'done') {
+    hint.textContent = '';
+  } else if (mine) {
+    hint.textContent = m.timerSec > 0
+      ? `Pick a subcategory to protect or ban. If the timer runs out, a random ban is made for you.`
+      : 'Pick a subcategory to protect or ban.';
+  } else if (myTurn && !linked) {
+    hint.textContent = "It's your team's pick, but this buzzer isn't linked to a player yet — " +
+      'ask the moderator to link you (or to make the pick for you).';
+  } else if (state.role === 'player' && myTeam(s)) {
+    hint.textContent = `Waiting for ${m.teams[m.turn]} to pick.`;
+  } else {
+    hint.textContent = '';
   }
 
   const board = $('#ms-board');
@@ -354,6 +394,16 @@ function renderMassinger(s) {
       sc.banned > 0 ? `${sc.banned} of ${sc.indexes.length} banned` :
       sc.indexes.length > 1 ? `×${sc.indexes.length}` : '';
     li.append(el('span', { className: 'ms-mark', textContent: mark }));
+    if (mine && left > 0 && sc.protectedBy == null) {
+      const actions = el('span', { className: 'ms-pick' });
+      actions.append(
+        el('button', { className: 'tiny', textContent: 'Protect',
+          onclick: () => sendMassingerPick('protect', sc.label) }),
+        el('button', { className: 'tiny', textContent: 'Ban',
+          onclick: () => sendMassingerPick('ban', sc.label) })
+      );
+      li.append(actions);
+    }
     return li;
   }));
 
@@ -365,6 +415,23 @@ function renderMassinger(s) {
   } else if ((m.status !== 'active' || !m.deadline) && msTimer) {
     clearInterval(msTimer); msTimer = null;
   }
+}
+
+const MASSINGER_PICK_ERRORS = {
+  not_your_turn: "It isn't your team's pick right now.",
+  not_linked: "This buzzer isn't linked to a player yet — ask the moderator to link you.",
+  not_a_player: 'Only players can pick.',
+  protected: 'That subcategory is protected — it can\u2019t be banned.',
+  exhausted: 'That subcategory has no questions left to ban.',
+  not_active: 'The pick/ban has already finished.'
+};
+
+function sendMassingerPick(type, label) {
+  const hint = $('#ms-hint');
+  hint.textContent = 'Sending\u2026';
+  socket.emit('massinger_pick', { type, label }, (resp) => {
+    if (resp?.error) hint.textContent = MASSINGER_PICK_ERRORS[resp.error] || `Couldn\u2019t pick: ${resp.error}`;
+  });
 }
 
 // ---- roster (staff) ----
@@ -1083,7 +1150,14 @@ function renderTournament() {
   const t = state.tournament;
   if (!t) return;
   $('#tournament-strip').classList.remove('hidden');
-  $('#t-code').textContent = t.code;
+  // The code reads as a link, so make it one: a director on this device lands
+  // in their console, everyone else in the tournament's public stats.
+  const tcodeEl = $('#t-code');
+  tcodeEl.replaceChildren(el('a', {
+    className: 'tlink',
+    href: recall('directorToken:' + t.code) ? `/t/${t.code}` : `/t/${t.code}/stats`,
+    title: recall('directorToken:' + t.code) ? 'Open the director console' : 'Open the tournament standings'
+  }, t.code));
   // Director-set player links: the schedule and the tournament's Discord.
   const linksEl = $('#t-links');
   linksEl.innerHTML = '';

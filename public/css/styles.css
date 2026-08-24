@@ -103,7 +103,10 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 }
 .bar-left { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .crumbs .crumb { color: var(--muted); text-decoration: none; font-size: .85rem; }
-.crumbs .crumb:hover { color: var(--ink); text-decoration: underline; }
+/* Only real links get the link affordance: a <span> crumb (the page you're
+   already on) shouldn't underline on hover and then do nothing when clicked. */
+.crumbs a.crumb:hover { color: var(--ink); text-decoration: underline; }
+.crumbs span.crumb, .crumbs .crumb[aria-current="page"] { cursor: default; }
 .crumb-mark { font-family: var(--display); font-weight: 700; color: var(--ink) !important; font-size: 1rem; letter-spacing: -.01em; }
 .crumb-sep { color: var(--soft); }
 .room-code { font-family: var(--mono); font-weight: 600; letter-spacing: .12em; color: var(--accent); }
@@ -379,3 +382,10 @@ button.active { background: var(--accent); color: #fff; }
 .ms-board li.banned .ms-label { text-decoration: line-through; }
 .ms-board li.protected { background: #eaf4ea; border-color: #1e7d32; }
 .ms-board .ms-mark { font-size: .78rem; color: var(--muted); white-space: nowrap; }
+.massinger .ms-status.mine { color: var(--accent, #1e7d32); }
+.massinger .ms-hint { margin: .1em 0 .7em; font-size: .85rem; color: var(--muted); }
+.ms-board .ms-pick { display: flex; gap: 4px; margin-left: auto; }
+.ms-board .ms-pick button { padding: .15em .5em; font-size: .72rem; box-shadow: 2px 2px 0 var(--ink); }
+/* Tournament code in the room's tournament strip: a real link. */
+.tournament h3 .tlink { color: var(--accent); text-decoration: none; border-bottom: 1.5px solid var(--accent); }
+.tournament h3 .tlink:hover { color: var(--ink); border-bottom-color: var(--ink); }

@@ -404,6 +404,81 @@ export function clearRoster(room) {
   persistRooms();
 }
 
+// Build the room's roster straight from the teams a moderator entered in
+// MODAQ's New Game dialog, then link the buzzers to those players by name.
+// This is what ties a buzz to a real MODAQ player in every mode: the reader no
+// longer has to load a roster file for the names to line up.
+export function setRosterFromGameTeams(room, teams) {
+  const clean = [];
+  for (const team of Array.isArray(teams) ? teams : []) {
+    const name = String(team?.name ?? '').trim().slice(0, 60);
+    const players = (Array.isArray(team?.players) ? team.players : [])
+      .map((p) => String(p ?? '').trim().slice(0, 60))
+      .filter(Boolean);
+    if (name && players.length && !clean.some((t) => t.name === name)) {
+      clean.push({ name, players });
+    }
+  }
+  if (clean.length === 0) return { error: 'no_teams' };
+  setRoster(room, { name: 'MODAQ game', teams: clean });
+  setRosterTeams(room, clean.map((t) => t.name));
+  const linked = autoLinkRosterPlayers(room);
+  return { ok: true, teams: clean.length, linked };
+}
+
+// Attach every unassigned buzzer to the roster player whose name matches what
+// that person typed on the join gate (case- and punctuation-insensitive, and
+// also matching on first name when that's unambiguous). Names nobody matches
+// are left for the moderator to assign by hand — a guess that pins the wrong
+// name to a buzzer would be worse than leaving it blank.
+export function autoLinkRosterPlayers(room) {
+  if (!room.roster) return 0;
+  const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const taken = new Set();
+  for (const m of room.members.values()) {
+    if (m.rosterTeam && m.rosterPlayer) taken.add(`${m.rosterTeam}\u0000${m.rosterPlayer}`);
+  }
+
+  // Candidate pool: every player on a team playing in this room.
+  const pool = [];
+  for (const team of room.roster.teams) {
+    if (!room.rosterTeams.includes(team.name)) continue;
+    for (const player of team.players) {
+      if (!taken.has(`${team.name}\u0000${player}`)) pool.push({ team: team.name, player });
+    }
+  }
+
+  let linked = 0;
+  for (const member of room.members.values()) {
+    if (member.role !== 'player' || member.rosterPlayer) continue;
+    const typed = norm(member.name);
+    if (!typed) continue;
+    const memberTeam = norm(member.team);
+    // Prefer an exact full-name match, and prefer one on the team they typed.
+    let matches = pool.filter((c) => norm(c.player) === typed);
+    if (matches.length === 0) {
+      const first = typed.split(' ')[0];
+      matches = pool.filter((c) => norm(c.player).split(' ')[0] === first);
+    }
+    if (matches.length > 1 && memberTeam) {
+      const onTeam = matches.filter((c) => norm(c.team) === memberTeam);
+      if (onTeam.length) matches = onTeam;
+    }
+    if (matches.length !== 1) continue;   // ambiguous: leave it to the moderator
+    const match = matches[0];
+    if (assignRosterPlayer(room, member.id, match.team, match.player)) {
+      pool.splice(pool.indexOf(match), 1);
+      linked++;
+    }
+  }
+  if (linked) persistRooms();
+  return linked;
+}
+
+// The team a buzzer counts as being on: the roster player they're linked to
+// wins over whatever they typed on the join gate.
+export const effectiveTeam = (member) => member?.rosterTeam || member?.team || '';
+
 // The teams actually playing in this room — the pool the per-buzzer picker
 // offers. Unknown names are ignored, so a client can't invent teams.
 export function setRosterTeams(room, names) {
@@ -674,7 +749,7 @@ export function massingerRestore(room, saved) {
   return { ok: true };
 }
 
-export function massingerPick(room, { type, label } = {}) {
+export function massingerPick(room, { type, label, by } = {}) {
   const m = room.massinger;
   if (!m || m.status !== 'active') return { error: 'not_active' };
   const sc = m.subcats.find((x) => x.label === label);
@@ -688,7 +763,7 @@ export function massingerPick(room, { type, label } = {}) {
   } else {
     return { error: 'bad_type' };
   }
-  m.actions.push({ type, label, team: m.turn, at: Date.now() });
+  m.actions.push({ type, label, team: m.turn, at: Date.now(), by: by || 'moderator' });
   m.turn = 1 - m.turn;
   massingerArm(m);
   massingerFinishIfDone(m);
@@ -712,6 +787,24 @@ export function massingerSetTeams(room, teams) {
   return { ok: true };
 }
 
+// Moderator correction of a single row: drop its protect and/or its bans and
+// forget the actions that produced them, without unwinding everything after.
+export function massingerResetSubcat(room, label) {
+  const m = room.massinger;
+  if (!m) return { error: 'not_active' };
+  const sc = m.subcats.find((x) => x.label === label);
+  if (!sc) return { error: 'no_subcat' };
+  if (sc.protectedBy == null && sc.banned === 0) return { error: 'nothing_to_reset' };
+  sc.protectedBy = null;
+  sc.banned = 0;
+  m.actions = m.actions.filter((a) => a.label !== label);
+  // Reopening a row can put the count back above target, so re-decide status.
+  m.status = 'active';
+  massingerArm(m);
+  massingerFinishIfDone(m);
+  return { ok: true };
+}
+
 export function massingerUndo(room) {
   const m = room.massinger;
   if (!m) return { error: 'not_active' };
@@ -729,13 +822,30 @@ export function massingerUndo(room) {
 }
 
 // Timer enforcement: apply a random legal ban for the team on the clock.
-export function massingerRandomBan(room) {
+export function massingerRandomBan(room, by) {
   const m = room.massinger;
   if (!m || m.status !== 'active') return { error: 'not_active' };
   const bannable = m.subcats.filter((sc) => sc.protectedBy == null && sc.banned < sc.indexes.length);
   if (bannable.length === 0) return { error: 'exhausted' };
   const sc = bannable[Math.floor(Math.random() * bannable.length)];
-  return massingerPick(room, { type: 'ban', label: sc.label });
+  return massingerPick(room, { type: 'ban', label: sc.label, by: by || 'random' });
+}
+
+// Can this member make the pick that's on the clock? The server decides this
+// rather than trusting the page that rendered the buttons. Once the room has a
+// roster (which a MASSINGER game always does — the MODAQ teams are pushed to it
+// before the pick/ban), the picker must be LINKED to one of its players: a
+// pick rewrites the packet, so it shouldn't be enough to have typed the team's
+// name on the join gate. Returns true or the reason it isn't allowed.
+export function massingerCanPick(room, member) {
+  const m = room.massinger;
+  if (!m || m.status !== 'active') return 'not_active';
+  if (!member || member.role !== 'player') return 'not_a_player';
+  if (room.roster && !member.rosterPlayer) return 'not_linked';
+  const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const team = norm(effectiveTeam(member));
+  if (team === '' || team !== norm(m.teams[m.turn])) return 'not_your_turn';
+  return true;
 }
 
 export function massingerCancel(room) {
