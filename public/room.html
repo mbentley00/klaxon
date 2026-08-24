@@ -75,6 +75,14 @@
       <button id="stuck-alert" class="ghost tiny hidden">Buzzer isn't clear — alert the moderator</button>
     </section>
 
+    <!-- MASSINGER pick/ban board (tournament games only) — mirrors the board
+         the moderator is driving so both teams watch picks land live. -->
+    <section id="massinger-view" class="panel massinger hidden" aria-live="polite">
+      <h3>MASSINGER pick/ban <span id="ms-round" class="muted-count"></span></h3>
+      <div id="ms-status" class="ms-status"></div>
+      <ul id="ms-board" class="ms-board"></ul>
+    </section>
+
     <!-- Buzz queue / order — always on screen so nothing below it jumps -->
     <section id="queue-view" class="order">
       <h3 id="queue-title">Buzz queue</h3>
@@ -84,6 +92,30 @@
         <button id="ctl-clear" class="ghost">Clear queue</button>
       </div>
       <button id="ctl-withdraw" class="ghost hidden">Withdraw my buzz</button>
+    </section>
+
+    <!-- Roster (staff only): load a QBJ registration file, pick the teams
+         playing here, then attach a real player to each buzzer below. -->
+    <section id="roster-panel" class="panel hidden">
+      <h3>Roster <span id="roster-count" class="muted-count"></span></h3>
+      <div class="row roster-load">
+        <input type="file" id="roster-file" accept=".qbj,.json,application/json"
+               aria-label="Roster file (QBJ)" />
+        <button id="roster-tournament" class="ghost tiny hidden">Use tournament roster</button>
+        <button id="roster-clear" class="ghost tiny hidden">Clear roster</button>
+      </div>
+      <div id="roster-teams" class="hidden">
+        <label class="select-label" for="roster-team-add">Teams playing in this room</label>
+        <div class="row">
+          <input id="roster-team-add" list="roster-team-options" placeholder="Add a team…" />
+          <datalist id="roster-team-options"></datalist>
+          <button id="roster-team-add-btn" class="ghost">Add</button>
+        </div>
+        <div id="roster-team-chips" class="t-rooms"></div>
+      </div>
+      <p id="roster-msg" class="msg"></p>
+      <p class="hint">Pick each player's name next to their buzzer in the list below. Buzzes then
+        show the roster name, and the read-aloud option says it out loud.</p>
     </section>
 
     <!-- Players — everyone in the room sees who else is here -->
@@ -141,6 +173,9 @@
         <label class="vol">Vol <input type="range" id="sound-vol" min="0" max="1" step="0.05" /></label>
         <button id="test-sound" class="ghost tiny">Test</button>
       </div>
+      <label class="toggle"><input type="checkbox" id="opt-speak-buzz" />
+        Read the buzzing player's name aloud</label>
+      <p id="speak-warn" class="hint hidden">This browser can't speak names aloud.</p>
     </section>
 
     <!-- Tournament strip -->

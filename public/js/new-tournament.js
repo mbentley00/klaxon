@@ -31,7 +31,9 @@ $('#create-tournament').addEventListener('click', async () => {
     };
     const format = {
       hasBonuses: $('#fmt-bonuses').checked,
-      tossupScheme: $('#fmt-scheme').value
+      tossupScheme: $('#fmt-scheme').value,
+      massinger: $('#fmt-massinger').checked,
+      massingerTimerSec: Number($('#fmt-massinger-timer').value)
     };
     const r = await api('POST', '/api/tournaments', {
       name: $('#tournament-name').value.trim() || undefined,

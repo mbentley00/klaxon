@@ -1,5 +1,5 @@
 import { ClockSync } from './clocksync.js';
-import { playerId, remember, recall, forget, api, $, el } from './util.js';
+import { playerId, remember, recall, forget, api, readFileText, $, el } from './util.js';
 
 const code = location.pathname.split('/').pop().toUpperCase();
 const params = new URLSearchParams(location.search);
@@ -240,6 +240,8 @@ function enterStage(snapshot) {
   $('#stage').classList.remove('hidden');
   const staff = isStaffRole(state.role);
   $('#options-panel').classList.toggle('hidden', !staff);
+  // The roster is a reader's tool: load it, then label the buzzers below.
+  $('#roster-panel').classList.toggle('hidden', !staff);
   // Everyone sees who's in the room; only staff get the moderation controls.
   $('#players-panel').classList.remove('hidden');
   $('#share-panel').classList.toggle('hidden', !staff);
@@ -298,13 +300,211 @@ function applyState(s) {
   renderQueue(s);
   renderOptions(s);
   renderStuck(s);
+  renderRoster(s);
   renderPlayers(s);
+  renderMassinger(s);
+  announceBuzz(s);
   if (roomInfo) roomInfo.requireTeam = !!s.settings?.requireTeam;
   if (s.tournamentCode) loadTournament(s.tournamentCode);
 }
 
+// ---- MASSINGER pick/ban board (read-only mirror) ----
+// The moderator drives the pick/ban from the MODAQ page; every client in the
+// room watches the same server-authoritative board here. The countdown runs on
+// synced server time so both teams see the same clock.
+let msTimer = null;
+
+function msCountdownText(m) {
+  if (!m.deadline) return '';
+  const left = Math.max(0, Math.ceil((m.deadline - clock.now()) / 1000));
+  return left > 0 ? ` — ${left}s` : ' — TIME’S UP';
+}
+
+function renderMassinger(s) {
+  const m = s.massinger;
+  const view = $('#massinger-view');
+  if (!m) {
+    view.classList.add('hidden');
+    if (msTimer) { clearInterval(msTimer); msTimer = null; }
+    return;
+  }
+  view.classList.remove('hidden');
+  $('#ms-round').textContent = m.round ? `Round ${m.round}` : '';
+
+  const remaining = m.subcats.reduce((sum, sc) => sum + (sc.indexes.length - sc.banned), 0);
+  const status = $('#ms-status');
+  if (m.status === 'done') {
+    status.className = 'ms-status done';
+    status.textContent = `Pick/ban complete — ${remaining} questions remain.`;
+  } else {
+    const expired = m.deadline && clock.now() > m.deadline;
+    status.className = 'ms-status' + (expired ? ' expired' : '');
+    status.textContent = `${m.teams[m.turn]} is picking (protect or ban)${msCountdownText(m)} · ` +
+      `${remaining} questions remain, playing to ${m.target}.`;
+  }
+
+  const board = $('#ms-board');
+  board.replaceChildren(...m.subcats.map((sc) => {
+    const left = sc.indexes.length - sc.banned;
+    const li = el('li', { className: left === 0 ? 'banned' : sc.protectedBy != null ? 'protected' : '' });
+    li.append(el('span', { className: 'ms-label', textContent: sc.label }));
+    const mark =
+      left === 0 ? '✕ banned' :
+      sc.protectedBy != null ? `🛡 ${m.teams[sc.protectedBy]}` :
+      sc.banned > 0 ? `${sc.banned} of ${sc.indexes.length} banned` :
+      sc.indexes.length > 1 ? `×${sc.indexes.length}` : '';
+    li.append(el('span', { className: 'ms-mark', textContent: mark }));
+    return li;
+  }));
+
+  // Tick the countdown between state broadcasts.
+  if (m.status === 'active' && m.deadline && !msTimer) {
+    msTimer = setInterval(() => {
+      if (state.snapshot?.massinger) renderMassinger(state.snapshot);
+    }, 500);
+  } else if ((m.status !== 'active' || !m.deadline) && msTimer) {
+    clearInterval(msTimer); msTimer = null;
+  }
+}
+
+// ---- roster (staff) ----
+// A QBJ registration file tells us the real names behind the buzzers. Staff
+// load one, pick the teams playing in this room, then attach a player to each
+// buzzer in the list below — after which the server labels the buzz queue (and
+// the MODAQ buzz panel, which reads the same state) with the roster name.
+const ROSTER_ERRORS = {
+  bad_json: "That file isn't valid JSON.",
+  no_registrations: "That doesn't look like a QBJ roster file — no registrations in it.",
+  no_teams: 'No teams with players in that file.',
+  no_tournament_roster: "This tournament doesn't have a roster uploaded yet.",
+  forbidden: 'Only the reader can load a roster.'
+};
+
+function rosterMsg(text, cls = '') {
+  const msg = $('#roster-msg');
+  msg.className = 'msg ' + cls;
+  msg.textContent = text;
+}
+
+async function loadRoster(body) {
+  rosterMsg('Loading…');
+  try {
+    const { roster } = await api('PUT', `/api/rooms/${code}/buzzer-roster`, {
+      token: recall('staffToken:' + code) || undefined,
+      sessionToken: localStorage.getItem('bz_sessionToken') || undefined,
+      ...body
+    });
+    const teams = roster?.teamNames?.length || 0;
+    rosterMsg(`Loaded ${teams} team${teams === 1 ? '' : 's'}.` +
+      (roster?.teams?.length ? '' : ' Add the teams playing in this room.'), 'good');
+  } catch (e) {
+    rosterMsg(ROSTER_ERRORS[e.message] || `Could not load the roster: ${e.message}`, 'bad');
+  }
+}
+
+const setRosterTeams = (teams) => socket.emit('reader_action', { action: 'set_roster_teams', teams });
+
+function renderRoster(s) {
+  if (!isStaffRole(state.role)) return;
+  const roster = s.roster;
+  const all = roster?.teamNames || [];
+  const active = (roster?.teams || []).map((t) => t.name);
+
+  $('#roster-count').textContent = roster
+    ? `(${all.length} team${all.length === 1 ? '' : 's'}${roster.name ? ' · ' + roster.name : ''})`
+    : '';
+  $('#roster-clear').classList.toggle('hidden', !roster);
+  // Pulling the central roster only means something inside a tournament.
+  $('#roster-tournament').classList.toggle('hidden', !s.tournamentCode);
+  $('#roster-teams').classList.toggle('hidden', !roster);
+  if (!roster) return;
+
+  const opts = $('#roster-team-options');
+  opts.innerHTML = '';
+  for (const name of all) if (!active.includes(name)) opts.append(el('option', { value: name }));
+
+  const chips = $('#roster-team-chips');
+  chips.innerHTML = '';
+  if (!active.length) {
+    chips.append(el('span', { className: 'hint' }, 'No teams yet — add the ones playing here.'));
+  }
+  for (const name of active) {
+    const chip = el('span', { className: 'chip team-chip' }, name);
+    const x = el('button', { className: 'chip-x', title: `Remove ${name}` }, '×');
+    x.onclick = () => setRosterTeams(active.filter((n) => n !== name));
+    chip.append(x);
+    chips.append(chip);
+  }
+}
+
+$('#roster-file').onchange = async (e) => {
+  try {
+    const qbj = await readFileText(e.target);
+    if (qbj) await loadRoster({ qbj });
+  } catch (err) {
+    rosterMsg(err.message, 'bad');
+  }
+  e.target.value = ''; // let the same file be picked again after a fix
+};
+$('#roster-tournament').onclick = () => loadRoster({});
+$('#roster-clear').onclick = () => {
+  if (confirm('Clear the roster and every buzzer assignment?')) {
+    socket.emit('reader_action', { action: 'clear_roster' });
+    rosterMsg('');
+  }
+};
+
+function addRosterTeam() {
+  const input = $('#roster-team-add');
+  const wanted = input.value.trim();
+  if (!wanted) return;
+  const s = state.snapshot;
+  const all = s?.roster?.teamNames || [];
+  const active = (s?.roster?.teams || []).map((t) => t.name);
+  // Accept a case-insensitive typo of a real team name, not an invented one.
+  const name = all.find((n) => n.toLowerCase() === wanted.toLowerCase());
+  if (!name) return rosterMsg(`No team called “${wanted}” in this roster.`, 'bad');
+  if (active.includes(name)) return rosterMsg(`${name} is already in this room.`, 'bad');
+  input.value = '';
+  rosterMsg('');
+  setRosterTeams([...active, name]);
+}
+$('#roster-team-add-btn').onclick = addRosterTeam;
+$('#roster-team-add').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); addRosterTeam(); }
+});
+
+// The per-buzzer picker: every player on a team playing in this room, grouped
+// by team. Choosing a name that's already on another buzzer moves it here.
+function seatPicker(p, s) {
+  const teams = s.roster?.teams || [];
+  const sel = el('select', { className: 'seat-pick', title: 'Who is on this buzzer' });
+  sel.append(el('option', { value: '' }, '— who is this? —'));
+  teams.forEach((t, ti) => {
+    const group = el('optgroup', { label: t.name });
+    t.players.forEach((name, pi) => group.append(el('option', { value: `${ti}:${pi}` }, name)));
+    sel.append(group);
+  });
+  const ti = teams.findIndex((t) => t.name === p.rosterTeam);
+  const pi = ti < 0 ? -1 : teams[ti].players.indexOf(p.rosterPlayer);
+  sel.value = ti >= 0 && pi >= 0 ? `${ti}:${pi}` : '';
+  sel.onchange = () => {
+    // No value means "— who is this? —", i.e. take the name off this buzzer.
+    const picked = sel.value ? sel.value.split(':').map(Number) : null;
+    const team = picked ? teams[picked[0]] : null;
+    socket.emit('reader_action', {
+      action: 'assign_roster_player',
+      playerId: p.id,
+      team: team?.name ?? null,
+      player: team?.players[picked[1]] ?? null
+    });
+    sel.blur(); // don't let the select swallow Space-to-reset
+  };
+  return sel;
+}
+
 // ---- players panel ----
-// Everyone sees the roster and the head count; staff additionally get the
+// Everyone sees who's here and the head count; staff additionally get the
 // disconnect alert, the join times and the remove buttons.
 function renderPlayers(s) {
   const staff = isStaffRole(state.role);
@@ -333,6 +533,11 @@ function renderPlayers(s) {
   }
   $('#remove-all').classList.toggle('hidden', !staff || players.length === 0);
   const ul = $('#players-list');
+  // Don't rebuild the list under an open seat picker — a buzz (or the "x min
+  // ago" tick) would otherwise close the dropdown mid-choice. The next state
+  // update redraws it once the reader has moved on.
+  const active = document.activeElement;
+  if (active?.classList.contains('seat-pick') && ul.contains(active)) return;
   ul.innerHTML = '';
   if (!players.length) { ul.append(el('li', { className: 'empty' }, 'No players yet')); return; }
   // Show disconnected players first so they're the first thing the reader sees.
@@ -342,16 +547,23 @@ function renderPlayers(s) {
     const col = el('span', { className: 'pcol' });
     const nameRow = el('span', { className: 'pname-wrap' });
     const mine = p.id === state.me?.id;
+    // Once the reader has labelled this buzzer, the roster player IS the player.
+    const shown = p.displayName || p.name;
+    const under = p.rosterPlayer ? p.rosterTeam : p.team;
     nameRow.append(el('span', { className: 'pname' },
-      `${p.name}${p.team ? ` · ${p.team}` : ''}${mine ? ' (you)' : ''}`));
+      `${shown}${under ? ` · ${under}` : ''}${mine ? ' (you)' : ''}`));
     if (!p.connected) nameRow.append(el('span', { className: 'offline-badge' }, 'OFFLINE'));
     col.append(nameRow);
     if (staff && p.joinedAt) {
       const j = el('span', { className: 'pjoined', title: new Date(p.joinedAt).toLocaleString() });
-      j.textContent = `Joined ${clockTime(p.joinedAt)} · ${agoText(p.joinedAt)}`;
+      // Keep the name they typed visible, so the reader can tell whose device
+      // they just relabelled.
+      const typed = p.rosterPlayer && p.name !== p.rosterPlayer ? ` · joined as ${p.name}` : '';
+      j.textContent = `Joined ${clockTime(p.joinedAt)} · ${agoText(p.joinedAt)}${typed}`;
       col.append(j);
     }
     li.append(col);
+    if (staff && (s.roster?.teams || []).length) li.append(seatPicker(p, s));
     if (staff) {
       const x = el('button', { className: 'tiny ghost' }, 'Remove');
       x.onclick = () => socket.emit('reader_action', { action: 'remove_player', playerId: p.id });
@@ -708,6 +920,51 @@ function playStuckAlert() {
   }
 }
 
+// ---- read the buzzing player's name aloud ----
+// A moderator watching the question doc doesn't want to look away to see who
+// buzzed. The browser's own speech synthesis says the name — the FIRST name,
+// the way you'd actually call on someone, unless someone else in the room shares
+// it, in which case the full name disambiguates. Off by default, per device.
+const speakOn = () => recall('speakBuzz') === '1';
+const canSpeak = () => typeof window.speechSynthesis !== 'undefined';
+const firstNameOf = (full) => String(full || '').trim().split(/\s+/)[0] || '';
+
+function spokenNameFor(s, id) {
+  const players = (s.members || []).filter((m) => m.role === 'player');
+  const me = players.find((m) => m.id === id);
+  const full = String(me?.displayName || me?.name || '').trim();
+  const first = firstNameOf(full);
+  if (!first || first === full) return full;
+  const shared = players.some((m) => m.id !== id &&
+    firstNameOf(m.displayName || m.name).toLowerCase() === first.toLowerCase());
+  return shared ? full : first;
+}
+
+function speak(text) {
+  if (!text || !canSpeak()) return;
+  try {
+    // A second buzz shouldn't have to wait behind the first — the name that
+    // matters is the one on the buzzer now.
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.volume = volume();
+    u.rate = 1.05;
+    speechSynthesis.speak(u);
+  } catch { /* speech unavailable */ }
+}
+
+// Say whoever is on the buzz now, once per (cycle, player). Joining a room that
+// already has a buzz outstanding stays silent — only new buzzes are announced.
+function announceBuzz(s) {
+  const head = (s.queue || [])[0];
+  const key = head ? `${s.cycleNo}:${head.playerId}` : null;
+  const firstRender = state.announcedKey === undefined;
+  if (key === state.announcedKey) return;
+  state.announcedKey = key;
+  if (!key || firstRender || !speakOn() || isMuted()) return;
+  speak(spokenNameFor(s, head.playerId));
+}
+
 // `force` lets the Test/preview buttons play even while muted.
 function playSound(name, vol, force = false) {
   if (isMuted() && !force) return;
@@ -759,6 +1016,12 @@ function applySoundPrefs() {
   if (vol) vol.value = volume();
   const dc = $('#opt-disconnect-sound');
   if (dc) dc.checked = disconnectSoundOn();
+  const say = $('#opt-speak-buzz');
+  if (say) {
+    say.checked = speakOn() && canSpeak();
+    say.disabled = !canSpeak();
+  }
+  $('#speak-warn')?.classList.toggle('hidden', canSpeak());
   applyMuteUI();
 }
 function applyMuteUI() {
@@ -778,6 +1041,14 @@ $('#enable-sound')?.addEventListener('click', () => playSound(soundName(), volum
 $('#opt-disconnect-sound')?.addEventListener('change', (e) => {
   if (e.target.checked) { remember('disconnectSound', '1'); playDisconnect(); } // preview
   else forget('disconnectSound');
+});
+$('#opt-speak-buzz')?.addEventListener('change', (e) => {
+  if (!e.target.checked) return forget('speakBuzz');
+  remember('speakBuzz', '1');
+  // Preview with a real name from the room so the reader hears exactly what a
+  // buzz will sound like (including the first-name-only rule).
+  const someone = (state.snapshot?.members || []).find((m) => m.role === 'player');
+  speak(someone ? spokenNameFor(state.snapshot, someone.id) : 'Names will be read aloud');
 });
 $('#mute-btn')?.addEventListener('click', () => {
   if (isMuted()) forget('muted'); else remember('muted', '1');

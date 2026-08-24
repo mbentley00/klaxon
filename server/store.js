@@ -35,7 +35,11 @@ const serializeRoom = (r) => ({
   createdAt: r.createdAt,
   readerToken: r.readerToken,
   coReaderToken: r.coReaderToken,
-  settings: r.settings
+  settings: r.settings,
+  // The loaded buzzer roster survives a restart; the per-buzzer assignments
+  // don't, because members are runtime state (see hydrate).
+  roster: r.roster,
+  rosterTeams: r.rosterTeams
 });
 
 const persistTournament = (t) => persistence?.tournament(serializeTournament(t));
@@ -64,6 +68,8 @@ export function hydrate({ tournaments: tournamentRecords = [], rooms: roomRecord
       coReaderToken: r.coReaderToken || secretToken(),
       // playerAlerts defaults ON, so rooms persisted before it existed get it.
       settings: { ...(r.settings || {}), playerAlerts: r.settings?.playerAlerts !== false },
+      roster: normalizeRoster(r.roster),
+      rosterTeams: Array.isArray(r.rosterTeams) ? r.rosterTeams.map(String) : [],
       phase: 'open',
       cycleNo: 1,
       cycle: freshCycle(1),
@@ -110,6 +116,10 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
       modaqMode: !!eff.modaqMode,         // reader gets the embedded MODAQ reader + buzz panel
       modaqLite: !!eff.modaqLite          // lightweight MODAQ: reader + buzzer only, no tournament artifacts
     },
+    // Roster loaded from a QBJ registration file, so buzzers can be labelled
+    // with the real player who is sitting behind them (see setRoster).
+    roster: null,           // { name, teams: [{ name, players: [..] }] }
+    rosterTeams: [],        // team names actually playing in this room
     phase: 'open',          // open | locked  — buzzers are live by default
     cycleNo: 1,
     cycle: freshCycle(1),
@@ -181,7 +191,11 @@ export const TOSSUP_SCHEMES = ['15/10/-5', '20/15/10/-5', '20/10/0'];
 function normalizeFormat(f = {}) {
   return {
     hasBonuses: f.hasBonuses !== false, // default: bonuses on
-    tossupScheme: TOSSUP_SCHEMES.includes(f.tossupScheme) ? f.tossupScheme : '15/10/-5'
+    tossupScheme: TOSSUP_SCHEMES.includes(f.tossupScheme) ? f.tossupScheme : '15/10/-5',
+    // MASSINGER pick/ban: before each game, teams alternate protecting and
+    // banning subcategories until `massingerTarget` tossups remain.
+    massinger: f.massinger === true,
+    massingerTimerSec: clampNum(f.massingerTimerSec, 0, 300, 30)
   };
 }
 
@@ -279,6 +293,9 @@ export function joinRoom(room, { playerId, name, role, team }) {
     name: (name || 'Player').slice(0, 40),
     role: normRole,
     team: team ? String(team).slice(0, 40) : null,
+    // Set by the reader from the loaded roster (see assignRosterPlayer).
+    rosterTeam: null,
+    rosterPlayer: null,
     connected: true,
     joinedAt: Date.now()
   };
@@ -315,6 +332,124 @@ export function removeAllPlayers(room) {
   if (ids.length) pushLog(room, { type: 'remove_all_players', count: ids.length });
   return ids;
 }
+
+// --- roster: which real player is behind each buzzer ----------------------
+// A reader loads a QBJ registration file (parsed to { name, teams } by
+// server/qbjroster.js), picks the teams playing in this room, then attaches a
+// roster player to each connected buzzer. From then on that player's name is
+// what the buzz queue reports — including to the MODAQ buzz panel, which reads
+// the same public state.
+
+// A room may only have a handful of teams at the buzzers; the cap keeps the
+// per-buzzer picker (and the state we broadcast) small.
+const MAX_ACTIVE_TEAMS = 8;
+
+function normalizeRoster(roster) {
+  const teams = (Array.isArray(roster?.teams) ? roster.teams : [])
+    .map((t) => ({
+      name: String(t?.name ?? '').slice(0, 60),
+      players: (Array.isArray(t?.players) ? t.players : []).map((p) => String(p ?? '').slice(0, 60))
+    }))
+    .filter((t) => t.name && t.players.length);
+  if (!teams.length) return null;
+  return { name: String(roster?.name ?? '').slice(0, 80), teams };
+}
+
+const teamNames = (room) => (room.roster?.teams || []).map((t) => t.name);
+
+// Drop any per-buzzer assignment the roster no longer backs (team removed from
+// the room, roster replaced, player gone). Called after every roster change so
+// a stale assignment can never keep announcing a name that isn't in play.
+function pruneAssignments(room) {
+  const active = new Map(
+    (room.roster?.teams || [])
+      .filter((t) => room.rosterTeams.includes(t.name))
+      .map((t) => [t.name, new Set(t.players)])
+  );
+  for (const m of room.members.values()) {
+    if (!m.rosterTeam) continue;
+    if (!active.get(m.rosterTeam)?.has(m.rosterPlayer)) {
+      m.rosterTeam = null;
+      m.rosterPlayer = null;
+    }
+  }
+  refreshQueueNames(room);
+}
+
+// An already-resolved queue carries the name it was resolved under; relabel it
+// so a buzz that is still waiting on the reader picks up a just-made assignment.
+function refreshQueueNames(room) {
+  for (const q of room.queue) q.name = displayName(room.members.get(q.playerId));
+}
+
+// Load (or replace) the room's roster. Small rosters — a normal two-team room —
+// start with every team active so the reader can assign buzzers immediately;
+// for a whole-tournament roster file they pick the teams playing here first.
+export function setRoster(room, roster) {
+  room.roster = normalizeRoster(roster);
+  room.rosterTeams = room.roster && room.roster.teams.length <= MAX_ACTIVE_TEAMS
+    ? teamNames(room)
+    : [];
+  pruneAssignments(room);
+  pushLog(room, { type: 'set_roster', teams: room.roster?.teams.length || 0 });
+  persistRooms();
+  return room.roster;
+}
+
+export function clearRoster(room) {
+  room.roster = null;
+  room.rosterTeams = [];
+  pruneAssignments(room);
+  pushLog(room, { type: 'clear_roster' });
+  persistRooms();
+}
+
+// The teams actually playing in this room — the pool the per-buzzer picker
+// offers. Unknown names are ignored, so a client can't invent teams.
+export function setRosterTeams(room, names) {
+  const known = new Set(teamNames(room));
+  const picked = [];
+  for (const n of Array.isArray(names) ? names : []) {
+    const name = String(n ?? '');
+    if (known.has(name) && !picked.includes(name)) picked.push(name);
+    if (picked.length >= MAX_ACTIVE_TEAMS) break;
+  }
+  room.rosterTeams = picked;
+  pruneAssignments(room);
+  persistRooms();
+  return room.rosterTeams;
+}
+
+// Attach a roster player to one buzzer (or clear it with a null player). The
+// pairing is exclusive: handing a name to a second device takes it off the
+// first, so two buzzers can never both claim to be the same player.
+export function assignRosterPlayer(room, playerId, team, player) {
+  const member = room.members.get(playerId);
+  if (!member || member.role !== 'player') return false;
+  if (!team || !player) {
+    member.rosterTeam = null;
+    member.rosterPlayer = null;
+    refreshQueueNames(room);
+    return true;
+  }
+  const t = (room.roster?.teams || []).find((x) => x.name === team);
+  if (!t || !room.rosterTeams.includes(t.name) || !t.players.includes(player)) return false;
+  for (const other of room.members.values()) {
+    if (other !== member && other.rosterTeam === t.name && other.rosterPlayer === player) {
+      other.rosterTeam = null;
+      other.rosterPlayer = null;
+    }
+  }
+  member.rosterTeam = t.name;
+  member.rosterPlayer = player;
+  refreshQueueNames(room);
+  pushLog(room, { type: 'assign_roster_player', playerId, team: t.name, player });
+  return true;
+}
+
+// What everyone should be shown (and told) when this buzzer goes off: the
+// roster player once assigned, otherwise whatever they typed on the join gate.
+export const displayName = (member) => member?.rosterPlayer || member?.name || '?';
 
 // --- buzz cycle state machine --------------------------------------------
 // A room holds an ordered `queue` of who has buzzed.
@@ -377,7 +512,7 @@ export function resolveWindow(room) {
     if (room.queue.some((q) => q.playerId === b.playerId)) continue; // already queued
     room.queue.push({
       playerId: b.playerId,
-      name: room.members.get(b.playerId)?.name || '?',
+      name: displayName(room.members.get(b.playerId)),
       marginMs: Math.round(b.clampedTime - base)
     });
   }
@@ -448,9 +583,22 @@ export function publicState(room) {
     // Server time of the buzz the room is waiting on (null when clear) — the
     // player's "buzzer isn't clear" button counts down from it.
     lastBuzzAt: room.lastBuzzAt ?? null,
+    // MASSINGER pick/ban board (null outside the pick/ban phase). Fully
+    // public: players watch the same board the moderator drives.
+    massinger: room.massinger || null,
     queue: room.queue,
+    // Every team name (so the reader can pick who's playing here) but only the
+    // active teams' player lists, which is all the per-buzzer picker needs and
+    // keeps a whole-tournament roster out of every state broadcast.
+    roster: room.roster && {
+      name: room.roster.name,
+      teamNames: teamNames(room),
+      teams: room.roster.teams.filter((t) => room.rosterTeams.includes(t.name))
+    },
     members: [...room.members.values()].map((m) => ({
-      id: m.id, name: m.name, role: m.role, team: m.team, connected: m.connected, joinedAt: m.joinedAt
+      id: m.id, name: m.name, role: m.role, team: m.team, connected: m.connected, joinedAt: m.joinedAt,
+      rosterTeam: m.rosterTeam || null, rosterPlayer: m.rosterPlayer || null,
+      displayName: displayName(m)
     }))
   };
 }
@@ -459,6 +607,140 @@ function clampNum(v, lo, hi, fallback) {
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(hi, Math.max(lo, n));
+}
+
+// --- MASSINGER pick/ban ----------------------------------------------------
+// Server-authoritative pick/ban of subcategories before a game (see the
+// MASSINGER format): the two teams alternate protecting and banning one
+// subcategory at a time until `target` tossups remain. The MODERATOR is the
+// only writer — players watch the board via publicState. A subcategory with
+// two questions loses ONE per ban (the later one in packet order) and the
+// other stays bannable later; a protected subcategory can't be banned at all.
+//
+// State is plain JSON so it broadcasts as-is and persists per room+round
+// (index.js writes it through artifacts.saveMassinger on every change).
+
+const massingerRemaining = (m) =>
+  m.subcats.reduce((sum, sc) => sum + (sc.indexes.length - sc.banned), 0);
+
+// (Re)arm the per-turn clock. timerSec 0 disables the timer.
+function massingerArm(m, now = Date.now()) {
+  m.turnStartedAt = now;
+  m.deadline = m.timerSec > 0 ? now + m.timerSec * 1000 : null;
+}
+
+function massingerFinishIfDone(m) {
+  if (massingerRemaining(m) <= m.target) {
+    m.status = 'done';
+    m.deadline = null;
+  }
+}
+
+export function massingerStart(room, { round, subcats, teams, timerSec, target } = {}) {
+  const labels = new Set();
+  const clean = [];
+  for (const sc of Array.isArray(subcats) ? subcats : []) {
+    const label = String(sc?.label || '').trim().slice(0, 80);
+    const indexes = (Array.isArray(sc?.indexes) ? sc.indexes : [])
+      .map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < 500);
+    if (!label || labels.has(label) || indexes.length === 0) continue;
+    labels.add(label);
+    clean.push({ label, indexes, protectedBy: null, banned: 0 });
+  }
+  if (clean.length === 0) return { error: 'no_subcats' };
+  const total = clean.reduce((sum, sc) => sum + sc.indexes.length, 0);
+  const m = {
+    round: String(round ?? '').slice(0, 60),
+    status: 'active',
+    teams: [0, 1].map((i) => String(teams?.[i] ?? '').trim().slice(0, 60) || `Team ${'AB'[i]}`),
+    turn: 0,
+    timerSec: clampNum(timerSec, 0, 300, 30),
+    target: clampNum(target, 1, total, 20),
+    subcats: clean,
+    actions: []
+  };
+  massingerArm(m);
+  massingerFinishIfDone(m);
+  room.massinger = m;
+  return { ok: true };
+}
+
+// Load a previously persisted board (moderator reload / server restart).
+export function massingerRestore(room, saved) {
+  if (!saved || !Array.isArray(saved.subcats)) return { error: 'bad_state' };
+  room.massinger = saved;
+  // Never resume into a live countdown from the distant past.
+  if (saved.status === 'active') massingerArm(saved);
+  return { ok: true };
+}
+
+export function massingerPick(room, { type, label } = {}) {
+  const m = room.massinger;
+  if (!m || m.status !== 'active') return { error: 'not_active' };
+  const sc = m.subcats.find((x) => x.label === label);
+  if (!sc) return { error: 'no_subcat' };
+  if (sc.protectedBy != null) return { error: 'protected' };
+  if (sc.banned >= sc.indexes.length) return { error: 'exhausted' };
+  if (type === 'protect') {
+    sc.protectedBy = m.turn;
+  } else if (type === 'ban') {
+    sc.banned += 1;
+  } else {
+    return { error: 'bad_type' };
+  }
+  m.actions.push({ type, label, team: m.turn, at: Date.now() });
+  m.turn = 1 - m.turn;
+  massingerArm(m);
+  massingerFinishIfDone(m);
+  return { ok: true };
+}
+
+// The moderator decides which team is picking; auto-alternation is only the default.
+export function massingerSetTurn(room, team) {
+  const m = room.massinger;
+  if (!m || m.status !== 'active') return { error: 'not_active' };
+  if (team !== 0 && team !== 1) return { error: 'bad_team' };
+  m.turn = team;
+  massingerArm(m);
+  return { ok: true };
+}
+
+export function massingerSetTeams(room, teams) {
+  const m = room.massinger;
+  if (!m) return { error: 'not_active' };
+  m.teams = [0, 1].map((i) => String(teams?.[i] ?? '').trim().slice(0, 60) || m.teams[i]);
+  return { ok: true };
+}
+
+export function massingerUndo(room) {
+  const m = room.massinger;
+  if (!m) return { error: 'not_active' };
+  const last = m.actions.pop();
+  if (!last) return { error: 'nothing_to_undo' };
+  const sc = m.subcats.find((x) => x.label === last.label);
+  if (sc) {
+    if (last.type === 'protect') sc.protectedBy = null;
+    else sc.banned = Math.max(0, sc.banned - 1);
+  }
+  m.status = 'active';
+  m.turn = last.team;   // it's that team's turn again
+  massingerArm(m);
+  return { ok: true };
+}
+
+// Timer enforcement: apply a random legal ban for the team on the clock.
+export function massingerRandomBan(room) {
+  const m = room.massinger;
+  if (!m || m.status !== 'active') return { error: 'not_active' };
+  const bannable = m.subcats.filter((sc) => sc.protectedBy == null && sc.banned < sc.indexes.length);
+  if (bannable.length === 0) return { error: 'exhausted' };
+  const sc = bannable[Math.floor(Math.random() * bannable.length)];
+  return massingerPick(room, { type: 'ban', label: sc.label });
+}
+
+export function massingerCancel(room) {
+  room.massinger = null;
+  return { ok: true };
 }
 
 export const _internal = { rooms, tournaments };

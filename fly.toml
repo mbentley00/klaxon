@@ -14,6 +14,7 @@ primary_region = 'iad'
 # tournament records are persisted here so they survive restarts/redeploys.
 [env]
   KLAXON_DATA_DIR = '/data'
+  KLAXON_CANONICAL_HOST = 'klaxonbuzz.com'
 
 [[mounts]]
   source = 'klaxon_data'

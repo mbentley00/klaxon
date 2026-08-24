@@ -214,6 +214,21 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 .pname-wrap { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .pjoined { font-size: .72rem; color: var(--muted); font-family: var(--mono); }
 
+/* Roster: load a QBJ file, pick the teams here, then label each buzzer. */
+.roster-load { align-items: center; margin-bottom: 8px; }
+.roster-load input[type="file"] { flex: 1 1 220px; font-size: .8rem; padding: .35em .4em; }
+#roster-team-add { flex: 1 1 160px; }
+#roster-team-chips { margin-bottom: 6px; }
+#roster-msg:empty { min-height: 0; margin: 0; }
+.team-chip { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; }
+.chip-x {
+  border: 0; box-shadow: none; background: none; padding: 0 0 2px;
+  font-size: 1rem; line-height: 1; color: var(--muted);
+}
+.chip-x:hover { background: none; color: var(--bad); }
+/* The "who is on this buzzer" picker sits inside a player row. */
+.seat-pick { width: auto; max-width: 45%; flex: 0 1 auto; font-size: .8rem; padding: .3em .4em; }
+
 .offline-badge {
   flex: 0 0 auto;
   font-family: var(--display); font-weight: 700; font-size: .65rem; letter-spacing: .08em;
@@ -346,3 +361,21 @@ button.active { background: var(--accent); color: #fff; }
   flex-wrap: wrap;
 }
 .export-chips .chip { font-size: .78rem; padding: .2em .55em; }
+
+/* ---- MASSINGER pick/ban board (room page, read-only mirror) ---- */
+.massinger .ms-status { font-weight: 700; margin: .2em 0 .6em; }
+.massinger .ms-status.expired { color: var(--bad); animation: ms-blink 1s steps(2) infinite; }
+.massinger .ms-status.done { color: var(--good, #1e7d32); }
+@keyframes ms-blink { 50% { opacity: .35; } }
+.ms-board {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px;
+}
+.ms-board li {
+  display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
+  border: 1.5px solid var(--ink); border-radius: 6px; padding: 4px 8px; background: var(--surface);
+}
+.ms-board li.banned { opacity: .45; }
+.ms-board li.banned .ms-label { text-decoration: line-through; }
+.ms-board li.protected { background: #eaf4ea; border-color: #1e7d32; }
+.ms-board .ms-mark { font-size: .78rem; color: var(--muted); white-space: nowrap; }

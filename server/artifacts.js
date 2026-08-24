@@ -53,9 +53,13 @@ async function ensureDir(dir) {
 
 // Write atomically: to a temp file in the same dir, then rename over the target
 // so a crash mid-write can't leave a half-written artifact.
+// A counter, not just the clock: two writes to the same file inside one
+// millisecond would otherwise share a temp path, and one would rename the file
+// the other is still writing.
+let tmpSeq = 0;
 async function writeAtomic(file, text) {
   await ensureDir(path.dirname(file));
-  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${tmpSeq++}`;
   await fs.writeFile(tmp, text, 'utf8');
   await fs.rename(tmp, file);
 }
@@ -238,6 +242,31 @@ export async function addTiebreakerUsage(bucket, entry) {
 export async function getPacket(bucket, round) {
   const name = safeName(round, 'round');
   return readTextOrNull(path.join(bucketDir(bucket), 'packets', `${name}.json`));
+}
+
+// --- MASSINGER pick/ban boards ---------------------------------------------
+// The finished (or in-progress) pick/ban board for one room+round. Always
+// stored under the ROOM bucket — rooms in the same tournament round run
+// independent pick/bans, so the shared tournament bucket is the wrong scope.
+// Written on every action so a moderator reload or server restart resumes the
+// board (and, once done, keeps determining the filtered packet all game).
+
+function massingerFile(roomCode, round) {
+  return path.join(bucketDir({ kind: 'r', code: roomCode }), 'massinger', `${safeName(round, 'round')}.json`);
+}
+
+export async function saveMassinger(roomCode, round, state) {
+  await writeAtomic(massingerFile(roomCode, round), JSON.stringify(state, null, 2));
+}
+
+export async function getMassinger(roomCode, round) {
+  const text = await readTextOrNull(massingerFile(roomCode, round));
+  if (text == null) return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+export async function deleteMassinger(roomCode, round) {
+  await fs.rm(massingerFile(roomCode, round), { force: true });
 }
 
 // --- exported match QBJ ----------------------------------------------------
@@ -468,8 +497,16 @@ export async function loadTournamentRecords() {
   return out;
 }
 
-export async function saveRoomRecords(records) {
-  await writeAtomic(path.join(DATA_DIR, 'rooms.json'), JSON.stringify(records, null, 2));
+// Every room mutation rewrites the whole file, and several can land in the same
+// tick (loading a roster, then picking its teams). Chain them so the last call
+// is the last write — concurrent writes could otherwise finish out of order and
+// leave the older snapshot on disk.
+let roomWrites = Promise.resolve();
+export function saveRoomRecords(records) {
+  roomWrites = roomWrites
+    .catch(() => { /* a failed write must not stall later ones */ })
+    .then(() => writeAtomic(path.join(DATA_DIR, 'rooms.json'), JSON.stringify(records, null, 2)));
+  return roomWrites;
 }
 
 export async function loadRoomRecords() {

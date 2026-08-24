@@ -12,12 +12,28 @@ import { renderReport, PAGES } from './yellowfruit.js';
 import { buildZip } from './zip.js';
 import * as accounts from './accounts.js';
 import { parseYellowFruit, planImport } from './yfimport.js';
+import { parseQbjRoster } from './qbjroster.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 // Buzz payloads are tiny, but MODAQ-mode artifacts (round packets, exported
 // match QBJ) can be a few hundred KB, so allow a larger JSON body.
 app.use(express.json({ limit: '4mb' }));
+
+// Canonical host. Every other hostname the app is reachable on (the fly.dev
+// name, legacy domains) gets a permanent redirect so shared links, which are
+// built from location.origin in the browser, always use the canonical domain.
+// Health checks are exempt so Fly's probes (which hit the internal address)
+// keep passing. Unset KLAXON_CANONICAL_HOST (e.g. local dev) disables this.
+const CANONICAL_HOST = (process.env.KLAXON_CANONICAL_HOST || '').trim().toLowerCase();
+if (CANONICAL_HOST) {
+  app.use((req, res, next) => {
+    if (req.path === '/healthz') return next();
+    const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').toLowerCase();
+    if (!host || host === CANONICAL_HOST) return next();
+    res.redirect(301, `https://${CANONICAL_HOST}${req.originalUrl}`);
+  });
+}
 
 // Wrap an async route handler so a rejected promise becomes a 500 instead of an
 // unhandled rejection.
@@ -466,6 +482,27 @@ app.get('/api/rooms/:code/roster', ah(async (req, res) => {
   res.json({ roster: await artifacts.getRoster(store.bucketForRoom(room)) });
 }));
 
+// The room's BUZZER roster: staff upload a QBJ registration file (or, with no
+// `qbj` body, pull the tournament's central roster) so each connected buzzer can
+// be labelled with the real player behind it. Parsed here rather than in the
+// browser so both paths share one parser and every client sees the same teams.
+app.put('/api/rooms/:code/buzzer-roster', ah(async (req, res) => {
+  const room = roomOr(res, req.params.code); if (!room) return;
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  let source = req.body?.qbj;
+  if (source == null) {
+    if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
+    source = await artifacts.getRoster(store.bucketForRoom(room));
+    if (source == null) return res.status(404).json({ error: 'no_tournament_roster' });
+  }
+  let roster;
+  try { roster = parseQbjRoster(source); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+  store.setRoster(room, roster);
+  emitState(room);
+  res.json({ roster: store.publicState(room).roster });
+}));
+
 // Moderators only see rounds the director has made visible.
 app.get('/api/rooms/:code/packets', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
@@ -494,6 +531,15 @@ app.get('/api/rooms/:code/packets/:round', ah(async (req, res) => {
   const text = await artifacts.getPacket(bucket, req.params.round);
   if (text == null) return res.status(404).json({ error: 'not_found' });
   res.type('application/json').send(text);
+}));
+
+// The persisted MASSINGER pick/ban board for a round (null body if none).
+// The moderator page uses it on reload to re-apply the ban filter to the
+// packet before handing it to MODAQ.
+app.get('/api/rooms/:code/massinger/:round', ah(async (req, res) => {
+  const room = roomOr(res, req.params.code); if (!room) return;
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  res.json({ massinger: await artifacts.getMassinger(room.code, req.params.round) });
 }));
 
 // Released tiebreaker questions the moderator can sub in.
@@ -943,7 +989,7 @@ io.on('connection', (socket) => {
   });
 
   // --- staff controls (reader + co-reader, gated on a secret token) -----
-  socket.on('reader_action', (payload, ack) => {
+  socket.on('reader_action', async (payload, ack) => {
     const ctx = sock.get(socket.id);
     const room = ctx && store.getRoom(ctx.roomCode);
     if (!room) return ack?.({ error: 'no_room' });
@@ -961,14 +1007,77 @@ io.on('connection', (socket) => {
       case 'set_options':
         store.setOptions(room, payload.options || {});
         break;
+      case 'set_roster_teams':
+        store.setRosterTeams(room, payload.teams || []);
+        break;
+      case 'assign_roster_player':
+        store.assignRosterPlayer(room, payload.playerId, payload.team, payload.player);
+        break;
+      case 'clear_roster':
+        store.clearRoster(room);
+        break;
       case 'remove_player':
         if (store.removePlayer(room, payload.playerId)) kickPlayer(room, payload.playerId, 'removed');
         break;
       case 'remove_all_players':
         for (const id of store.removeAllPlayers(room)) kickPlayer(room, id, 'removed');
         break;
+      // --- MASSINGER pick/ban (moderator-driven, see store.js) ----------
+      case 'massinger_start': {
+        // Unless explicitly starting fresh, a persisted board for this round
+        // is resumed — a moderator reload (or server restart) mid-pick/ban
+        // must not wipe the picks already made.
+        let r = { error: 'no_saved' };
+        if (payload.fresh !== true) {
+          const saved = await artifacts.getMassinger(room.code, payload.round).catch(() => null);
+          if (saved) r = store.massingerRestore(room, saved);
+        }
+        // resumeOnly probes for a saved board without starting a fresh one
+        // (the pick/ban screen auto-resumes on load with it).
+        if (r.error && payload.resumeOnly === true) return ack?.({ error: 'no_saved' });
+        if (r.error) r = store.massingerStart(room, payload);
+        if (r.error) return ack?.(r);
+        break;
+      }
+      case 'massinger_pick': {
+        const r = store.massingerPick(room, payload);
+        if (r.error) return ack?.(r);
+        break;
+      }
+      case 'massinger_set_turn': {
+        const r = store.massingerSetTurn(room, payload.team);
+        if (r.error) return ack?.(r);
+        break;
+      }
+      case 'massinger_set_teams': {
+        const r = store.massingerSetTeams(room, payload.teams);
+        if (r.error) return ack?.(r);
+        break;
+      }
+      case 'massinger_undo': {
+        const r = store.massingerUndo(room);
+        if (r.error) return ack?.(r);
+        break;
+      }
+      case 'massinger_random_ban': {
+        const r = store.massingerRandomBan(room);
+        if (r.error) return ack?.(r);
+        break;
+      }
+      case 'massinger_cancel':
+        store.massingerCancel(room);
+        break;
       default:
         return ack?.({ error: 'unknown_action' });
+    }
+    // Persist the board so reloads/restarts resume it (cancel deletes it).
+    if (String(payload?.action).startsWith('massinger')) {
+      const m = room.massinger;
+      if (payload.action === 'massinger_cancel') {
+        artifacts.deleteMassinger(room.code, payload.round).catch(() => {});
+      } else if (m) {
+        artifacts.saveMassinger(room.code, m.round, m).catch((e) => console.error('persist massinger failed:', e));
+      }
     }
     emitState(room);
     ack?.({ ok: true });

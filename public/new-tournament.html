@@ -45,7 +45,12 @@
         <option value="20/10/0">20 / 10 / 0 &nbsp;(20 power, get, no negs)</option>
       </select>
       <label class="toggle"><input type="checkbox" id="fmt-bonuses" checked /> Tournament has bonuses</label>
-      <p class="hint">Moderators reading in MODAQ mode will score with this format by default.</p>
+      <label class="toggle"><input type="checkbox" id="fmt-massinger" /> MASSINGER pick/ban before each game
+        (teams alternate protecting and banning subcategories until 20 tossups remain)</label>
+      <label class="select-label" for="fmt-massinger-timer">Pick/ban timer (seconds per pick, 0 = no timer)</label>
+      <input type="number" id="fmt-massinger-timer" value="30" min="0" max="300" style="width:6em" />
+      <p class="hint">Moderators reading in MODAQ mode will score with this format by default.
+        MASSINGER needs packets whose tossups carry a subcategory in their metadata.</p>
     </section>
 
     <section class="panel">

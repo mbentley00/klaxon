@@ -28,6 +28,10 @@ and they're in.
 - **Full tossup loop:** start tossup → buzz → reader judges Power/Correct/Neg/Wrong
   → wrong answers lock that player out and **reopen** buzzers for everyone else.
 - **Live scoreboard** with per‑player manual adjustments and reset.
+- **Roster‑labelled buzzers:** the reader loads a QBJ registration file (or pulls
+  the tournament's), picks the teams playing in the room, and attaches a real
+  player to each connected buzzer. Buzzes then report that name — and can be
+  **read aloud**: first name only, full name when two players in the room share it.
 - **Reconnect‑safe:** identity lives in `localStorage`; a refresh or dropped
   connection rejoins the same room and restores full state.
 - **Tournaments (optional):** group rooms under a tournament code and attach a
@@ -124,6 +128,16 @@ routed to `/modaq?room=CODE`.
 - **Errata:** the MODAQ reader has an **Errata** button to flag a packet
   question (throw it out and/or add a correction). Errata are saved with the
   tournament and shown to the director.
+- **MASSINGER pick/ban:** a tournament can enable the MASSINGER format
+  (creation page → Scoring format). Before each game the moderator runs a
+  pick/ban phase: the two teams alternate **protecting** and **banning**
+  subcategories (from each tossup's packet `metadata`) until 20 tossups
+  remain — a ban removes one question, so a doubled subcategory keeps its
+  other question until banned again; a protected subcategory can't be banned.
+  The moderator controls which team is on the clock and applies each call; a
+  configurable per-pick timer (30 s default) counts down for everyone, with a
+  one-click **Random ban** to enforce it. Players watch the live board on the
+  room page. MODAQ then reads the filtered 20-question packet.
 
 These artifacts persist to disk under `KLAXON_DATA_DIR` (a Fly volume in
 production — see `fly.toml`), so they survive restarts. The realtime buzzer core
@@ -196,6 +210,7 @@ server/
   index.js     HTTP routes + Socket.IO wiring + buzz clamp/reconcile + MODAQ artifact APIs
   store.js     authoritative state: rooms, tournaments, scoring, cycle machine
   artifacts.js disk-backed store for MODAQ rosters/packets/exports/errata (KLAXON_DATA_DIR)
+  qbjroster.js parses a QBJ registration file into the room's buzzer roster
   config.js    all fairness/reliability tunables in one place
   ids.js       room codes + secret tokens
 public/
