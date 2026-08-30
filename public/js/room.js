@@ -422,73 +422,67 @@ function applyState(s) {
 
 // ---- Live scoresheet (read-only) ----
 // The server sends only what it deems safe for players (store.buildPlayerScoresheet):
-// team/player names and the points on questions already read. This just draws it.
+// team/player names and the scoring events up to the question being read. This
+// draws them exactly as MODAQ's own Events panel does for the reader.
 let ssLastKey = '';
 function renderScoresheet(s) {
   const sheet = s.scoresheet;
   const view = $('#scoresheet-view');
   const on = !!sheet && Array.isArray(sheet.teams) && sheet.teams.length === 2;
   view.classList.toggle('hidden', !on);
+  document.body.classList.toggle('has-sheet', on);
   if (!on) { ssLastKey = ''; return; }
   // State broadcasts arrive on every buzz; only redraw when the sheet changed.
-  const key = JSON.stringify([sheet.teams, sheet.rows, sheet.scores]);
+  const key = JSON.stringify([sheet.teams, sheet.rows, sheet.scores, sheet.current, sheet.total]);
   if (key === ssLastKey) return;
   ssLastKey = key;
 
   const [a, b] = sheet.teams;
-  $('#ss-status').textContent = `${a.name} ${sheet.scores[0]} · ${b.name} ${sheet.scores[1]}`;
+  $('#ss-status').textContent = `${a.name}: ${sheet.scores[0]}, ${b.name}: ${sheet.scores[1]}`;
 
   const table = $('#ss-table');
   table.replaceChildren();
-  const fmt = (n) => (n > 0 ? `+${n}` : String(n));
-  const marks = (parts) => parts.map((x) => (x > 0 ? '✓' : '✗')).join('');
-
-  // Header: team A's players, bonus, total | # | team B's players, bonus, total
   const thead = el('thead');
-  const teamRow = el('tr');
-  const nameRow = el('tr');
-  sheet.teams.forEach((t, ti) => {
-    if (ti === 1) {
-      teamRow.append(el('th', { className: 'ss-num' }, '#'));
-      nameRow.append(el('th', { className: 'ss-num' }));
-    }
-    teamRow.append(el('th', { className: 'ss-team', colSpan: t.players.length + 2 }, t.name));
-    for (const p of t.players) nameRow.append(el('th', { className: 'ss-player', title: p }, p));
-    nameRow.append(el('th', { className: 'ss-bonus' }, 'B'));
-    nameRow.append(el('th', { className: 'ss-total' }, 'Tot'));
-  });
-  thead.append(teamRow, nameRow);
+  const hr = el('tr');
+  hr.append(el('th', { className: 'ss-num' }, '#'), el('th', { className: 'ss-ev' }, 'Events'));
+  thead.append(hr);
 
+  const byN = new Map(sheet.rows.map((r) => [r.n, r]));
+  const total = Math.max(sheet.total || 0, sheet.rows.length);
   const tbody = el('tbody');
-  for (const row of sheet.rows) {
-    const tr = el('tr', { className: row.replaced ? 'ss-replaced' : '' });
-    sheet.teams.forEach((t, ti) => {
-      if (ti === 1) tr.append(el('td', { className: 'ss-num' }, String(row.n)));
-      for (const p of t.players) {
-        const mine = row.buzzes.filter((z) => z.team === ti && z.player === p);
-        const cls = mine.some((z) => z.points < 0) ? 'ss-neg' : mine.some((z) => z.points > 0) ? 'ss-get' : '';
-        tr.append(el('td', { className: `ss-cell ${cls}` }, mine.length ? mine.map((z) => fmt(z.points)).join(' ') : ''));
+  let carried = [0, 0];
+  let currentRow = null;
+  for (let n = 1; n <= total; n++) {
+    const row = byN.get(n);
+    const tr = el('tr', { className: n === sheet.current ? 'ss-current' : '' });
+    const num = el('td', { className: 'ss-num' });
+    num.append(n === sheet.current ? el('u', {}, String(n)) : String(n));
+    const ev = el('td', { className: 'ss-ev' });
+    if (row) {
+      // Same order and wording as MODAQ's cycle items.
+      if (row.thrownOut) ev.append(el('div', { className: 'ss-item' }, `Threw out tossup #${row.thrownOut}`));
+      for (const z of row.buzzes) {
+        const team = sheet.teams[z.team]?.name ?? '';
+        const desc = z.points > 0 ? `for ${z.points} ✓` : `for ${z.points} ✗`;
+        ev.append(el('div', { className: 'ss-item' }, `${z.player} (${team}) ${desc}`));
       }
-      const bonus = row.bonus && row.bonus.team === ti ? row.bonus : null;
-      const bounce = row.bonus && row.bonus.team !== ti ? row.bonus.bounceback : 0;
-      const bCell = el('td', { className: 'ss-bonus' });
-      if (bonus) {
-        bCell.append(String(bonus.total), el('span', { className: 'ss-parts' }, ' ' + marks(bonus.parts)));
-      } else if (bounce) {
-        bCell.textContent = `↩${bounce}`;
+      if (row.bonus) {
+        const team = sheet.teams[row.bonus.team]?.name ?? '';
+        const icons = row.bonus.parts.map((p) => (p > 0 ? '✓' : '✗')).join('');
+        let text = `${team} ${row.bonus.total} on bonus (${icons})`;
+        if (row.bonus.bounceback) text += ` (stolen for ${row.bonus.bounceback} points)`;
+        ev.append(el('div', { className: 'ss-item' }, text));
       }
-      tr.append(bCell);
-      tr.append(el('td', { className: 'ss-total' }, String(row.scores[ti])));
-    });
+      carried = row.scores;
+    }
+    ev.append(el('div', { className: 'ss-score-line' }, `(${carried[0]} - ${carried[1]})`));
+    tr.append(num, ev);
     tbody.append(tr);
-  }
-  if (!sheet.rows.length) {
-    const tr = el('tr', { className: 'ss-empty' });
-    const colSpan = sheet.teams.reduce((n, t) => n + t.players.length + 2, 1);
-    tr.append(el('td', { colSpan }, 'No questions finished yet.'));
-    tbody.append(tr);
+    if (n === sheet.current) currentRow = tr;
   }
   table.append(thead, tbody);
+  // Keep the question being read in view, as MODAQ does for the reader.
+  if (currentRow) currentRow.scrollIntoView({ block: 'nearest' });
 }
 
 // ---- MASSINGER pick/ban board (read-only mirror) ----

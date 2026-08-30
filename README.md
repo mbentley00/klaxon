@@ -154,13 +154,13 @@ routed to `/modaq?room=CODE`.
   editing the same question in the same second. "Change round / teams" retires
   the shared copy.
 - **Live scoresheet for players:** while the moderator reads, everyone in the
-  room sees a scoresheet of the game (per-player tossup points, bonus parts,
-  running totals). It is built on the server from the reader's game and is a
-  strict whitelist: no question text, answers, buzz positions, protest notes,
-  or packet names ever reach a player, and only questions *before* the one the
-  reader is on appear — so a stray click, a jump ahead in the question chooser,
-  or Next pressed twice reveals nothing, and the rows retract as soon as the
-  reader navigates back. Tournament-level option (creation page → Scoring
+  room sees MODAQ's Events panel — the same "# / Events" table the reader has
+  on the right, with the question being read highlighted. It is built on the
+  server from the reader's game and is a strict whitelist: no question text,
+  answers, buzz positions, protest notes, or packet names ever reach a player,
+  and nothing past the question the reader is on is sent — so a stray click,
+  a jump ahead in the question chooser, or Next pressed twice reveals nothing,
+  and the rows retract as soon as the reader navigates back. Tournament-level option (creation page → Scoring
   format, or the director console), on by default; rooms outside a tournament
   always show it.
 - **MASSINGER pick/ban:** a tournament can enable the MASSINGER format

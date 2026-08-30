@@ -397,22 +397,29 @@ button.active { background: var(--accent); color: #fff; }
 .roster-alerts h5 { margin: 0 0 .4em; font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--bad); }
 .roster-alerts ul { margin: 0 0 .5em; padding-left: 1.1em; font-size: .85rem; }
 
-/* Live scoresheet (players' view of the MODAQ game). */
-.scoresheet .ss-scroll { overflow-x: auto; }
-.scoresheet table { border-collapse: collapse; font-size: .8rem; min-width: 100%; }
-.scoresheet th, .scoresheet td { padding: 2px 5px; text-align: center; border-bottom: 1px solid #e4e4e4; white-space: nowrap; }
-.scoresheet th.ss-team { background: var(--ink); color: #fff; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
-.scoresheet th.ss-player { max-width: 6.5em; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
-.scoresheet .ss-num { color: var(--muted); font-weight: 700; border-left: 1.5px solid var(--ink); border-right: 1.5px solid var(--ink); }
-.scoresheet .ss-total { font-weight: 700; background: #f4f4f0; }
-.scoresheet .ss-bonus { color: var(--muted); }
-.scoresheet .ss-parts { font-size: .68rem; letter-spacing: .05em; }
-.scoresheet .ss-get { color: var(--good, #1e7d32); font-weight: 700; }
-.scoresheet .ss-neg { color: var(--bad); font-weight: 700; }
-.scoresheet tr.ss-replaced .ss-num::after { content: '*'; }
-.scoresheet .ss-empty td { color: var(--muted); text-align: left; padding: 6px 4px; }
-
-/* "Read with MODAQ" offer on a plain room's reader view. */
-.modaq-offer .row { align-items: center; }
-.modaq-offer .hint { flex: 1; min-width: 12em; margin: 0; }
-body.compact .modaq-offer { display: none; }
+/* Live scoresheet: MODAQ's Events panel, as the reader sees it, on the right. */
+body.has-sheet .stage { max-width: 1100px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+body.has-sheet .stage > * { grid-column: 1; }
+body.has-sheet .stage > #scoresheet-view { grid-column: 2; grid-row: 1 / span 40; position: sticky; top: 64px; }
+.scoresheet {
+  font-family: "Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+  color: #323130; font-size: 14px;
+}
+.scoresheet .ss-score { font-weight: 600; font-size: 1.1rem; text-align: center; margin: 0 0 10px; color: #201f1e; }
+.scoresheet .ss-scroll { border: 1px solid #000; max-height: 90vh; overflow-y: auto; background: #fff; }
+.scoresheet table.ss-events { width: 100%; border-collapse: collapse; }
+.scoresheet .ss-events th {
+  text-align: left; font-weight: 600; font-size: 14px; padding: 11px 12px 11px; color: #323130;
+  border-bottom: 1px solid #edebe9; background: #fff; position: sticky; top: 0;
+}
+.scoresheet .ss-events td { padding: 11px 12px; vertical-align: top; border-bottom: 1px solid #edebe9; line-height: 20px; }
+.scoresheet .ss-events .ss-num { width: 2.6em; font-weight: 600; color: #323130; }
+.scoresheet .ss-events tr.ss-current td { background: #edebe9; }
+.scoresheet .ss-item { margin-bottom: 4px; }
+.scoresheet .ss-score-line { color: #323130; }
+body.compact .scoresheet { display: none; }
+@media (max-width: 900px) {
+  body.has-sheet .stage { grid-template-columns: 1fr; }
+  body.has-sheet .stage > #scoresheet-view { grid-column: 1; grid-row: auto; position: static; }
+  .scoresheet .ss-scroll { max-height: 50vh; }
+}

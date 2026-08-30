@@ -95,10 +95,12 @@
     <!-- Live scoresheet of the MODAQ game being read. Built by the server from
          the reader's game and limited to questions already read (see
          store.buildPlayerScoresheet), so nothing here is ahead of the room. -->
-    <section id="scoresheet-view" class="panel scoresheet hidden">
-      <h3>Scoresheet <span id="ss-status" class="muted-count"></span></h3>
-      <div class="ss-scroll"><table id="ss-table"></table></div>
-    </section>
+    <aside id="scoresheet-view" class="scoresheet hidden" aria-label="Scoresheet">
+      <div id="ss-status" class="ss-score"></div>
+      <div class="ss-scroll">
+        <table id="ss-table" class="ss-events"></table>
+      </div>
+    </aside>
 
     <!-- MASSINGER pick/ban board (tournament games only) — mirrors the board
          the moderator is driving so both teams watch picks land live. -->

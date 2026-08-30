@@ -821,11 +821,13 @@ export function publicState(room) {
 //
 // So the sheet holds only: team + player names, and per question (a) which
 // players buzzed and what it was worth, (b) the bonus parts' points, and (c)
-// running totals — and ONLY for questions BEFORE the one the reader is on.
-// A reader who jumps ahead by mistake (Next twice, the question chooser, a
-// stray click that scores a later tossup) reveals nothing: those rows are
-// empty or absent, and disappear again the moment they navigate back, because
-// the sheet is rebuilt from scratch on every update rather than accumulated.
+// running totals — and ONLY up to the question the reader is on (the events
+// on that one are what the room is hearing judged live, exactly as MODAQ's
+// own Events panel shows them). A reader who jumps ahead by mistake (Next
+// twice, the question chooser, a stray click that scores a later tossup)
+// reveals nothing: rows past the current question are never sent, and the
+// sheet is rebuilt from scratch on every update rather than accumulated, so
+// it retracts the moment they navigate back.
 const SCORESHEET_MAX_ROWS = 100;
 const SCORESHEET_MAX_PLAYERS = 12;
 const label = (v) => String(v ?? '').slice(0, 80);
@@ -843,10 +845,11 @@ export function buildPlayerScoresheet(match, currentQuestion) {
   if (teams.length < 2 || teams.some((t) => !t.name)) return null;
   const teamIndex = (name) => teams.findIndex((t) => t.name === label(name));
 
-  // The question being read is never shown — a buzz on it is live and may be
-  // undone; the players hear the result as it happens.
   const cur = Number(currentQuestion);
-  const through = Number.isFinite(cur) && cur >= 1 ? Math.floor(cur) - 1 : 0;
+  const through = Number.isFinite(cur) && cur >= 1 ? Math.floor(cur) : 0;
+  // How many tossup rows the game has (MODAQ lists them all, later ones with
+  // the score carried forward). Never fewer than the rows we send.
+  const total = Math.max(through, Math.min(SCORESHEET_MAX_ROWS, Math.floor(Number(match.tossups_read)) || 0));
 
   const questions = Array.isArray(match.match_questions) ? match.match_questions : [];
   const totals = [0, 0];
@@ -877,18 +880,22 @@ export function buildPlayerScoresheet(match, currentQuestion) {
         bonus = { team: winner.team, parts, total: got, bounceback: bounced || 0 };
       }
     }
+    // A thrown-out tossup is something the room witnessed; nothing about the
+    // replacement itself is carried. (In the QBJ the replacement's number is
+    // the row's tossup number, so the thrown-out one is the number before.)
+    const replaced = q.replacement_tossup_question != null;
+    const thrownOut = replaced ? Math.max(1, pts(q.tossup_question?.question_number) - 1) : null;
     rows.push({
       n,
       buzzes,
       bonus,
-      // A replaced tossup is something the room witnessed; nothing about the
-      // replacement itself is carried.
-      replaced: q.replacement_tossup_question != null,
+      replaced,
+      thrownOut,
       scores: [totals[0], totals[1]]
     });
   }
   rows.sort((a, b) => a.n - b.n);
-  return { teams, rows, through, current: through + 1, scores: [totals[0], totals[1]], at: Date.now() };
+  return { teams, rows, through, current: through, total, scores: [totals[0], totals[1]], at: Date.now() };
 }
 
 // The reader's page pushes its game on every change; keep the players' view.
