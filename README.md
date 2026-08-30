@@ -152,7 +152,10 @@ routed to `/modaq?room=CODE`.
   can score buzzes and bonus parts; each side's changes appear on the other
   within a second. Whole-game last-write-wins, so two people shouldn't be
   editing the same question in the same second. "Change round / teams" retires
-  the shared copy.
+  the shared copy. Once the game is exported an **End game →** button takes the
+  reader back to the plain buzzer page (settings, players, invite links) and
+  turns MODAQ mode off for the room; players can be removed straight from the
+  buzz panel's player list (×).
 - **Live scoresheet for players:** while the moderator reads, everyone in the
   room sees MODAQ's Events panel — the same "# / Events" table the reader has
   on the right, with the question being read highlighted. It is built on the
