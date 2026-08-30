@@ -65,6 +65,7 @@ async function init() {
     saveRooms(known);
     initLinks(t);
     initAutoRelease(t);
+    initPlayerScoresheet(t);
     initMessaging(t);
     initPlayerPage();
   } catch {
@@ -127,6 +128,24 @@ function initMessaging(t) {
     }
   };
   $('#msg-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#msg-send').click(); });
+}
+
+// Players' live scoresheet in MODAQ-mode rooms (default on).
+function initPlayerScoresheet(t) {
+  const cb = $('#player-scoresheet');
+  if (!cb) return;
+  cb.checked = t.playerScoresheet !== false;
+  cb.onchange = async () => {
+    try {
+      await api('PUT', `/api/tournaments/${code}/player-scoresheet`, { directorToken, enabled: cb.checked });
+      msay(cb.checked
+        ? 'Players now see a live scoresheet of questions already read.'
+        : 'Player scoresheet off.');
+    } catch (e) {
+      msay('Could not change the player scoresheet: ' + e.message, false);
+      cb.checked = !cb.checked;
+    }
+  };
 }
 
 // Auto-release: when every room's game in a round is final, the server makes
@@ -328,6 +347,7 @@ function initModaq() {
     return;
   }
   refreshRoster();
+  refreshRosterAlerts();
   refreshPackets();
   refreshExports();
   refreshErrata();
@@ -408,7 +428,9 @@ function initModaq() {
   // Stats sync live from moderators, so keep the exports + errata + protest
   // lists fresh without the director having to click Refresh. Packets refresh
   // too, so an auto-release shows up in the list and on the release button.
-  setInterval(() => { refreshExports(); refreshErrata(); refreshProtests(); refreshPackets(); }, 15000);
+  setInterval(() => {
+    refreshExports(); refreshErrata(); refreshProtests(); refreshPackets(); refreshRosterAlerts();
+  }, 15000);
 }
 
 async function refreshRoster() {
@@ -417,6 +439,29 @@ async function refreshRoster() {
     $('#roster-status').textContent = roster ? '· uploaded' : '· none yet';
   } catch { /* leave as-is */ }
 }
+
+// Players who joined a roster room under a name the roster doesn't have —
+// a sub, a late addition, or a typo the director may want to fix.
+async function refreshRosterAlerts() {
+  try {
+    const { alerts } = await api('GET', `/api/tournaments/${code}/roster-alerts?directorToken=${qt(directorToken)}`);
+    const box = $('#roster-alerts');
+    box.classList.toggle('hidden', alerts.length === 0);
+    $('#roster-alerts-count').textContent = alerts.length ? `(${alerts.length})` : '';
+    $('#roster-alerts-list').replaceChildren(...alerts.slice().reverse().map((a) => {
+      const when = new Date(a.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      return el('li', {},
+        el('strong', { textContent: a.name }),
+        el('span', { className: 'muted-count', textContent:
+          ` ${a.team ? `· ${a.team} ` : ''}· room ${a.room} · ${when}` }));
+    }));
+  } catch { /* leave as-is */ }
+}
+
+$('#roster-alerts-clear').onclick = async () => {
+  await api('DELETE', `/api/tournaments/${code}/roster-alerts`, { directorToken });
+  refreshRosterAlerts();
+};
 
 async function refreshPackets() {
   try {

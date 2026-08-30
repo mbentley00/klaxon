@@ -244,6 +244,42 @@ export async function getPacket(bucket, round) {
   return readTextOrNull(path.join(bucketDir(bucket), 'packets', `${name}.json`));
 }
 
+// --- off-roster joins -------------------------------------------------------
+// Players who joined a roster room under a name the roster doesn't have. Kept
+// with the tournament so a director who was away still sees them; capped so a
+// misbehaving room can't grow the file without bound.
+const ROSTER_ALERT_LIMIT = 200;
+
+function rosterAlertsFile(bucket) {
+  return path.join(bucketDir(bucket), 'roster-alerts.json');
+}
+
+export async function getRosterAlerts(bucket) {
+  const text = await readTextOrNull(rosterAlertsFile(bucket));
+  if (text == null) return [];
+  try {
+    const list = JSON.parse(text);
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function addRosterAlert(bucket, alert) {
+  const list = await getRosterAlerts(bucket);
+  // One entry per player per room: a reconnect isn't news.
+  const key = (a) => `${a.room}|${a.playerId}`;
+  const kept = list.filter((a) => key(a) !== key(alert));
+  kept.push(alert);
+  const trimmed = kept.slice(-ROSTER_ALERT_LIMIT);
+  await writeAtomic(rosterAlertsFile(bucket), JSON.stringify(trimmed, null, 2));
+  return trimmed;
+}
+
+export async function clearRosterAlerts(bucket) {
+  await writeAtomic(rosterAlertsFile(bucket), '[]');
+}
+
 // --- MASSINGER pick/ban boards ---------------------------------------------
 // The finished (or in-progress) pick/ban board for one room+round. Always
 // stored under the ROOM bucket — rooms in the same tournament round run

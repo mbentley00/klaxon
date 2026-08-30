@@ -389,3 +389,30 @@ button.active { background: var(--accent); color: #fff; }
 /* Tournament code in the room's tournament strip: a real link. */
 .tournament h3 .tlink { color: var(--accent); text-decoration: none; border-bottom: 1.5px solid var(--accent); }
 .tournament h3 .tlink:hover { color: var(--ink); border-bottom-color: var(--ink); }
+
+/* Roster join gate: pick your team and yourself. */
+.gate-roster { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.gate-roster select { width: 100%; }
+.roster-alerts { border: 1.5px solid var(--bad); border-radius: 8px; padding: 8px 10px; margin-top: 10px; background: #fff6f5; }
+.roster-alerts h5 { margin: 0 0 .4em; font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--bad); }
+.roster-alerts ul { margin: 0 0 .5em; padding-left: 1.1em; font-size: .85rem; }
+
+/* Live scoresheet (players' view of the MODAQ game). */
+.scoresheet .ss-scroll { overflow-x: auto; }
+.scoresheet table { border-collapse: collapse; font-size: .8rem; min-width: 100%; }
+.scoresheet th, .scoresheet td { padding: 2px 5px; text-align: center; border-bottom: 1px solid #e4e4e4; white-space: nowrap; }
+.scoresheet th.ss-team { background: var(--ink); color: #fff; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+.scoresheet th.ss-player { max-width: 6.5em; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.scoresheet .ss-num { color: var(--muted); font-weight: 700; border-left: 1.5px solid var(--ink); border-right: 1.5px solid var(--ink); }
+.scoresheet .ss-total { font-weight: 700; background: #f4f4f0; }
+.scoresheet .ss-bonus { color: var(--muted); }
+.scoresheet .ss-parts { font-size: .68rem; letter-spacing: .05em; }
+.scoresheet .ss-get { color: var(--good, #1e7d32); font-weight: 700; }
+.scoresheet .ss-neg { color: var(--bad); font-weight: 700; }
+.scoresheet tr.ss-replaced .ss-num::after { content: '*'; }
+.scoresheet .ss-empty td { color: var(--muted); text-align: left; padding: 6px 4px; }
+
+/* "Read with MODAQ" offer on a plain room's reader view. */
+.modaq-offer .row { align-items: center; }
+.modaq-offer .hint { flex: 1; min-width: 12em; margin: 0; }
+body.compact .modaq-offer { display: none; }

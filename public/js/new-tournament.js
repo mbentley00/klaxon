@@ -25,6 +25,7 @@ $('#create-tournament').addEventListener('click', async () => {
       allowWithdraw: $('#t-def-withdraw').checked,
       autoClear: $('#t-def-autoclear').checked,
       requireTeam: $('#t-def-require-team').checked,
+      rosterJoin: $('#t-def-roster-join').checked,
       playerAlerts: $('#t-def-player-alerts').checked,
       modaqMode: modaqMode !== 'off',
       modaqLite: modaqMode === 'lite'
@@ -33,7 +34,8 @@ $('#create-tournament').addEventListener('click', async () => {
       hasBonuses: $('#fmt-bonuses').checked,
       tossupScheme: $('#fmt-scheme').value,
       massinger: $('#fmt-massinger').checked,
-      massingerTimerSec: Number($('#fmt-massinger-timer').value)
+      massingerTimerSec: Number($('#fmt-massinger-timer').value),
+      massingerControl: $('#fmt-massinger-control').value
     };
     const r = await api('POST', '/api/tournaments', {
       name: $('#tournament-name').value.trim() || undefined,
@@ -41,7 +43,8 @@ $('#create-tournament').addEventListener('click', async () => {
       format,
       requireReaderAccounts: $('#t-require-accounts').checked,
       date: $('#t-date').value || undefined,
-      listed: $('#t-listed').checked
+      listed: $('#t-listed').checked,
+      playerScoresheet: $('#fmt-player-scoresheet').checked
     });
     remember('directorToken:' + r.code, r.directorToken);
 

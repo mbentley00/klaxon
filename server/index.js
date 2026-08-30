@@ -103,14 +103,21 @@ app.get('/api/rooms/:code', (req, res) => {
   if (!room) return res.status(404).json({ error: 'not_found' });
   res.json({
     code: room.code, name: room.name, tournamentCode: room.tournamentCode,
-    // The join gate needs this before joining, to ask for a team up front.
-    requireTeam: !!room.settings.requireTeam
+    // The join gate needs these before joining: whether a team is required,
+    // and (when the room asks players to identify from the roster) the teams
+    // and players to choose from.
+    requireTeam: !!room.settings.requireTeam,
+    rosterJoin: !!room.settings.rosterJoin,
+    roster: store.joinRoster(room)
   });
 });
 
 app.post('/api/tournaments', (req, res) => {
   const { name, schedule, defaults, format, requireReaderAccounts, date, listed } = req.body || {};
-  const t = store.createTournament({ name, schedule, defaults, format, requireReaderAccounts, date, listed });
+  const t = store.createTournament({
+    name, schedule, defaults, format, requireReaderAccounts, date, listed,
+    playerScoresheet: req.body?.playerScoresheet !== false
+  });
   res.json({ code: t.code, directorToken: t.directorToken, name: t.name, defaults: t.roomDefaults, format: t.format });
 });
 
@@ -126,7 +133,8 @@ app.get('/api/tournaments/:code', (req, res) => {
     code: t.code, name: t.name, date: t.date || '', schedule: t.schedule, rooms: [...t.roomCodes],
     defaults: t.roomDefaults, format: t.format, requireReaderAccounts: !!t.requireReaderAccounts,
     links: t.links || { schedule: '', discord: '' },
-    autoRelease: t.autoRelease === true
+    autoRelease: t.autoRelease === true,
+    playerScoresheet: t.playerScoresheet !== false
   });
 });
 
@@ -281,6 +289,16 @@ app.post('/api/tournaments/:code/message', (req, res) => {
   }
   if (rooms === 0) return res.status(404).json({ error: 'no_matching_rooms' });
   res.json({ ok: true, rooms, delivered });
+});
+
+// Toggle the live scoresheet players see in MODAQ-mode rooms.
+app.put('/api/tournaments/:code/player-scoresheet', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const on = store.setPlayerScoresheet(t, req.body?.enabled !== false);
+  // Rooms show or hide the sheet straight away.
+  for (const code of t.roomCodes) { const room = store.getRoom(code); if (room) emitState(room); }
+  res.json({ playerScoresheet: on });
 });
 
 // Toggle automatic packet release (see maybeAutoRelease).
@@ -533,6 +551,22 @@ app.get('/api/rooms/:code/packets/:round', ah(async (req, res) => {
   res.type('application/json').send(text);
 }));
 
+// Players who joined without being on the roster, for the director console.
+app.get('/api/tournaments/:code/roster-alerts', ah(async (req, res) => {
+  const t = store.getTournament(req.params.code);
+  if (!t) return res.status(404).json({ error: 'not_found' });
+  if (req.query.directorToken !== t.directorToken) return res.status(403).json({ error: 'forbidden' });
+  res.json({ alerts: await artifacts.getRosterAlerts({ kind: 't', code: t.code }) });
+}));
+
+app.delete('/api/tournaments/:code/roster-alerts', ah(async (req, res) => {
+  const t = store.getTournament(req.params.code);
+  if (!t) return res.status(404).json({ error: 'not_found' });
+  if (req.body?.directorToken !== t.directorToken) return res.status(403).json({ error: 'forbidden' });
+  await artifacts.clearRosterAlerts({ kind: 't', code: t.code });
+  res.json({ ok: true });
+}));
+
 // The persisted MASSINGER pick/ban board for a round (null body if none).
 // The moderator page uses it on reload to re-apply the ban filter to the
 // packet before handing it to MODAQ.
@@ -775,6 +809,25 @@ const io = new Server(httpServer, {
 // ---------------------------------------------------------------------------
 const sock = new Map(); // socket.id -> { roomCode, playerId, minRtt }
 
+// A player joined a roster room without picking themselves out of the roster.
+// Kept with the tournament (so the director sees it whenever they look) and
+// pushed live to anyone watching the console.
+async function recordOffRosterJoin(room, member) {
+  const alert = {
+    room: room.code,
+    playerId: member.id,
+    name: member.name,
+    team: member.team || member.assignedTeam || '',
+    at: Date.now()
+  };
+  if (room.tournamentCode) {
+    await artifacts.addRosterAlert({ kind: 't', code: room.tournamentCode }, alert);
+  }
+  io.to(room.code).emit('roster_alert', alert);
+  emitToStaff(room.code, 'roster_alert', alert);
+  console.log(`off-roster join: ${member.name} in room ${room.code}`);
+}
+
 // --- MASSINGER: server-side pick clock --------------------------------------
 // The per-pick timer has to be enforced here, not in the moderator's browser:
 // the teams are picking from their own pages, and a closed laptop must not
@@ -927,8 +980,16 @@ io.on('connection', (socket) => {
       playerId: payload?.playerId,
       name: payload?.name,
       role,
-      team: payload?.team
+      team: payload?.team,
+      rosterTeam: payload?.rosterTeam,
+      rosterPlayer: payload?.rosterPlayer
     });
+
+    // Someone joined a roster room under a name the roster doesn't have: the
+    // director wants to know (a sub, a late addition, or a typo to fix).
+    if (role === 'player' && member.offRoster && room.settings.rosterJoin) {
+      recordOffRosterJoin(room, member).catch((e) => console.error('off-roster alert failed:', e));
+    }
 
     // A player who joins after the teams were set still gets linked to their
     // MODAQ player, so their buzzes report the right name.
@@ -1117,6 +1178,23 @@ io.on('connection', (socket) => {
         if (r.error) return ack?.(r);
         break;
       }
+      // Put a connected buzzer on a team by hand, and name a team's captain.
+      // Both are moderator calls: they decide who is allowed to pick.
+      case 'set_member_team': {
+        const r = store.setMemberTeam(room, payload.playerId, payload.team);
+        if (r.error) return ack?.(r);
+        break;
+      }
+      case 'set_captain': {
+        const r = store.setCaptain(room, payload.playerId, payload.captain !== false);
+        if (r.error) return ack?.(r);
+        break;
+      }
+      case 'massinger_set_control': {
+        const r = store.massingerSetControl(room, payload.control);
+        if (r.error) return ack?.(r);
+        break;
+      }
       case 'massinger_reset_subcat': {
         const r = store.massingerResetSubcat(room, payload.label);
         if (r.error) return ack?.(r);
@@ -1130,6 +1208,13 @@ io.on('connection', (socket) => {
       case 'set_modaq_teams': {
         const r = store.setRosterFromGameTeams(room, payload.teams);
         if (r.error) return ack?.(r);
+        break;
+      }
+      // The reader's MODAQ game, on every change: the server cuts it down to
+      // the player-safe scoresheet (see store.buildPlayerScoresheet) before
+      // it goes anywhere near a player. `qbj: null` clears it.
+      case 'modaq_game': {
+        store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion);
         break;
       }
       default:

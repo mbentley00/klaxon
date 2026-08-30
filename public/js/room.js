@@ -92,6 +92,77 @@ function applyTeamRequirement(required) {
   team.required = !!required;
 }
 
+// ---- roster join ----
+// When the room hands out a roster, players identify themselves from it rather
+// than typing: their buzzes then carry the roster name from the first press,
+// with nothing for the moderator to link up by hand. "Not on the roster" is
+// always offered — subs exist — and tells the director someone new turned up.
+const NOT_ON_ROSTER = '\u0000other';
+
+function renderRosterGate(info) {
+  const wrap = $('#gate-roster');
+  const roster = info?.roster;
+  const on = !!info?.rosterJoin && !!roster?.teams?.length;
+  wrap.classList.toggle('hidden', !on);
+  if (!on) return false;
+
+  const teamSel = $('#gate-roster-team');
+  teamSel.replaceChildren(
+    el('option', { value: '', textContent: 'Choose your team…' }),
+    ...roster.teams.map((t) => el('option', { value: t.name, textContent: t.name })),
+    el('option', { value: NOT_ON_ROSTER, textContent: "My team isn't listed" })
+  );
+  const remembered = recall('team');
+  if (remembered && roster.teams.some((t) => t.name === remembered)) teamSel.value = remembered;
+
+  const fillPlayers = () => {
+    const team = roster.teams.find((t) => t.name === teamSel.value);
+    const playerSel = $('#gate-roster-player');
+    playerSel.replaceChildren(
+      el('option', { value: '', textContent: team ? 'Choose your name…' : 'Pick a team first' }),
+      ...(team?.players || []).map((p) => el('option', {
+        value: p.name,
+        textContent: p.taken ? `${p.name} (already buzzing)` : p.name
+      })),
+      el('option', { value: NOT_ON_ROSTER, textContent: "I'm not on the roster" })
+    );
+    const mine = recall('name');
+    if (mine && team?.players.some((p) => p.name === mine)) playerSel.value = mine;
+    updateRosterGate();
+  };
+  teamSel.onchange = fillPlayers;
+  $('#gate-roster-player').onchange = updateRosterGate;
+  fillPlayers();
+  return true;
+}
+
+// Typing a name is only for people who said they aren't on the roster.
+function updateRosterGate() {
+  const usingRoster = !$('#gate-roster').classList.contains('hidden');
+  if (!usingRoster) return;
+  const teamSel = $('#gate-roster-team');
+  const playerSel = $('#gate-roster-player');
+  const custom = teamSel.value === NOT_ON_ROSTER || playerSel.value === NOT_ON_ROSTER;
+  $('#gate-name').classList.toggle('hidden', !custom);
+  $('#gate-team').classList.toggle('hidden', teamSel.value !== NOT_ON_ROSTER);
+  $('#gate-name').placeholder = 'Your name';
+  $('#gate-msg').textContent = custom
+    ? "You'll join as a guest and the tournament director will be told you're not on the roster."
+    : '';
+}
+
+// What the gate should send: either a roster identity or a typed name.
+function rosterGateChoice() {
+  if ($('#gate-roster').classList.contains('hidden')) return null;
+  const team = $('#gate-roster-team').value;
+  const player = $('#gate-roster-player').value;
+  if (team === '' || player === '') return { error: 'incomplete' };
+  if (team === NOT_ON_ROSTER || player === NOT_ON_ROSTER) {
+    return { offRoster: true, team: team === NOT_ON_ROSTER ? $('#gate-team').value.trim() : team };
+  }
+  return { rosterTeam: team, rosterPlayer: player };
+}
+
 function showGate(mode, staffRole) {
   $('#loading').classList.add('hidden');
   const gate = $('#gate');
@@ -114,13 +185,23 @@ function showGate(mode, staffRole) {
     : 'Moderator? Sign in to read';
   $('#gate-request').classList.add('hidden'); // only offered after an unapproved join attempt
   $('#gate-name').focus();
-  if (!staff) loadRoomInfo().then((info) => applyTeamRequirement(info.requireTeam));
+  if (!staff) {
+    loadRoomInfo().then((info) => {
+      applyTeamRequirement(info.requireTeam);
+      renderRosterGate(info);
+    });
+  } else {
+    $('#gate-roster').classList.add('hidden');
+  }
 }
 
 // ---- join flow ----
-function doJoin(role, name, team) {
+function doJoin(role, name, team, roster) {
   socket.emit('join', {
     roomCode: code, playerId: playerId(), name, team, role,
+    // A player who picked themselves out of the roster is linked on join.
+    rosterTeam: roster?.rosterTeam,
+    rosterPlayer: roster?.rosterPlayer,
     staffToken: isStaffRole(role) ? recall('staffToken:' + code) : undefined,
     // A logged-in account a director approved for this tournament is a
     // moderator credential too — no reader link needed.
@@ -180,7 +261,25 @@ $('#gate-join').onclick = () => {
     if (name) remember('name', name);
     doJoin(gate.dataset.staffRole, name || undefined);
   } else {
-    const team = $('#gate-team').value.trim();
+    const choice = rosterGateChoice();
+    if (choice?.error === 'incomplete') {
+      $('#gate-msg').textContent = 'Pick your team and your name to join.';
+      return;
+    }
+    if (choice?.rosterPlayer) {
+      remember('name', choice.rosterPlayer);
+      remember('team', choice.rosterTeam);
+      doJoin('player', choice.rosterPlayer, choice.rosterTeam, choice);
+      return;
+    }
+    // Typed their own name: either the room has no roster, or they said they
+    // aren't on it (which the server reports to the director).
+    const team = choice?.offRoster ? choice.team : $('#gate-team').value.trim();
+    if (!name && choice?.offRoster) {
+      $('#gate-msg').textContent = 'Enter the name you want on your buzzer.';
+      $('#gate-name').focus();
+      return;
+    }
     if (!team && roomInfo?.requireTeam) {
       $('#gate-msg').textContent = 'This room requires a team name.';
       $('#gate-team').focus();
@@ -240,6 +339,9 @@ function enterStage(snapshot) {
   $('#stage').classList.remove('hidden');
   const staff = isStaffRole(state.role);
   $('#options-panel').classList.toggle('hidden', !staff);
+  // A plain room's reader gets the MODAQ switch up top (a MODAQ room's reader
+  // is already redirected to /modaq unless they asked for ?plain=1).
+  $('#modaq-offer').classList.toggle('hidden', !staff || !!snapshot?.settings?.modaqMode);
   // The roster is a reader's tool: load it, then label the buzzers below.
   $('#roster-panel').classList.toggle('hidden', !staff);
   // Everyone sees who's in the room; only staff get the moderation controls.
@@ -291,6 +393,15 @@ socket.on('buzzer_reset', () => {
 // The instant a buzz lands, everyone hears it (the state update renders order).
 socket.on('buzz_pending', () => playBuzz());
 
+// Someone joined a roster room who isn't on the roster: tell the staff in the
+// room (the director sees the same thing in their console).
+socket.on('roster_alert', (alert) => {
+  if (!isStaffRole(state.role) || !alert) return;
+  const banner = $('#stuck-banner');
+  banner.classList.remove('hidden');
+  banner.textContent = `${alert.name}${alert.team ? ` (${alert.team})` : ''} joined but isn't on the roster.`;
+});
+
 function applyState(s) {
   if (!s) return;
   state.snapshot = s;
@@ -303,9 +414,81 @@ function applyState(s) {
   renderRoster(s);
   renderPlayers(s);
   renderMassinger(s);
+  renderScoresheet(s);
   announceBuzz(s);
   if (roomInfo) roomInfo.requireTeam = !!s.settings?.requireTeam;
   if (s.tournamentCode) loadTournament(s.tournamentCode);
+}
+
+// ---- Live scoresheet (read-only) ----
+// The server sends only what it deems safe for players (store.buildPlayerScoresheet):
+// team/player names and the points on questions already read. This just draws it.
+let ssLastKey = '';
+function renderScoresheet(s) {
+  const sheet = s.scoresheet;
+  const view = $('#scoresheet-view');
+  const on = !!sheet && Array.isArray(sheet.teams) && sheet.teams.length === 2;
+  view.classList.toggle('hidden', !on);
+  if (!on) { ssLastKey = ''; return; }
+  // State broadcasts arrive on every buzz; only redraw when the sheet changed.
+  const key = JSON.stringify([sheet.teams, sheet.rows, sheet.scores]);
+  if (key === ssLastKey) return;
+  ssLastKey = key;
+
+  const [a, b] = sheet.teams;
+  $('#ss-status').textContent = `${a.name} ${sheet.scores[0]} · ${b.name} ${sheet.scores[1]}`;
+
+  const table = $('#ss-table');
+  table.replaceChildren();
+  const fmt = (n) => (n > 0 ? `+${n}` : String(n));
+  const marks = (parts) => parts.map((x) => (x > 0 ? '✓' : '✗')).join('');
+
+  // Header: team A's players, bonus, total | # | team B's players, bonus, total
+  const thead = el('thead');
+  const teamRow = el('tr');
+  const nameRow = el('tr');
+  sheet.teams.forEach((t, ti) => {
+    if (ti === 1) {
+      teamRow.append(el('th', { className: 'ss-num' }, '#'));
+      nameRow.append(el('th', { className: 'ss-num' }));
+    }
+    teamRow.append(el('th', { className: 'ss-team', colSpan: t.players.length + 2 }, t.name));
+    for (const p of t.players) nameRow.append(el('th', { className: 'ss-player', title: p }, p));
+    nameRow.append(el('th', { className: 'ss-bonus' }, 'B'));
+    nameRow.append(el('th', { className: 'ss-total' }, 'Tot'));
+  });
+  thead.append(teamRow, nameRow);
+
+  const tbody = el('tbody');
+  for (const row of sheet.rows) {
+    const tr = el('tr', { className: row.replaced ? 'ss-replaced' : '' });
+    sheet.teams.forEach((t, ti) => {
+      if (ti === 1) tr.append(el('td', { className: 'ss-num' }, String(row.n)));
+      for (const p of t.players) {
+        const mine = row.buzzes.filter((z) => z.team === ti && z.player === p);
+        const cls = mine.some((z) => z.points < 0) ? 'ss-neg' : mine.some((z) => z.points > 0) ? 'ss-get' : '';
+        tr.append(el('td', { className: `ss-cell ${cls}` }, mine.length ? mine.map((z) => fmt(z.points)).join(' ') : ''));
+      }
+      const bonus = row.bonus && row.bonus.team === ti ? row.bonus : null;
+      const bounce = row.bonus && row.bonus.team !== ti ? row.bonus.bounceback : 0;
+      const bCell = el('td', { className: 'ss-bonus' });
+      if (bonus) {
+        bCell.append(String(bonus.total), el('span', { className: 'ss-parts' }, ' ' + marks(bonus.parts)));
+      } else if (bounce) {
+        bCell.textContent = `↩${bounce}`;
+      }
+      tr.append(bCell);
+      tr.append(el('td', { className: 'ss-total' }, String(row.scores[ti])));
+    });
+    tbody.append(tr);
+  }
+  if (!sheet.rows.length) {
+    const tr = el('tr', { className: 'ss-empty' });
+    const colSpan = sheet.teams.reduce((n, t) => n + t.players.length + 2, 1);
+    tr.append(el('td', { colSpan }, 'No questions finished yet.'));
+    tbody.append(tr);
+  }
+  table.append(thead, tbody);
 }
 
 // ---- MASSINGER pick/ban board (read-only mirror) ----
@@ -324,7 +507,7 @@ function msCountdownText(m) {
 // (or auto-linking) tied us to wins over whatever we typed on the join gate.
 function myTeam(s) {
   const me = (s.members || []).find((x) => x.id === state.me?.id);
-  return me?.rosterTeam || me?.team || '';
+  return me?.effectiveTeam || me?.rosterTeam || me?.assignedTeam || me?.team || '';
 }
 
 const sameTeam = (a, b) => {
@@ -347,12 +530,15 @@ function renderMassinger(s) {
   // makes its own protect/ban here, and the server re-checks that it's really
   // my turn before applying it.
   const me = (s.members || []).find((x) => x.id === state.me?.id);
-  // A pick rewrites the packet, so the server only accepts one from a buzzer
-  // linked to a MODAQ player (see massingerCanPick). Mirror that here so the
-  // buttons only appear when they'd actually work.
-  const linked = !s.roster || !!me?.rosterPlayer;
+  // Mirror the server's rules (massingerCanPick) so the buttons only appear
+  // when a pick would actually be accepted: the room has to know which team
+  // this buzzer is on, and the board's control mode decides who may pick.
+  const vouched = !!me?.rosterPlayer || !!me?.assignedTeam;
   const myTurn = state.role === 'player' && m.status === 'active' && sameTeam(myTeam(s), m.teams[m.turn]);
-  const mine = myTurn && linked;
+  const captainMode = m.control === 'captain';
+  const mine = myTurn && vouched && m.control !== 'moderator' && (!captainMode || me?.isCaptain === true);
+  // Who picks for my team, when I'm not the one who does.
+  const ourCaptain = (s.members || []).find((x) => x.isCaptain && sameTeam(x.effectiveTeam, myTeam(s)));
 
   const remaining = m.subcats.reduce((sum, sc) => sum + (sc.indexes.length - sc.banned), 0);
   const status = $('#ms-status');
@@ -374,9 +560,15 @@ function renderMassinger(s) {
     hint.textContent = m.timerSec > 0
       ? `Pick a subcategory to protect or ban. If the timer runs out, a random ban is made for you.`
       : 'Pick a subcategory to protect or ban.';
-  } else if (myTurn && !linked) {
-    hint.textContent = "It's your team's pick, but this buzzer isn't linked to a player yet — " +
-      'ask the moderator to link you (or to make the pick for you).';
+  } else if (m.control === 'moderator') {
+    hint.textContent = 'The moderator is making every pick — call yours out to them.';
+  } else if (myTurn && !vouched) {
+    hint.textContent = "It's your team's pick, but the room doesn't know which team this buzzer is on — " +
+      'ask the moderator to put you on your team (or to make the pick for you).';
+  } else if (myTurn && captainMode && !me?.isCaptain) {
+    hint.textContent = ourCaptain
+      ? `Your team's picks are made by your captain, ${ourCaptain.rosterPlayer || ourCaptain.name}.`
+      : "Your team's picks are made by its captain — ask the moderator to name one.";
   } else if (state.role === 'player' && myTeam(s)) {
     hint.textContent = `Waiting for ${m.teams[m.turn]} to pick.`;
   } else {
@@ -419,7 +611,9 @@ function renderMassinger(s) {
 
 const MASSINGER_PICK_ERRORS = {
   not_your_turn: "It isn't your team's pick right now.",
-  not_linked: "This buzzer isn't linked to a player yet — ask the moderator to link you.",
+  not_linked: "The room doesn't know which team this buzzer is on — ask the moderator to put you on your team.",
+  moderator_only: 'The moderator is making every pick for this game.',
+  not_captain: "Your team's picks are made by its captain.",
   not_a_player: 'Only players can pick.',
   protected: 'That subcategory is protected — it can\u2019t be banned.',
   exhausted: 'That subcategory has no questions left to ban.',
@@ -890,14 +1084,24 @@ $('#opt-require-team').onchange = (e) =>
 $('#opt-player-alerts').onchange = (e) =>
   socket.emit('reader_action', { action: 'set_options', options: { playerAlerts: e.target.checked } });
 // Switching to a MODAQ mode moves this staff view over to the MODAQ reader.
-$('#opt-modaq-mode')?.addEventListener('change', (e) => {
-  const v = e.target.value; // off | lite | full
+// The switch is acknowledged before navigating so the MODAQ page never lands
+// on a room that still says "standard buzzer" (it would bounce straight back).
+function setModaqMode(v) { // off | lite | full
   const options = v === 'lite' ? { modaqMode: true, modaqLite: true }
     : v === 'full' ? { modaqMode: true, modaqLite: false }
       : { modaqMode: false, modaqLite: false };
-  socket.emit('reader_action', { action: 'set_options', options });
-  if (v !== 'off') location.replace(`/modaq?room=${code}`);
-});
+  socket.emit('reader_action', { action: 'set_options', options }, () => {
+    if (v !== 'off') location.replace(`/modaq?room=${code}`);
+  });
+}
+$('#opt-modaq-mode')?.addEventListener('change', (e) => setModaqMode(e.target.value));
+// One-off packet reading from a plain room: lite is the right fit (MODAQ's own
+// packet file + New Game; a tournament room already comes in as MODAQ).
+$('#modaq-switch').onclick = () => {
+  $('#modaq-switch').disabled = true;
+  $('#modaq-switch').textContent = 'Opening MODAQ…';
+  setModaqMode(state.snapshot?.tournamentCode ? 'full' : 'lite');
+};
 
 // ---- share / invite links ----
 function buildShareLinks() {

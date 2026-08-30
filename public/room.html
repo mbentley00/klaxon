@@ -39,6 +39,13 @@
   <div id="gate" class="gate hidden">
     <div class="card">
       <h2 id="gate-title">Join</h2>
+      <!-- Roster rooms: pick your team and yourself instead of typing. -->
+      <div id="gate-roster" class="gate-roster hidden">
+        <label class="select-label" for="gate-roster-team">Your team</label>
+        <select id="gate-roster-team"></select>
+        <label class="select-label" for="gate-roster-player">You</label>
+        <select id="gate-roster-player"></select>
+      </div>
       <input id="gate-name" placeholder="Your name" autofocus />
       <input id="gate-team" placeholder="Team (optional)" />
       <div class="row">
@@ -73,6 +80,24 @@
       <div id="stuck-banner" class="offline-alert hidden" role="alert" aria-live="assertive"></div>
       <!-- Players: ping the moderator about a buzzer left un-reset. -->
       <button id="stuck-alert" class="ghost tiny hidden">Buzzer isn't clear — alert the moderator</button>
+    </section>
+
+    <!-- Reader in a plain room: one click to read a packet with MODAQ instead. -->
+    <section id="modaq-offer" class="panel modaq-offer hidden">
+      <h3>Reading a packet?</h3>
+      <div class="row">
+        <button id="modaq-switch" class="primary">Read with MODAQ →</button>
+        <span class="hint">Opens the MODAQ reader beside this buzzer — load a packet file, enter
+          the teams, and it keeps score. Players stay in this room and see the scoresheet.</span>
+      </div>
+    </section>
+
+    <!-- Live scoresheet of the MODAQ game being read. Built by the server from
+         the reader's game and limited to questions already read (see
+         store.buildPlayerScoresheet), so nothing here is ahead of the room. -->
+    <section id="scoresheet-view" class="panel scoresheet hidden">
+      <h3>Scoresheet <span id="ss-status" class="muted-count"></span></h3>
+      <div class="ss-scroll"><table id="ss-table"></table></div>
     </section>
 
     <!-- MASSINGER pick/ban board (tournament games only) — mirrors the board

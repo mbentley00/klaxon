@@ -108,7 +108,17 @@
         rooms prefill teams from the roster below.</p>
 
       <div class="modaq-block">
+        <label class="vol"><input type="checkbox" id="player-scoresheet" />
+          players see a live scoresheet while the moderator reads (questions already read only)</label>
+      </div>
+
+      <div class="modaq-block">
         <h4>Roster <span id="roster-status" class="muted-count"></span></h4>
+        <div id="roster-alerts" class="roster-alerts hidden">
+          <h5>Players not on the roster <span id="roster-alerts-count" class="muted-count"></span></h5>
+          <ul id="roster-alerts-list"></ul>
+          <button id="roster-alerts-clear" class="ghost tiny">Clear these</button>
+        </div>
         <div class="sound-row">
           <input type="file" id="roster-file" accept=".qbj,.json,application/json" />
           <button id="roster-upload" class="primary tiny">Upload roster</button>

@@ -110,6 +110,10 @@ There are two flavors, chosen when creating a room (dropdown on the home page),
 as a tournament default, or live from a room's Game options. Staff are then
 routed to `/modaq?room=CODE`.
 
+- **One-off readings:** the home page's **Read a packet with MODAQ** button
+  creates a lite room and opens the MODAQ reader directly, and a plain room's
+  reader view has a **Read with MODAQ →** button that switches the room over
+  in one click (players stay put). No tournament needed.
 - **MODAQ — lite:** the fastest path. Straight to the MODAQ reader + buzz panel,
   with **no tournament infrastructure** — the moderator loads a packet and sets
   teams with MODAQ's own New Game, and exports with MODAQ's own download. Klaxon
@@ -128,31 +132,51 @@ routed to `/modaq?room=CODE`.
 - **Errata:** the MODAQ reader has an **Errata** button to flag a packet
   question (throw it out and/or add a correction). Errata are saved with the
   tournament and shown to the director.
+- **Roster joining:** a tournament can ask players to identify themselves from
+  the roster — they pick their team and their own name from dropdowns instead
+  of typing, so their buzzes carry the roster name from the first press with
+  nothing for the moderator to link up. Anyone genuinely not on the roster can
+  still join under their own name, and the director is told (in the console,
+  and live in the room) that someone new turned up.
 - **Player links:** in every MODAQ mode, the teams entered in MODAQ's New Game
   dialog become the room's roster, and each connected buzzer is linked by name
   to the MODAQ player behind it — so buzzes are reported (and read aloud) as
   the player MODAQ is scoring. Names that don't match are left for the reader
   to link by hand rather than guessed at.
+- **Live scoresheet for players:** while the moderator reads, everyone in the
+  room sees a scoresheet of the game (per-player tossup points, bonus parts,
+  running totals). It is built on the server from the reader's game and is a
+  strict whitelist: no question text, answers, buzz positions, protest notes,
+  or packet names ever reach a player, and only questions *before* the one the
+  reader is on appear — so a stray click, a jump ahead in the question chooser,
+  or Next pressed twice reveals nothing, and the rows retract as soon as the
+  reader navigates back. Tournament-level option (creation page → Scoring
+  format, or the director console), on by default; rooms outside a tournament
+  always show it.
 - **MASSINGER pick/ban:** a tournament can enable the MASSINGER format
   (creation page → Scoring format). A game then runs in three steps:
-  1. **Players, then teams** — a lobby waits for both teams to join (with the
-     player link, a live count and the buzzer panel, so they can test their
-     buzzers), then the moderator sets the two teams and their players in
-     MODAQ's own New Game dialog, which links the connected buzzers to them.
+  1. **The lobby** — where the game is set up. Players join (link, live count,
+     buzzer panel to test with), the moderator picks the two teams, and every
+     connected buzzer is put on one of them; nobody is left without a team
+     before the game starts. Captains are marked here too.
   2. **Pick/ban** — the teams alternate **protecting** and **banning**
      subcategories (from each tossup's packet `metadata`) until 20 tossups
      remain. A ban removes one question, so a doubled subcategory keeps its
      other question until banned again; a protected subcategory can't be
      banned. The team picking first is chosen from a dropdown of the two team
-     names. **Each team picks from their own room page** when it's their
-     turn — the server only accepts a pick from a buzzer linked to that team's
-     player — and when the per-pick timer (30 s by default) runs out the
-     **server** bans at random for whoever is on the clock. The moderator sees
-     who's connected, can pick on a team's behalf, change whose turn it is,
-     undo, or clear any subcategory outright.
-  3. **The game** — MODAQ's New Game dialog reopens with the teams prefilled
-     and a summary of everything banned and protected, plus a link back to the
-     pick/ban if it needs fixing. Starting it reads the filtered 20 questions.
+     names. **Who may pick is a setting** — each team's captain (the default),
+     anyone the room knows to be on the team, or the moderator alone — and it
+     can be changed mid-board. Players pick from their own room page when it's
+     their turn; the server accepts a pick only from a buzzer it has been told
+     is on that team (and, in captain mode, only from the captain). When the
+     per-pick timer (30 s by default) runs out the **server** bans at random
+     for whoever is on the clock. The moderator sees who's connected, can pick
+     on a team's behalf, change whose turn it is, undo, clear any subcategory
+     outright, or remove someone from the room.
+  3. **The game** — only now does MODAQ open, with its New Game dialog
+     prefilled from the lobby (teams and their players) for the moderator to
+     confirm, plus a summary of everything banned and protected and a link back
+     to the pick/ban if it needs fixing. Starting it reads the filtered 20.
 
 These artifacts persist to disk under `KLAXON_DATA_DIR` (a Fly volume in
 production — see `fly.toml`), so they survive restarts. The realtime buzzer core
