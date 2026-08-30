@@ -156,6 +156,12 @@ routed to `/modaq?room=CODE`.
   reader back to the plain buzzer page (settings, players, invite links) and
   turns MODAQ mode off for the room; players can be removed straight from the
   buzz panel's player list (×).
+- **Previous games (rooms outside a tournament):** leaving a game (End game,
+  Change round, or loading another) files its full MODAQ snapshot under the
+  room. The setup screen (and a "Previous games" button in lite mode) lists
+  them — round, teams, score, progress — and **Load** puts one back into MODAQ
+  to correct a score or export it again; re-filing a loaded game updates its
+  entry rather than adding another.
 - **Live scoresheet for players:** while the moderator reads, everyone in the
   room sees MODAQ's Events panel — the same "# / Events" table the reader has
   on the right, with the question being read highlighted. It is built on the

@@ -323,6 +323,44 @@ export async function getModaqState(roomCode) {
   try { return JSON.parse(text); } catch { return null; }
 }
 
+// --- previous games ----------------------------------------------------------
+// Finished (or abandoned) MODAQ games of a room, one file each: the same
+// serialized game as the shared state plus a summary for listing. A moderator
+// outside a tournament reloads one to fix a score after the fact.
+function gamesDir(roomCode) {
+  return path.join(bucketDir({ kind: 'r', code: roomCode }), 'games');
+}
+
+export async function saveGame(roomCode, record) {
+  await writeAtomic(path.join(gamesDir(roomCode), `${safeName(record.id, 'game')}.json`), JSON.stringify(record));
+}
+
+export async function getGame(roomCode, id) {
+  const text = await readTextOrNull(path.join(gamesDir(roomCode), `${safeName(id, 'game')}.json`));
+  if (text == null) return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+// Summaries only (no game JSON), newest first.
+export async function listGames(roomCode) {
+  const dir = gamesDir(roomCode);
+  try {
+    const files = await fs.readdir(dir);
+    const out = [];
+    for (const f of files) {
+      if (!f.endsWith('.json')) continue;
+      const text = await readTextOrNull(path.join(dir, f));
+      if (text == null) continue;
+      try {
+        const { json, ...meta } = JSON.parse(text);
+        out.push(meta);
+      } catch { /* skip a bad file */ }
+    }
+    out.sort((a, b) => (b.at || 0) - (a.at || 0));
+    return out;
+  } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+}
+
 // --- exported match QBJ ----------------------------------------------------
 // On export, MODAQ hands us the match QBJ; we archive it under the tournament
 // so the TD and other moderators can retrieve it. Timestamp is supplied by the

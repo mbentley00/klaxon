@@ -5,6 +5,7 @@ import express from 'express';
 import { Server } from 'socket.io';
 
 import { PORT, DEFAULTS } from './config.js';
+import { uuid } from './ids.js';
 import * as store from './store.js';
 import * as artifacts from './artifacts.js';
 import { computeStats, liveGameRows, protestRows } from './stats.js';
@@ -565,6 +566,21 @@ app.delete('/api/tournaments/:code/roster-alerts', ah(async (req, res) => {
   if (req.body?.directorToken !== t.directorToken) return res.status(403).json({ error: 'forbidden' });
   await artifacts.clearRosterAlerts({ kind: 't', code: t.code });
   res.json({ ok: true });
+}));
+
+// Previous games of this room (staff only): summaries, and one full record.
+app.get('/api/rooms/:code/games', ah(async (req, res) => {
+  const room = roomOr(res, req.params.code); if (!room) return;
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  res.json({ games: await artifacts.listGames(room.code) });
+}));
+
+app.get('/api/rooms/:code/games/:id', ah(async (req, res) => {
+  const room = roomOr(res, req.params.code); if (!room) return;
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const game = await artifacts.getGame(room.code, req.params.id);
+  if (!game) return res.status(404).json({ error: 'not_found' });
+  res.json({ game });
 }));
 
 // The shared MODAQ game for this room (staff only — it contains the packet).
@@ -1253,6 +1269,27 @@ io.on('connection', (socket) => {
       // and kept for whoever (re)opens the page next. `json: null` means the
       // moderator left the game (Change round). Sequence numbers are minted
       // here so every client can tell newer from older.
+      // Archive the room's current shared game as a "previous game" (the
+      // moderator ended it, changed round, or is loading another). An `id`
+      // overwrites an earlier archive of the same game instead of duplicating.
+      case 'modaq_archive': {
+        const st = await modaqStateFor(room);
+        if (!st?.json) return ack?.({ error: 'no_game' });
+        const summary = room.scoresheet || null;
+        const id = typeof payload.id === 'string' && /^[A-Za-z0-9_-]{4,64}$/.test(payload.id) ? payload.id : uuid();
+        const record = {
+          id,
+          round: st.round,
+          at: Date.now(),
+          teams: summary ? summary.teams.map((t) => t.name) : [],
+          scores: summary ? summary.scores : [0, 0],
+          current: summary ? summary.current : 0,
+          total: summary ? summary.total : 0,
+          json: st.json
+        };
+        await artifacts.saveGame(room.code, record);
+        return ack?.({ ok: true, id });
+      }
       case 'modaq_state': {
         const json = typeof payload.json === 'string' ? payload.json : null;
         if (json && json.length > MODAQ_STATE_MAX) return ack?.({ error: 'too_large' });
