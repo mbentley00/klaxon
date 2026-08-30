@@ -148,6 +148,53 @@ function initPlayerScoresheet(t) {
   };
 }
 
+// Temporary share links to the stats/buzzpoint reports.
+function initShareLinks() {
+  const smsg2 = (t, ok = true) => { const m = $('#share-msg'); m.textContent = t; m.className = 'msg ' + (ok ? 'good' : 'bad'); };
+  const KIND_LABEL = { stats: 'Stats', buzzpoints: 'Buzzpoints' };
+
+  async function refresh() {
+    try {
+      const { links } = await api('GET', `/api/tournaments/${code}/share-links?directorToken=${encodeURIComponent(directorToken)}`);
+      const ul = $('#share-list');
+      ul.innerHTML = '';
+      for (const l of links) {
+        const url = `${location.origin}/s/${l.token}`;
+        const li = el('li', {});
+        const col = el('span', { className: 'pcol' });
+        col.append(el('span', { className: 'pname' }, `${KIND_LABEL[l.kind] || l.kind} · ${url}`));
+        col.append(el('span', { className: 'pjoined' }, `expires ${new Date(l.expiresAt).toLocaleString()}`));
+        const copy = el('button', { className: 'tiny ghost' }, 'Copy');
+        copy.onclick = async () => {
+          try { await navigator.clipboard.writeText(url); copy.textContent = 'Copied!'; setTimeout(() => { copy.textContent = 'Copy'; }, 1200); } catch { /* ignore */ }
+        };
+        const revoke = el('button', { className: 'tiny ghost' }, 'Revoke');
+        revoke.onclick = async () => {
+          try {
+            await api('DELETE', `/api/tournaments/${code}/share-links/${l.token}`, { directorToken });
+            refresh();
+          } catch (e) { smsg2('Could not revoke: ' + e.message, false); }
+        };
+        li.append(col, copy, revoke);
+        ul.append(li);
+      }
+    } catch { /* panel stays empty */ }
+  }
+
+  const mint = (kind) => async () => {
+    try {
+      const { link } = await api('POST', `/api/tournaments/${code}/share-links`, { directorToken, kind });
+      const url = `${location.origin}/s/${link.token}`;
+      try { await navigator.clipboard.writeText(url); smsg2(`Link created and copied: ${url}`); }
+      catch { smsg2(`Link created: ${url}`); }
+      refresh();
+    } catch (e) { smsg2('Could not create the link: ' + e.message, false); }
+  };
+  $('#share-new-stats').onclick = mint('stats');
+  $('#share-new-buzzpoints').onclick = mint('buzzpoints');
+  refresh();
+}
+
 // Auto-release: when every room's game in a round is final, the server makes
 // the next hidden packet visible without the director clicking anything.
 function initAutoRelease(t) {
@@ -298,6 +345,12 @@ function initPublicStats() {
   };
   const dl = $('#stats-download');
   if (dl) dl.onclick = () => { window.location = `/t/${code}/stats.zip`; };
+
+  // Buzzpoints are director-only (answer lines): the links carry the token.
+  const bq = `?directorToken=${encodeURIComponent(directorToken)}`;
+  $('#buzzpoints-open').href = `/t/${code}/buzzpoints${bq}`;
+  $('#buzzpoints-csv').href = `/t/${code}/buzzpoints.csv${bq}`;
+  initShareLinks();
 
   // Games in progress: which rooms are still playing, the score, where they are
   // in the packet, and how long they've been going. Public data; refreshes live.

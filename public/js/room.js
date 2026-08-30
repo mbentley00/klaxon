@@ -19,7 +19,7 @@ if (isStaffRole(urlRole)) {
   }
 }
 
-const state = { me: null, role: null, snapshot: null, tournament: null, offlineIds: null };
+const state = { me: null, role: null, snapshot: null, tournament: null, offlineIds: null, soundedCycle: null };
 
 // ---- connect ----
 const socket = io({ transports: ['websocket', 'polling'], reconnection: true });
@@ -391,8 +391,9 @@ socket.on('buzzer_reset', () => {
   state.stuckSentFor = null;
   $('#stuck-banner').classList.add('hidden');   // the complaint is resolved
 });
-// The instant a buzz lands, everyone hears it (the state update renders order).
-socket.on('buzz_pending', () => playBuzz());
+// The instant a buzz lands, everyone hears it (the state update renders order;
+// no name is shown until the server resolves the reconcile window).
+socket.on('buzz_pending', (p) => soundCycle(p?.cycleNo));
 
 // Someone joined a roster room who isn't on the roster: tell the staff in the
 // room (the director sees the same thing in their console).
@@ -901,8 +902,22 @@ function buzzerAction() {
 function fireBuzz() {
   $('#buzz-feedback').textContent = 'Buzzed!';
   navigator.vibrate?.(40);
+  // Play the sound NOW, before the round trip: the press itself is certain.
+  // Who WON the buzz stays unknown until the server resolves the window —
+  // nothing here shows a name. The cycle guard keeps the buzz_pending
+  // broadcast (or a race with another player's press) from double-playing.
+  soundCycle(state.snapshot?.cycleNo);
   socket.emit('buzz', { pressServerTime: clock.now() }); // best estimate of server-time press
   buzzer.disabled = true; // optimistic; the next state update confirms
+}
+
+// One buzz sound per cycle, whether it comes from our own press or the room's
+// buzz_pending broadcast — whichever happens first.
+function soundCycle(cycleNo) {
+  const key = cycleNo ?? state.snapshot?.cycleNo ?? -1;
+  if (state.soundedCycle === key) return;
+  state.soundedCycle = key;
+  playBuzz();
 }
 
 buzzer.addEventListener('click', buzzerAction);

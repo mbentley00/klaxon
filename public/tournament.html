@@ -268,6 +268,28 @@
         </span>
       </label>
       <button id="stats-download" class="primary tiny">Download YellowFruit report (.zip)</button>
+
+      <div class="modaq-block">
+        <h4>Buzzpoints</h4>
+        <p class="hint">Where every buzz came in every tossup, with answer lines — so unlike the stat
+          report it is <strong>not</strong> public. View it here, or hand out a temporary link below.</p>
+        <div class="row">
+          <a id="buzzpoints-open" class="btnlink tiny" target="_blank" rel="noopener">Open buzzpoints report</a>
+          <a id="buzzpoints-csv" class="btnlink tiny ghost">Download CSV</a>
+        </div>
+      </div>
+
+      <div class="modaq-block">
+        <h4>Temporary share links</h4>
+        <p class="hint">Expiring links you can hand to coaches or players and revoke any time.
+          Stats links show the YellowFruit report; buzzpoint links include answer lines.</p>
+        <div class="row">
+          <button id="share-new-stats" class="tiny">New stats link (7 days)</button>
+          <button id="share-new-buzzpoints" class="tiny">New buzzpoints link (7 days)</button>
+        </div>
+        <ul id="share-list" class="players"></ul>
+        <p id="share-msg" class="msg"></p>
+      </div>
     </section>
   </main>
 

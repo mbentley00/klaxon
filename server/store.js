@@ -41,7 +41,9 @@ const serializeRoom = (r) => ({
   roster: r.roster,
   rosterTeams: r.rosterTeams,
   // The player-facing scoresheet of the game being read (already sanitized).
-  scoresheet: r.scoresheet || null
+  scoresheet: r.scoresheet || null,
+  // Every buzz attempt, for the full-buzz export (buzz-point tracking).
+  buzzLog: r.buzzLog || []
 });
 
 const persistTournament = (t) => persistence?.tournament(serializeTournament(t));
@@ -274,6 +276,15 @@ export function setLinks(tournament, links) {
   tournament.links = normalizeLinks(links);
   persistTournament(tournament);
   return tournament.links;
+}
+
+// Every tournament (for share-token resolution) and an explicit persist hook
+// for records the routes mutate in place (share links).
+export function allTournaments() {
+  return tournaments.values();
+}
+export function persistTournamentRecord(tournament) {
+  persistTournament(tournament);
 }
 
 export function setAutoRelease(tournament, enabled) {
@@ -668,10 +679,37 @@ export function withdraw(room, playerId) {
 // Record an incoming buzz intent. Returns { accepted, reason, firstOfWindow }.
 // `clampedTime` is the server-time the buzz is CREDITED at (see index.js for
 // how it is computed and clamped). Ordering later uses this value.
+// Every buzz ATTEMPT — including ones that lost to the lock or arrived after
+// the window — goes into the room's full buzz log, stamped with the MODAQ
+// question being read. Exported later for buzz-point tracking, so a player who
+// buzzed second still shows up even without queue mode.
+const FULL_BUZZ_CAP = 5000;
+function logBuzzAttempt(room, member, { clampedTime, arrival, accepted, reason }) {
+  if (!room.buzzLog) room.buzzLog = [];
+  room.buzzLog.push({
+    at: arrival,
+    t: clampedTime,
+    cycleNo: room.cycleNo,
+    playerId: member.id,
+    name: displayName(member),
+    team: effectiveTeam(member) || null,
+    modaqPlayer: member.rosterPlayer || null,
+    round: room.modaqState?.round ?? null,
+    question: room.scoresheet?.current ?? null,
+    accepted,
+    reason: reason || null
+  });
+  if (room.buzzLog.length > FULL_BUZZ_CAP) room.buzzLog.splice(0, room.buzzLog.length - FULL_BUZZ_CAP);
+}
+
 export function recordBuzz(room, { playerId, clampedTime, arrival }) {
-  if (room.phase !== 'open') return { accepted: false, reason: 'not_open' };
   const member = room.members.get(playerId);
   if (!member || member.role !== 'player') return { accepted: false, reason: 'not_player' };
+  if (room.phase !== 'open') {
+    // Locked to an earlier buzz: still worth remembering that they tried.
+    logBuzzAttempt(room, member, { clampedTime, arrival, accepted: false, reason: 'locked' });
+    return { accepted: false, reason: 'not_open' };
+  }
   if (room.queue.some((q) => q.playerId === playerId)) return { accepted: false, reason: 'queued' };
 
   const already = room.cycle.collected.filter((b) => b.playerId === playerId).length;
@@ -680,7 +718,34 @@ export function recordBuzz(room, { playerId, clampedTime, arrival }) {
   const firstOfWindow = room.cycle.collected.length === 0;
   if (firstOfWindow) room.cycle.windowOpenedAt = arrival;
   room.cycle.collected.push({ playerId, clampedTime, arrival });
+  logBuzzAttempt(room, member, { clampedTime, arrival, accepted: true });
   return { accepted: true, firstOfWindow };
+}
+
+// The room's buzz attempts with per-cycle ordering, ready to download.
+export function fullBuzzExport(room) {
+  const byCycle = new Map();
+  for (const b of room.buzzLog || []) {
+    if (!byCycle.has(b.cycleNo)) byCycle.set(b.cycleNo, []);
+    byCycle.get(b.cycleNo).push(b);
+  }
+  const buzzes = [];
+  for (const list of byCycle.values()) {
+    const accepted = list.filter((b) => b.accepted).sort((a, b) => a.t - b.t);
+    const first = accepted[0];
+    for (const b of list) {
+      const order = b.accepted ? accepted.indexOf(b) + 1 : null;
+      buzzes.push({ ...b, order, msAfterFirst: first ? Math.max(0, Math.round(b.t - first.t)) : null });
+    }
+  }
+  buzzes.sort((a, b) => a.at - b.at);
+  return {
+    format: 'klaxon-fullbuzz-1',
+    room: room.code,
+    name: room.name,
+    exportedAt: Date.now(),
+    buzzes
+  };
 }
 
 // Close the reconcile window: rank this wave fairly and append to the queue.
@@ -697,6 +762,7 @@ export function resolveWindow(room) {
     });
   }
   room.cycle = freshCycle(room.cycleNo); // ready to collect the next wave
+  persistRooms();                        // the full buzz log survives a restart
   // Stamped once per unresolved queue: the "is the buzzer stuck?" clock that
   // gates player alerts runs from the FIRST buzz still waiting on the reader.
   if (room.lastBuzzAt == null && room.queue.length) room.lastBuzzAt = Date.now();
@@ -833,7 +899,7 @@ const SCORESHEET_MAX_PLAYERS = 12;
 const label = (v) => String(v ?? '').slice(0, 80);
 const pts = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
-export function buildPlayerScoresheet(match, currentQuestion) {
+export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true) {
   if (!match || typeof match !== 'object' || !Array.isArray(match.match_teams)) return null;
   const teams = match.match_teams.slice(0, 2).map((mt) => ({
     name: label(mt?.team?.name),
@@ -867,7 +933,10 @@ export function buildPlayerScoresheet(match, currentQuestion) {
       totals[ti] += points;
     }
     let bonus = null;
-    if (q.bonus && Array.isArray(q.bonus.parts)) {
+    // A game without bonuses (tossup-only packet or format) shows no bonus
+    // lines at all — MODAQ still emits empty ones, so the reader's page says
+    // which kind of game this is.
+    if (hasBonuses && q.bonus && Array.isArray(q.bonus.parts)) {
       // The bonus goes to whoever answered the tossup; the other team gets any bouncebacks.
       const winner = buzzes.find((b) => b.points > 0);
       if (winner) {
@@ -900,8 +969,8 @@ export function buildPlayerScoresheet(match, currentQuestion) {
 
 // The reader's page pushes its game on every change; keep the players' view.
 // Clearing (a null match) hides the sheet, e.g. when the reader leaves a game.
-export function setScoresheet(room, match, currentQuestion) {
-  room.scoresheet = match == null ? null : buildPlayerScoresheet(match, currentQuestion);
+export function setScoresheet(room, match, currentQuestion, hasBonuses = true) {
+  room.scoresheet = match == null ? null : buildPlayerScoresheet(match, currentQuestion, hasBonuses);
   persistRooms();
   return { ok: true };
 }

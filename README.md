@@ -172,6 +172,23 @@ routed to `/modaq?room=CODE`.
   and the rows retract as soon as the reader navigates back. Tournament-level option (creation page → Scoring
   format, or the director console), on by default; rooms outside a tournament
   always show it.
+- **Buzzpoints + temporary share links:** the director console generates a
+  buzzpoint report (where every buzz came in every tossup, with celerity and a
+  CSV export) alongside the YellowFruit report. Buzzpoints include answer
+  lines, so they are director-only; both reports can be handed out via
+  expiring **share links** (`/s/<token>`, 7 days, revocable any time).
+- **Full buzz log:** every buzz attempt in a MODAQ room — including buzzes
+  behind the first, even without queue mode — is recorded with the question
+  being read and per-cycle order, downloadable from the buzz panel as a
+  `klaxon-fullbuzz-1` JSON for buzz-point tracking.
+- **Instant buzz sound:** the presser hears their buzz immediately on the
+  press, and everyone else (moderator included) on the server's first-buzz
+  signal — before the latency-fair reconcile window resolves who won. Who
+  actually buzzed is only ever shown once the window resolves.
+- **MODAQ-linked buzzes:** the buzz panel shows each buzz as the MODAQ player
+  it's linked to (name + team from the game being scored); unlinked buzzers
+  are flagged with an inline picker. A **5-second bonus timer** (button or
+  `t`) counts down for the moderator only.
 - **MASSINGER pick/ban:** a tournament can enable the MASSINGER format
   (creation page → Scoring format). A game then runs in three steps:
   1. **The lobby** — where the game is set up. Players join (link, live count,

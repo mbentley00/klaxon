@@ -5,11 +5,12 @@ import express from 'express';
 import { Server } from 'socket.io';
 
 import { PORT, DEFAULTS } from './config.js';
-import { uuid } from './ids.js';
+import { uuid, secretToken } from './ids.js';
 import * as store from './store.js';
 import * as artifacts from './artifacts.js';
 import { computeStats, liveGameRows, protestRows } from './stats.js';
 import { renderReport, PAGES } from './yellowfruit.js';
+import { computeBuzzpoints, renderBuzzpointsCsv, renderBuzzpointsHtml } from './buzzpoints.js';
 import { buildZip } from './zip.js';
 import * as accounts from './accounts.js';
 import { parseYellowFruit, planImport } from './yfimport.js';
@@ -569,6 +570,16 @@ app.delete('/api/tournaments/:code/roster-alerts', ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Every buzz attempt in the room — including buzzes that lost to the lock —
+// with per-cycle order and the MODAQ question read at the time. For buzz-point
+// tracking tools; staff only.
+app.get('/api/rooms/:code/fullbuzz', ah(async (req, res) => {
+  const room = roomOr(res, req.params.code); if (!room) return;
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  res.setHeader('Content-Disposition', `attachment; filename="klaxon_${room.code}_fullbuzz.json"`);
+  res.json(store.fullBuzzExport(room));
+}));
+
 // Previous games of this room (staff only): summaries, and one full record.
 app.get('/api/rooms/:code/games', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
@@ -776,6 +787,138 @@ app.get('/t/:code/stats/:page', ah(async (req, res) => {
   // Served pages are the live view: auto-refresh so a projected standings stays
   // current as moderators sync (the Live Games page refreshes faster). The
   // downloaded zip keeps the pristine YF format.
+  const html = renderReport(page, data.stats, servedLink)
+    .replace('<HEAD>', `<HEAD>\n<meta http-equiv="refresh" content="${page === 'live' ? 20 : 60}">`);
+  res.type('html').send(html);
+}));
+
+// --- Buzzpoints (director-only: answer lines are in it) ---------------------
+
+async function buzzpointsFor(code) {
+  const t = store.getTournament(code);
+  if (!t) return null;
+  const bucket = { kind: 't', code: t.code };
+  let matches = [];
+  try { matches = await artifacts.readAllExports(bucket); } catch { matches = []; }
+  const packetsByRound = new Map();
+  try {
+    for (const p of await artifacts.listPackets(bucket)) {
+      const text = await artifacts.getPacket(bucket, p.round);
+      if (text == null) continue;
+      try { packetsByRound.set(String(p.round), JSON.parse(text)); } catch { /* skip bad packet */ }
+    }
+  } catch { /* no packets: lengths/answers just come up empty */ }
+  return { t, data: computeBuzzpoints(matches, packetsByRound) };
+}
+
+async function serveBuzzpoints(res, code, kind, csvHref) {
+  const r = await buzzpointsFor(code);
+  if (!r) return res.status(404).send('Tournament not found.');
+  if (kind === 'csv') {
+    const base = (r.t.name || r.t.code).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || r.t.code;
+    res.setHeader('Content-Disposition', `attachment; filename="${base}_buzzpoints.csv"`);
+    return res.type('text/csv').send(renderBuzzpointsCsv(r.data));
+  }
+  res.type('html').send(renderBuzzpointsHtml(r.t.name || r.t.code, r.data, csvHref));
+}
+
+app.get('/t/:code/buzzpoints', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).send('Director link required (or use a share link).');
+  const q = `?directorToken=${encodeURIComponent(req.query.directorToken)}`;
+  await serveBuzzpoints(res, t.code, 'html', `/t/${t.code}/buzzpoints.csv${q}`);
+}));
+
+app.get('/t/:code/buzzpoints.csv', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).send('Director link required (or use a share link).');
+  await serveBuzzpoints(res, t.code, 'csv');
+}));
+
+// --- Temporary share links ---------------------------------------------------
+// The director mints an expiring link to the YellowFruit report or the
+// buzzpoint report, hands it out, and can revoke it. Tokens live on the
+// tournament record (persisted), so they survive a restart and die on expiry.
+const SHARE_KINDS = new Set(['stats', 'buzzpoints']);
+const SHARE_DEFAULT_HOURS = 7 * 24;
+
+function pruneShareLinks(t) {
+  const now = Date.now();
+  const before = (t.shareLinks || []).length;
+  t.shareLinks = (t.shareLinks || []).filter((l) => l.expiresAt > now);
+  if (t.shareLinks.length !== before) store.persistTournamentRecord(t);
+  return t.shareLinks;
+}
+
+app.get('/api/tournaments/:code/share-links', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  res.json({ links: pruneShareLinks(t) });
+});
+
+app.post('/api/tournaments/:code/share-links', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const kind = String(req.body?.kind || '');
+  if (!SHARE_KINDS.has(kind)) return res.status(400).json({ error: 'bad_kind' });
+  const hours = Math.min(24 * 30, Math.max(1, Number(req.body?.hours) || SHARE_DEFAULT_HOURS));
+  const link = { token: secretToken(), kind, createdAt: Date.now(), expiresAt: Date.now() + hours * 3600_000 };
+  pruneShareLinks(t);
+  t.shareLinks.push(link);
+  store.persistTournamentRecord(t);
+  res.json({ link });
+});
+
+app.delete('/api/tournaments/:code/share-links/:token', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  t.shareLinks = (t.shareLinks || []).filter((l) => l.token !== req.params.token);
+  store.persistTournamentRecord(t);
+  res.json({ links: pruneShareLinks(t) });
+});
+
+// Resolve a share token to its tournament + kind (null if unknown/expired).
+function shareFor(token) {
+  for (const t of store.allTournaments()) {
+    const link = (t.shareLinks || []).find((l) => l.token === token);
+    if (link) return link.expiresAt > Date.now() ? { t, link } : null;
+  }
+  return null;
+}
+
+const SHARE_GONE = '<p style="font-family:sans-serif">This share link has expired or was revoked. Ask the tournament director for a fresh one.</p>';
+
+app.get('/s/:token', (req, res) => {
+  const hit = shareFor(req.params.token);
+  if (!hit) return res.status(404).send(SHARE_GONE);
+  res.redirect(hit.link.kind === 'buzzpoints' ? `/s/${req.params.token}/buzzpoints` : `/s/${req.params.token}/standings`);
+});
+
+app.get('/s/:token/buzzpoints', ah(async (req, res) => {
+  const hit = shareFor(req.params.token);
+  if (!hit || hit.link.kind !== 'buzzpoints') return res.status(404).send(SHARE_GONE);
+  await serveBuzzpoints(res, hit.t.code, 'html', `/s/${req.params.token}/buzzpoints.csv`);
+}));
+
+app.get('/s/:token/buzzpoints.csv', ah(async (req, res) => {
+  const hit = shareFor(req.params.token);
+  if (!hit || hit.link.kind !== 'buzzpoints') return res.status(404).send(SHARE_GONE);
+  await serveBuzzpoints(res, hit.t.code, 'csv');
+}));
+
+app.get('/s/:token/stats.zip', ah(async (req, res) => {
+  const hit = shareFor(req.params.token);
+  if (!hit || hit.link.kind !== 'stats') return res.status(404).send(SHARE_GONE);
+  res.redirect(`/t/${hit.t.code}/stats.zip`);
+}));
+
+app.get('/s/:token/:page', ah(async (req, res) => {
+  const hit = shareFor(req.params.token);
+  if (!hit || hit.link.kind !== 'stats') return res.status(404).send(SHARE_GONE);
+  const page = req.params.page.replace(/\.html$/, '');
+  if (!REPORT_PAGES.has(page)) return res.status(404).send('Unknown report page.');
+  const data = await statsFor(hit.t.code);
+  if (!data) return res.status(404).send(SHARE_GONE);
   const html = renderReport(page, data.stats, servedLink)
     .replace('<HEAD>', `<HEAD>\n<meta http-equiv="refresh" content="${page === 'live' ? 20 : 60}">`);
   res.type('html').send(html);
@@ -1274,7 +1417,7 @@ io.on('connection', (socket) => {
       // the player-safe scoresheet (see store.buildPlayerScoresheet) before
       // it goes anywhere near a player. `qbj: null` clears it.
       case 'modaq_game': {
-        store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion);
+        store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false);
         break;
       }
       // MODAQ's serialized game from one moderator, fanned out to the others
