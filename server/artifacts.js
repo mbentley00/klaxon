@@ -305,6 +305,24 @@ export async function deleteMassinger(roomCode, round) {
   await fs.rm(massingerFile(roomCode, round), { force: true });
 }
 
+// --- shared MODAQ game state -----------------------------------------------
+// The reader's serialized MODAQ game (the same JSON MODAQ persists locally),
+// kept per room so a moderator can reconnect from any device and a co-reader
+// can score the same game. It contains the packet: never served to players.
+function modaqStateFile(roomCode) {
+  return path.join(bucketDir({ kind: 'r', code: roomCode }), 'modaq-state.json');
+}
+
+export async function saveModaqState(roomCode, state) {
+  await writeAtomic(modaqStateFile(roomCode), JSON.stringify(state));
+}
+
+export async function getModaqState(roomCode) {
+  const text = await readTextOrNull(modaqStateFile(roomCode));
+  if (text == null) return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
 // --- exported match QBJ ----------------------------------------------------
 // On export, MODAQ hands us the match QBJ; we archive it under the tournament
 // so the TD and other moderators can retrieve it. Timestamp is supplied by the

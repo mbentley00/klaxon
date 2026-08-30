@@ -567,6 +567,13 @@ app.delete('/api/tournaments/:code/roster-alerts', ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// The shared MODAQ game for this room (staff only — it contains the packet).
+app.get('/api/rooms/:code/modaq-state', ah(async (req, res) => {
+  const room = roomOr(res, req.params.code); if (!room) return;
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  res.json({ state: await modaqStateFor(room) });
+}));
+
 // The persisted MASSINGER pick/ban board for a round (null body if none).
 // The moderator page uses it on reload to re-apply the ban filter to the
 // packet before handing it to MODAQ.
@@ -799,7 +806,10 @@ const io = new Server(httpServer, {
   // websocket-first with polling fallback => reliable behind hostile proxies
   transports: ['websocket', 'polling'],
   pingInterval: 10000,
-  pingTimeout: 8000
+  pingTimeout: 8000,
+  // The shared MODAQ game state (packet included) rides the socket; the
+  // default 1 MB cap is too tight for a long packet.
+  maxHttpBufferSize: 8 * 1024 * 1024
 });
 
 // ---------------------------------------------------------------------------
@@ -879,10 +889,12 @@ function emitState(room) {
 }
 
 // Deliver an event to a room's staff sockets only (reader/co-reader) — used
-// for director messages, which players must never receive.
-function emitToStaff(roomCode, event, payload) {
+// for director messages, which players must never receive. `except` skips one
+// socket (the sender of a change that the others need to hear about).
+function emitToStaff(roomCode, event, payload, except = null) {
   let delivered = 0;
   for (const [sid, ctx] of sock) {
+    if (sid === except) continue;
     if (ctx.roomCode === roomCode && ctx.staffRole) {
       const sk = io.sockets.sockets.get(sid);
       if (sk) { sk.emit(event, payload); delivered++; }
@@ -890,6 +902,19 @@ function emitToStaff(roomCode, event, payload) {
   }
   return delivered;
 }
+
+// --- Shared MODAQ game state ----------------------------------------------
+// The moderator page pushes MODAQ's serialized game on every change; it's kept
+// here (and on disk) so a reload on another device, or a second moderator,
+// gets the same game at the same question. Loaded from disk on first use
+// after a restart. STAFF ONLY — it contains the packet.
+async function modaqStateFor(room) {
+  if (room.modaqState === undefined) {
+    room.modaqState = (await artifacts.getModaqState(room.code)) || null;
+  }
+  return room.modaqState;
+}
+const MODAQ_STATE_MAX = 6 * 1024 * 1024;
 
 // Eject a player's live socket(s) from a room (after the reader removes them).
 function kickPlayer(room, playerId, reason) {
@@ -1005,12 +1030,19 @@ io.on('connection', (socket) => {
       staffRole
     });
 
+    // Staff learn whether a shared MODAQ game exists (and how current it is)
+    // so a moderator page can catch up after a reconnect.
+    let sharedGame = null;
+    if (staffRole) {
+      try { sharedGame = await modaqStateFor(room); } catch { sharedGame = null; }
+    }
     ack?.({
       ok: true,
       playerId: member.id,
       role: member.role,
       staffDenied,
       denyReason,
+      modaqState: staffRole ? (sharedGame ? { seq: sharedGame.seq, round: sharedGame.round, hasGame: !!sharedGame.json } : null) : undefined,
       // Only a full reader is trusted to mint co-reader invite links.
       coReaderToken: staffRole === 'reader' ? room.coReaderToken : undefined,
       state: store.publicState(room),
@@ -1216,6 +1248,26 @@ io.on('connection', (socket) => {
       case 'modaq_game': {
         store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion);
         break;
+      }
+      // MODAQ's serialized game from one moderator, fanned out to the others
+      // and kept for whoever (re)opens the page next. `json: null` means the
+      // moderator left the game (Change round). Sequence numbers are minted
+      // here so every client can tell newer from older.
+      case 'modaq_state': {
+        const json = typeof payload.json === 'string' ? payload.json : null;
+        if (json && json.length > MODAQ_STATE_MAX) return ack?.({ error: 'too_large' });
+        const prev = await modaqStateFor(room);
+        const next = {
+          seq: (prev?.seq || 0) + 1,
+          round: String(payload.round ?? '').slice(0, 80),
+          json,
+          by: ctx.playerId,
+          at: Date.now()
+        };
+        room.modaqState = next;
+        artifacts.saveModaqState(room.code, next).catch((e) => console.error('modaq state save failed:', e));
+        emitToStaff(room.code, 'modaq_state', next, socket.id);
+        return ack?.({ ok: true, seq: next.seq });
       }
       default:
         return ack?.({ error: 'unknown_action' });

@@ -143,6 +143,16 @@ routed to `/modaq?room=CODE`.
   to the MODAQ player behind it — so buzzes are reported (and read aloud) as
   the player MODAQ is scoring. Names that don't match are left for the reader
   to link by hand rather than guessed at.
+- **Shared game — reconnect from anywhere, co-readers who score:** every
+  moderator screen pushes MODAQ's own serialized game to Klaxon on each change
+  (staff-only channel — it contains the packet), and Klaxon keeps it per room on
+  disk. Opening the moderator page on any device — after a crash, a dead
+  laptop, or a server restart — resumes the same game at the same question with
+  the same scores. A **co-reader** (co-reader link) lands in the same game and
+  can score buzzes and bonus parts; each side's changes appear on the other
+  within a second. Whole-game last-write-wins, so two people shouldn't be
+  editing the same question in the same second. "Change round / teams" retires
+  the shared copy.
 - **Live scoresheet for players:** while the moderator reads, everyone in the
   room sees a scoresheet of the game (per-player tossup points, bonus parts,
   running totals). It is built on the server from the reader's game and is a
