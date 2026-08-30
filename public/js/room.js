@@ -269,6 +269,7 @@ $('#gate-join').onclick = () => {
     if (choice?.rosterPlayer) {
       remember('name', choice.rosterPlayer);
       remember('team', choice.rosterTeam);
+      pushPref(['team']);
       doJoin('player', choice.rosterPlayer, choice.rosterTeam, choice);
       return;
     }
@@ -1124,6 +1125,16 @@ document.querySelectorAll('.copy-btn').forEach((b) => {
 // Synthesized via Web Audio (no asset to load/fail). Several selectable
 // presets; the default ("ding") is deliberately loud and attention-grabbing.
 const SOUNDS = { ding: 'Ding (default)', buzzer: 'Game buzzer', bell: 'Bell', chime: 'Chime', beep: 'Beep' };
+// A logged-in player's settings follow their account: any change made here is
+// saved to it (best-effort), and logging in on another device brings them back.
+function pushPref(keys) {
+  const sessionToken = localStorage.getItem('bz_sessionToken');
+  if (!sessionToken) return;
+  const prefs = {};
+  for (const k of keys) prefs[k] = recall(k) ?? '';
+  api('PATCH', '/api/accounts/me', { sessionToken, prefs }).catch(() => {});
+}
+
 const soundName = () => recall('sound') || 'ding';
 const volume = () => { const v = parseFloat(recall('volume')); return Number.isFinite(v) ? v : 0.9; };
 const isMuted = () => recall('muted') === '1';
@@ -1298,18 +1309,20 @@ function applyMuteUI() {
   b.classList.toggle('active', m);
   const vol = $('#sound-vol'); if (vol) vol.disabled = m;
 }
-$('#sound-pick')?.addEventListener('change', (e) => { remember('sound', e.target.value); playSound(soundName(), volume(), true); e.target.blur(); /* don't let the select keep focus and swallow Space-to-reset */ });
+$('#sound-pick')?.addEventListener('change', (e) => { remember('sound', e.target.value); pushPref(['sound']); playSound(soundName(), volume(), true); e.target.blur(); /* don't let the select keep focus and swallow Space-to-reset */ });
 $('#sound-vol')?.addEventListener('input', (e) => remember('volume', e.target.value));
-$('#sound-vol')?.addEventListener('change', () => playSound(soundName(), volume(), true));
+$('#sound-vol')?.addEventListener('change', () => { pushPref(['volume']); playSound(soundName(), volume(), true); });
 $('#test-sound')?.addEventListener('click', () => playSound(soundName(), volume(), true));
 $('#enable-sound')?.addEventListener('click', () => playSound(soundName(), volume(), true));
 $('#opt-disconnect-sound')?.addEventListener('change', (e) => {
   if (e.target.checked) { remember('disconnectSound', '1'); playDisconnect(); } // preview
   else forget('disconnectSound');
+  pushPref(['disconnectSound']);
 });
 $('#opt-speak-buzz')?.addEventListener('change', (e) => {
-  if (!e.target.checked) return forget('speakBuzz');
+  if (!e.target.checked) { forget('speakBuzz'); pushPref(['speakBuzz']); return; }
   remember('speakBuzz', '1');
+  pushPref(['speakBuzz']);
   // Preview with a real name from the room so the reader hears exactly what a
   // buzz will sound like (including the first-name-only rule).
   const someone = (state.snapshot?.members || []).find((m) => m.role === 'player');
@@ -1317,6 +1330,7 @@ $('#opt-speak-buzz')?.addEventListener('change', (e) => {
 });
 $('#mute-btn')?.addEventListener('click', () => {
   if (isMuted()) forget('muted'); else remember('muted', '1');
+  pushPref(['muted']);
   applyMuteUI();
   if (!isMuted()) playSound(soundName(), volume(), true); // confirm on unmute
 });

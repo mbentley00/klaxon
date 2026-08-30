@@ -25,8 +25,12 @@ function showSignedIn(account) {
 }
 
 // Logging in makes the account's name the default for "Your name" fields
-// (the join gate reads the same key). The name is separate from the username.
+// (the join gate reads the same key), and brings back the player settings the
+// account carries (buzz sound, volume, spoken names, team) on this device.
 const syncName = (account) => { if (account.displayName) remember('name', account.displayName); };
+function applyPrefs(account) {
+  for (const [k, v] of Object.entries(account?.prefs || {})) remember(k, v);
+}
 function showSignedOut() {
   $('#signed-out').classList.remove('hidden');
   $('#signed-in').classList.add('hidden');
@@ -57,6 +61,8 @@ async function init() {
   if (session()) {
     try {
       const { account } = await api('GET', `/api/accounts/me?sessionToken=${encodeURIComponent(session())}`);
+      syncName(account);
+      applyPrefs(account);
       if (returnTo) return void location.assign(returnTo); // already signed in: head back
       return showSignedIn(account);
     } catch { clearSession(); }
@@ -84,6 +90,7 @@ $('#account-form').addEventListener('submit', async (e) => {
     const r = await api('POST', path, body);
     setSession(r.sessionToken);
     syncName(r.account);
+    applyPrefs(r.account);
     if (returnTo) return void location.assign(returnTo);
     showSignedIn(r.account);
     say('');

@@ -6,6 +6,21 @@ const say = (t, ok = true) => { msg.textContent = t; msg.className = 'msg ' + (o
 // Remember the player's name across sessions.
 $('#join-name').value = recall('name') || '';
 
+// Signed in? Label the account link, and refresh the name/settings the account
+// carries so a player landing here on a new device gets theirs back.
+const sessionToken = localStorage.getItem('bz_sessionToken');
+if (sessionToken) {
+  api('GET', `/api/accounts/me?sessionToken=${encodeURIComponent(sessionToken)}`)
+    .then(({ account }) => {
+      $('#account-link').textContent = `Account: ${account.displayName || account.username} →`;
+      $('#account-link').href = '/account';
+      if (account.displayName) remember('name', account.displayName);
+      for (const [k, v] of Object.entries(account.prefs || {})) remember(k, v);
+      $('#join-name').value = recall('name') || '';
+    })
+    .catch(() => { /* stale session: the link still offers log in */ });
+}
+
 function go(code, extra = '') {
   location.href = `/r/${code}${extra}`;
 }

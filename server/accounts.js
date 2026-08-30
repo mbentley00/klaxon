@@ -98,6 +98,22 @@ export function setDisplayName(account, displayName) {
   return account;
 }
 
+// Player-facing preferences that follow the account between devices: the
+// buzz sound, volume, mute, spoken names, and the team prefilled on join.
+// Whitelisted keys, short string values; '' deletes a key.
+const PREF_KEYS = new Set(['team', 'sound', 'volume', 'muted', 'disconnectSound', 'speakBuzz']);
+export function setPrefs(account, prefs) {
+  const out = { ...(account.prefs || {}) };
+  for (const [k, v] of Object.entries(prefs && typeof prefs === 'object' ? prefs : {})) {
+    if (!PREF_KEYS.has(k)) continue;
+    const val = String(v ?? '').slice(0, 40);
+    if (val === '') delete out[k]; else out[k] = val;
+  }
+  account.prefs = out;
+  saveToDisk();
+  return account;
+}
+
 export function setEmail(account, email) {
   const cleaned = cleanEmail(email);
   if (cleaned == null) return { error: 'bad_email' };
@@ -144,7 +160,10 @@ export function getAccount(accountId) {
 // clients fall back to the username where a name must be shown.
 export function publicAccount(account) {
   return account
-    ? { id: account.id, username: account.username, displayName: account.displayName || '', email: account.email || '' }
+    ? {
+        id: account.id, username: account.username, displayName: account.displayName || '',
+        email: account.email || '', prefs: account.prefs || {}
+      }
     : null;
 }
 

@@ -164,6 +164,7 @@ app.patch('/api/accounts/me', (req, res) => {
   const account = accounts.accountForSession(req.body?.sessionToken);
   if (!account) return res.status(401).json({ error: 'not_logged_in' });
   if (req.body?.displayName !== undefined) accounts.setDisplayName(account, req.body.displayName);
+  if (req.body?.prefs !== undefined) accounts.setPrefs(account, req.body.prefs);
   if (req.body?.email !== undefined) {
     const r = accounts.setEmail(account, req.body.email);
     if (r.error) return res.status(400).json({ error: r.error });
@@ -578,6 +579,8 @@ app.get('/api/rooms/:code/games', ah(async (req, res) => {
 app.get('/api/rooms/:code/games/:id', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
   if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  // The archived game carries the packet: same account gate as packet reads.
+  if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
   const game = await artifacts.getGame(room.code, req.params.id);
   if (!game) return res.status(404).json({ error: 'not_found' });
   res.json({ game });
@@ -587,6 +590,8 @@ app.get('/api/rooms/:code/games/:id', ah(async (req, res) => {
 app.get('/api/rooms/:code/modaq-state', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
   if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  // The shared game carries the packet: same account gate as packet reads.
+  if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
   res.json({ state: await modaqStateFor(room) });
 }));
 
@@ -1038,12 +1043,19 @@ io.on('connection', (socket) => {
       try { store.autoLinkRosterPlayers(room); } catch { /* linking is best-effort */ }
     }
 
+    // Whether this staff socket may receive packet-bearing payloads (the
+    // shared MODAQ game): same account gate as the packet REST endpoints.
+    let packetOk = false;
+    if (staffRole) {
+      try { packetOk = await readerAccessOk(room, payload?.sessionToken); } catch { packetOk = false; }
+    }
     socket.join(room.code);
     sock.set(socket.id, {
       ...sock.get(socket.id),
       roomCode: room.code,
       playerId: member.id,
-      staffRole
+      staffRole,
+      packetOk
     });
 
     // Staff learn whether a shared MODAQ game exists (and how current it is)
@@ -1303,7 +1315,11 @@ io.on('connection', (socket) => {
         };
         room.modaqState = next;
         artifacts.saveModaqState(room.code, next).catch((e) => console.error('modaq state save failed:', e));
-        emitToStaff(room.code, 'modaq_state', next, socket.id);
+        // Only staff sockets cleared for packets hear the game itself.
+        for (const [sid, c] of sock) {
+          if (sid === socket.id || c.roomCode !== room.code || !c.staffRole || !c.packetOk) continue;
+          io.sockets.sockets.get(sid)?.emit('modaq_state', next);
+        }
         return ack?.({ ok: true, seq: next.seq });
       }
       default:
