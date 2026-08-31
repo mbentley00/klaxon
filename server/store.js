@@ -899,7 +899,25 @@ const SCORESHEET_MAX_PLAYERS = 12;
 const label = (v) => String(v ?? '').slice(0, 80);
 const pts = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
-export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true) {
+export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true, protests = []) {
+  // Protests, whitelisted field by field. Everything here was said out loud in
+  // the room (who protested, on what, the answer they gave) — the moderator's
+  // free-text reasoning stays out.
+  const protestsByCycle = new Map();
+  for (const p of Array.isArray(protests) ? protests : []) {
+    const cycle = Number(p?.cycle);
+    if (!Number.isFinite(cycle) || cycle < 1) continue;
+    if (!protestsByCycle.has(cycle)) protestsByCycle.set(cycle, []);
+    if (protestsByCycle.get(cycle).length >= 8) continue;
+    protestsByCycle.get(cycle).push({
+      type: p.type === 'bonus' ? 'bonus' : 'tossup',
+      team: label(p.team),
+      question: pts(p.question) || null,
+      part: p.part == null ? null : pts(p.part),
+      position: p.position == null ? null : pts(p.position),
+      givenAnswer: label(p.givenAnswer)
+    });
+  }
   if (!match || typeof match !== 'object' || !Array.isArray(match.match_teams)) return null;
   const teams = match.match_teams.slice(0, 2).map((mt) => ({
     name: label(mt?.team?.name),
@@ -960,6 +978,7 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true)
       bonus,
       replaced,
       thrownOut,
+      protests: protestsByCycle.get(n) || [],
       scores: [totals[0], totals[1]]
     });
   }
@@ -969,8 +988,8 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true)
 
 // The reader's page pushes its game on every change; keep the players' view.
 // Clearing (a null match) hides the sheet, e.g. when the reader leaves a game.
-export function setScoresheet(room, match, currentQuestion, hasBonuses = true) {
-  room.scoresheet = match == null ? null : buildPlayerScoresheet(match, currentQuestion, hasBonuses);
+export function setScoresheet(room, match, currentQuestion, hasBonuses = true, protests = []) {
+  room.scoresheet = match == null ? null : buildPlayerScoresheet(match, currentQuestion, hasBonuses, protests);
   persistRooms();
   return { ok: true };
 }

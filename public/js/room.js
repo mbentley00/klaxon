@@ -475,6 +475,13 @@ function renderScoresheet(s) {
         if (row.bonus.bounceback) text += ` (stolen for ${row.bonus.bounceback} points)`;
         ev.append(el('div', { className: 'ss-item' }, text));
       }
+      // Protests, worded as MODAQ's own Events panel words them.
+      for (const pr of row.protests || []) {
+        const text = pr.type === 'bonus'
+          ? `${pr.team} protests bonus #${pr.question}${pr.part ? `, part ${pr.part}` : ''} (answer given: "${pr.givenAnswer}")`
+          : `${pr.team} protests tossup #${pr.question}${pr.position ? ` at word ${pr.position}` : ''} (answer given: "${pr.givenAnswer}")`;
+        ev.append(el('div', { className: 'ss-item ss-protest' }, text));
+      }
       carried = row.scores;
     }
     ev.append(el('div', { className: 'ss-score-line' }, `(${carried[0]} - ${carried[1]})`));

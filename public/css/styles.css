@@ -423,3 +423,5 @@ body.compact .scoresheet { display: none; }
   body.has-sheet .stage > #scoresheet-view { grid-column: 1; grid-row: auto; position: static; }
   .scoresheet .ss-scroll { max-height: 50vh; }
 }
+
+.scoresheet .ss-protest { color: var(--warn); font-style: italic; }

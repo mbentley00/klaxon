@@ -576,7 +576,7 @@ app.delete('/api/tournaments/:code/roster-alerts', ah(async (req, res) => {
 app.get('/api/rooms/:code/fullbuzz', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
   if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
-  res.setHeader('Content-Disposition', `attachment; filename="klaxon_${room.code}_fullbuzz.json"`);
+  res.setHeader('Content-Disposition', `attachment; filename="klaxon_${room.code}_full_buzz.json"`);
   res.json(store.fullBuzzExport(room));
 }));
 
@@ -1417,7 +1417,7 @@ io.on('connection', (socket) => {
       // the player-safe scoresheet (see store.buildPlayerScoresheet) before
       // it goes anywhere near a player. `qbj: null` clears it.
       case 'modaq_game': {
-        store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false);
+        store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false, payload.protests);
         break;
       }
       // MODAQ's serialized game from one moderator, fanned out to the others
