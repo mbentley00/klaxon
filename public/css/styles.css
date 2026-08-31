@@ -425,3 +425,8 @@ body.compact .scoresheet { display: none; }
 }
 
 .scoresheet .ss-protest { color: var(--warn); font-style: italic; }
+
+/* Scoresheet header row: score line + the player's own hide/show toggle. */
+.scoresheet .ss-head { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 0 10px; }
+.scoresheet .ss-head .ss-score { margin: 0; }
+.scoresheet.ss-collapsed .ss-scroll { display: none; }

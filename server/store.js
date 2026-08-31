@@ -384,6 +384,18 @@ export function removePlayer(room, playerId) {
   return true;
 }
 
+// Reader clears out players who joined before the cutoff — leftovers from an
+// earlier game who never left. Returns the removed ids.
+export function removeStalePlayers(room, minutes) {
+  const mins = clampNum(minutes, 1, 24 * 60, 15);
+  const cutoff = Date.now() - mins * 60000;
+  const ids = [...room.members.values()]
+    .filter((m) => m.role === 'player' && (m.joinedAt || 0) < cutoff)
+    .map((m) => m.id);
+  for (const id of ids) removePlayer(room, id);
+  return ids;
+}
+
 // Reader clears every player out of the room. Returns the removed ids.
 export function removeAllPlayers(room) {
   const ids = [...room.members.values()].filter((m) => m.role === 'player').map((m) => m.id);

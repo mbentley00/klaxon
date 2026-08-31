@@ -965,6 +965,18 @@ app.get('/tp/:code', (_req, res) => res.sendFile(path.join(publicDir, 'player-to
 // room.html serves any /r/CODE deep link
 app.get('/r/:code', (_req, res) => res.sendFile(path.join(publicDir, 'room.html')));
 
+// klaxonbuzz.com/CODE — the shortest possible link to hand a player. A room
+// code (4 letters) lands on the room's join page; a tournament code (5) on the
+// tournament's public stats. Anything unknown falls through to the usual 404.
+app.get('/:code([A-Za-z0-9]{4,5})', (req, res, next) => {
+  const code = req.params.code.toUpperCase();
+  const qi = req.originalUrl.indexOf('?');
+  const qs = qi >= 0 ? req.originalUrl.slice(qi) : '';
+  if (store.getRoom(code)) return res.redirect(`/r/${code}${qs}`);
+  if (store.getTournament(code)) return res.redirect(`/t/${code}/stats`);
+  next();
+});
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   // websocket-first with polling fallback => reliable behind hostile proxies
@@ -1338,6 +1350,13 @@ io.on('connection', (socket) => {
       case 'remove_all_players':
         for (const id of store.removeAllPlayers(room)) kickPlayer(room, id, 'removed');
         break;
+      // Clear out players who joined more than N minutes ago (leftovers from
+      // an earlier game). Default 15.
+      case 'remove_stale_players': {
+        const removed = store.removeStalePlayers(room, payload.minutes);
+        for (const id of removed) kickPlayer(room, id, 'removed');
+        return ack?.({ ok: true, removed: removed.length });
+      }
       // --- MASSINGER pick/ban (moderator-driven, see store.js) ----------
       case 'massinger_start': {
         // Unless explicitly starting fresh, a persisted board for this round

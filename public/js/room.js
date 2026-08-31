@@ -374,7 +374,7 @@ $('#compact-toggle').onclick = () => {
 
 // ---- copy player join link (everyone) ----
 $('#copy-link').onclick = async (e) => {
-  const url = `${location.origin}/r/${code}`;
+  const url = `${location.origin}/${code}`;
   try { await navigator.clipboard.writeText(url); }
   catch { prompt('Copy this player link:', url); }
   const btn = e.currentTarget;
@@ -431,16 +431,23 @@ function renderScoresheet(s) {
   const sheet = s.scoresheet;
   const view = $('#scoresheet-view');
   const on = !!sheet && Array.isArray(sheet.teams) && sheet.teams.length === 2;
+  // Each player chooses whether they want the sheet on screen (on by default);
+  // hiding it collapses the panel to the score line and a Show button.
+  const wanted = recall('hideScoresheet') !== '1';
   view.classList.toggle('hidden', !on);
-  document.body.classList.toggle('has-sheet', on);
+  view.classList.toggle('ss-collapsed', on && !wanted);
+  document.body.classList.toggle('has-sheet', on && wanted);
+  const tog = $('#ss-toggle');
+  if (tog) tog.textContent = wanted ? 'Hide' : 'Show scoresheet';
   if (!on) { ssLastKey = ''; return; }
+
+  const [a, b] = sheet.teams;
+  $('#ss-status').textContent = `${a.name}: ${sheet.scores[0]}, ${b.name}: ${sheet.scores[1]}`;
+  if (!wanted) { ssLastKey = ''; return; }   // collapsed: the table isn't drawn
   // State broadcasts arrive on every buzz; only redraw when the sheet changed.
   const key = JSON.stringify([sheet.teams, sheet.rows, sheet.scores, sheet.current, sheet.total]);
   if (key === ssLastKey) return;
   ssLastKey = key;
-
-  const [a, b] = sheet.teams;
-  $('#ss-status').textContent = `${a.name}: ${sheet.scores[0]}, ${b.name}: ${sheet.scores[1]}`;
 
   const table = $('#ss-table');
   table.replaceChildren();
@@ -493,6 +500,11 @@ function renderScoresheet(s) {
   // Keep the question being read in view, as MODAQ does for the reader.
   if (currentRow) currentRow.scrollIntoView({ block: 'nearest' });
 }
+
+$('#ss-toggle')?.addEventListener('click', () => {
+  if (recall('hideScoresheet') === '1') forget('hideScoresheet'); else remember('hideScoresheet', '1');
+  if (state.snapshot) renderScoresheet(state.snapshot);
+});
 
 // ---- MASSINGER pick/ban board (read-only mirror) ----
 // The moderator drives the pick/ban from the MODAQ page; every client in the
@@ -1123,7 +1135,7 @@ $('#modaq-switch').onclick = () => {
 // ---- share / invite links ----
 function buildShareLinks() {
   $('#share-code').textContent = code;
-  $('#share-player').value = `${location.origin}/r/${code}`;
+  $('#share-player').value = `${location.origin}/${code}`;
   const coToken = recall('coReaderToken:' + code);
   const coRow = $('#share-coreader-row');
   if (coToken) {

@@ -96,7 +96,10 @@
          the reader's game and limited to questions already read (see
          store.buildPlayerScoresheet), so nothing here is ahead of the room. -->
     <aside id="scoresheet-view" class="scoresheet hidden" aria-label="Scoresheet">
-      <div id="ss-status" class="ss-score"></div>
+      <div class="ss-head">
+        <div id="ss-status" class="ss-score"></div>
+        <button id="ss-toggle" class="tiny ghost">Hide</button>
+      </div>
       <div class="ss-scroll">
         <table id="ss-table" class="ss-events"></table>
       </div>

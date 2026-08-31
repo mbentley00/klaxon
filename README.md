@@ -138,6 +138,9 @@ routed to `/modaq?room=CODE`.
   nothing for the moderator to link up. Anyone genuinely not on the roster can
   still join under their own name, and the director is told (in the console,
   and live in the room) that someone new turned up.
+- **Short links:** `klaxonbuzz.com/CODE` is all a player needs — a room code
+  lands on the join page, a tournament code on its public stats. Copy-link
+  buttons hand out the short form.
 - **Player links:** in every MODAQ mode, the teams entered in MODAQ's New Game
   dialog become the room's roster, and each connected buzzer is linked by name
   to the MODAQ player behind it — so buzzes are reported (and read aloud) as
