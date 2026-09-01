@@ -100,6 +100,25 @@ app.post('/api/rooms', (req, res) => {
   });
 });
 
+// A few rooms at once, for the home page's "rooms you've joined" list. Only
+// rooms that still exist come back; a code is already the thing you need to
+// join, so the name and how many players are in there is no new exposure.
+app.get('/api/rooms-summary', (req, res) => {
+  const codes = String(req.query.codes || '').split(',').map((c) => c.trim().toUpperCase()).filter(Boolean).slice(0, 12);
+  const rooms = [];
+  for (const code of codes) {
+    const room = store.getRoom(code);
+    if (!room) continue;
+    const members = [...room.members.values()];
+    rooms.push({
+      code: room.code,
+      name: room.name,
+      players: members.filter((m) => m.role === 'player' && m.connected).length
+    });
+  }
+  res.json({ rooms });
+});
+
 app.get('/api/rooms/:code', (req, res) => {
   const room = store.getRoom(req.params.code);
   if (!room) return res.status(404).json({ error: 'not_found' });
@@ -1339,8 +1358,10 @@ io.on('connection', (socket) => {
         store.setRosterTeams(room, payload.teams || []);
         break;
       case 'assign_roster_player':
+        // Answer (and broadcast) immediately; persistence is coalesced.
         store.assignRosterPlayer(room, payload.playerId, payload.team, payload.player);
-        break;
+        emitState(room);
+        return ack?.({ ok: true });
       case 'clear_roster':
         store.clearRoster(room);
         break;

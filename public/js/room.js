@@ -67,7 +67,12 @@ function setConn(cls, text) {
 function maybeAutoJoin() {
   if (state.role) return doJoin(state.role, state.me?.name, state.me?.team);
   const staffRole = recall('staffRole:' + code);
-  if (staffRole && recall('staffToken:' + code)) {
+  // A moderator is staff either by the room's reader link OR by a logged-in
+  // account the director approved — the account path has no staff token, so
+  // requiring one used to drop those moderators on the player join gate (e.g.
+  // following "Buzzer options" out of the MODAQ view). The server still
+  // decides: a rejected attempt comes back staffDenied and reopens the gate.
+  if (staffRole && (recall('staffToken:' + code) || localStorage.getItem('bz_sessionToken'))) {
     const name = recall('name');
     if (name) return doJoin(staffRole, name);  // never default the name to "Reader"
     return showGate('staff', staffRole);       // ask the reader for their name first
@@ -195,6 +200,18 @@ function showGate(mode, staffRole) {
   }
 }
 
+// Rooms this browser has been in, newest first — the home page offers them
+// back (the ones still running). Codes only; nothing about who was in them.
+function rememberRecentRoom() {
+  try {
+    const list = JSON.parse(recall('recentRooms') || '[]').filter((r) => r?.code && r.code !== code);
+    list.unshift({ code, at: Date.now() });
+    remember('recentRooms', JSON.stringify(list.slice(0, 8)));
+  } catch {
+    remember('recentRooms', JSON.stringify([{ code, at: Date.now() }]));
+  }
+}
+
 // ---- join flow ----
 function doJoin(role, name, team, roster) {
   socket.emit('join', {
@@ -224,6 +241,10 @@ function doJoin(role, name, team, roster) {
     state.role = resp.role;
     remember('joined:' + code, '1');
     remember('role:' + code, resp.role);
+    // However they proved it (reader link or approved account), remember that
+    // this browser is staff here, so later visits skip the join gate.
+    if (isStaffRole(resp.role)) remember('staffRole:' + code, resp.role);
+    rememberRecentRoom();
     if (name) remember('name', name);
     if (team) remember('team', team);
     if (resp.coReaderToken) remember('coReaderToken:' + code, resp.coReaderToken);

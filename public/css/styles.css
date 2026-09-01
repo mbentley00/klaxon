@@ -430,3 +430,12 @@ body.compact .scoresheet { display: none; }
 .scoresheet .ss-head { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 0 10px; }
 .scoresheet .ss-head .ss-score { margin: 0; }
 .scoresheet.ss-collapsed .ss-scroll { display: none; }
+
+/* Home page: rooms this browser has joined that are still running. */
+.recent { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.recent-link { display: flex; align-items: baseline; gap: 8px; text-decoration: none; color: var(--ink);
+  border: 1.5px solid var(--soft); border-radius: var(--radius); padding: 6px 10px; }
+.recent-link:hover { border-color: var(--ink); background: var(--surface); }
+.recent-code { font-family: var(--mono); font-weight: 600; letter-spacing: .1em; color: var(--accent); }
+.recent-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-meta { font-size: .78rem; color: var(--muted); white-space: nowrap; }

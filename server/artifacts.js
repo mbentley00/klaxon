@@ -597,7 +597,7 @@ let roomWrites = Promise.resolve();
 export function saveRoomRecords(records) {
   roomWrites = roomWrites
     .catch(() => { /* a failed write must not stall later ones */ })
-    .then(() => writeAtomic(path.join(DATA_DIR, 'rooms.json'), JSON.stringify(records, null, 2)));
+    .then(() => writeAtomic(path.join(DATA_DIR, 'rooms.json'), JSON.stringify(records)));
   return roomWrites;
 }
 

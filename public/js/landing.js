@@ -1,4 +1,4 @@
-import { api, remember, recall, $ } from './util.js';
+import { api, remember, recall, $, el } from './util.js';
 
 const msg = $('#msg');
 const say = (t, ok = true) => { msg.textContent = t; msg.className = 'msg ' + (ok ? 'good' : 'bad'); };
@@ -24,6 +24,46 @@ if (sessionToken) {
 function go(code, extra = '') {
   location.href = `/r/${code}${extra}`;
 }
+
+// Rooms this browser joined before, if they're still running. Minimal: code,
+// name, how many players are in there now, and when we were last in.
+const ago = (ms) => {
+  const mins = Math.round((Date.now() - ms) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? 'yesterday' : `${days} days ago`;
+};
+
+async function showRecentRooms() {
+  let recent = [];
+  try { recent = JSON.parse(recall('recentRooms') || '[]'); } catch { return; }
+  recent = recent.filter((r) => r?.code);
+  if (!recent.length) return;
+  let live = [];
+  try {
+    const r = await api('GET', `/api/rooms-summary?codes=${recent.map((x) => x.code).join(',')}`);
+    live = r.rooms || [];
+  } catch { return; }
+  if (!live.length) return;                     // all of them are gone
+  const byCode = new Map(live.map((r) => [r.code, r]));
+  const ul = $('#recent-list');
+  ul.replaceChildren();
+  for (const { code: rc, at } of recent) {
+    const room = byCode.get(rc);
+    if (!room) continue;                        // expired since we were there
+    const link = el('a', { href: `/${rc}`, className: 'recent-link' });
+    link.append(el('span', { className: 'recent-code' }, rc));
+    link.append(el('span', { className: 'recent-name' }, room.name || ''));
+    link.append(el('span', { className: 'recent-meta' },
+      `${room.players} player${room.players === 1 ? '' : 's'} · ${ago(at)}`));
+    ul.append(el('li', {}, link));
+  }
+  if (ul.childElementCount) $('#recent-section').classList.remove('hidden');
+}
+showRecentRooms();
 
 $('#join-form').addEventListener('submit', (e) => {
   e.preventDefault();

@@ -47,7 +47,33 @@ const serializeRoom = (r) => ({
 });
 
 const persistTournament = (t) => persistence?.tournament(serializeTournament(t));
-const persistRooms = () => persistence?.rooms([...rooms.values()].map(serializeRoom));
+
+// Rooms are persisted as one file holding every room, and the record now
+// carries the live scoresheet and the full buzz log. Serializing that on every
+// change (a scoresheet update lands ~once a second while scoring, and every
+// buzz resolves one) would block the event loop right where the room is
+// waiting for its state broadcast. So writes are coalesced: mark dirty, flush
+// shortly after. Anything whose loss would be unrecoverable — a freshly minted
+// room and its tokens — asks for an immediate flush.
+const ROOM_PERSIST_MS = 1500;
+let roomsDirty = false;
+let roomsTimer = null;
+
+function flushRooms() {
+  if (roomsTimer) { clearTimeout(roomsTimer); roomsTimer = null; }
+  if (!roomsDirty || !persistence) return;
+  roomsDirty = false;
+  persistence.rooms([...rooms.values()].map(serializeRoom));
+}
+
+function persistRooms(immediate = false) {
+  if (!persistence) return;
+  roomsDirty = true;
+  if (immediate) return flushRooms();
+  if (roomsTimer) return;
+  roomsTimer = setTimeout(flushRooms, ROOM_PERSIST_MS);
+  roomsTimer.unref?.();   // never hold the process open for a pending write
+}
 
 // Reload persisted records at boot (before setPersistence, so hydration never
 // triggers writes). Rooms come back with fresh runtime state: an interrupted
@@ -141,7 +167,7 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
     tournaments.get(tournamentCode).roomCodes.add(code);
     persistTournament(tournaments.get(tournamentCode));
   }
-  persistRooms();
+  persistRooms(true);
   return room;
 }
 
