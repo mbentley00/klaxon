@@ -242,6 +242,26 @@ in‑browser speech engines (Whisper/Vosk, ~29 MB of wasm) are stubbed out of th
 build via aliases in `vite.moderator.config.ts`, since the moderator page
 doesn't need them.
 
+## Feedback form
+
+`/feedback` mails feedback and bug reports straight through (nothing is
+stored), rate-limited to 5 per IP per 10 minutes. It uses the same mail
+configuration as the Buzzpoints app, so one set of credentials serves both:
+
+| Variable | Purpose |
+| --- | --- |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | SMTP transport (port 465 = implicit TLS, 587 = STARTTLS) |
+| `RESEND_API_KEY` | Fallback if SMTP is missing or fails |
+| `EMAIL_FROM` | From address; must be a mailbox the server may send as |
+| `FEEDBACK_EMAIL` | Where reports go (defaults to the author's address) |
+
+With none of them set the form stays honest: it says it isn't wired up and
+offers the same message as a `mailto:` the sender can send themselves.
+
+```bash
+fly secrets set -a klaxon-buzz SMTP_HOST=... SMTP_USER=... SMTP_PASS=... EMAIL_FROM='Klaxon <klaxon@doc-ent.com>'
+```
+
 ## Deploy: Vercel or dedicated host?
 
 **Short answer: the realtime buzzer core needs a persistent‑process host (Fly.io,

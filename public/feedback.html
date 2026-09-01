@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <link rel="icon" href="/favicon.ico?v=2" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=2" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=2" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+  <title>Klaxon — feedback</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="landing">
+  <main class="card">
+    <h1 class="wordmark">Klaxon</h1>
+    <p class="tag">Feedback &amp; bug reports.</p>
+
+    <form id="feedback-form" class="stack">
+      <div class="row">
+        <label class="toggle"><input type="radio" name="kind" value="feedback" checked /> Feedback or idea</label>
+        <label class="toggle"><input type="radio" name="kind" value="bug" /> Something's broken</label>
+      </div>
+
+      <label class="select-label" for="fb-email">Your email</label>
+      <input id="fb-email" type="email" autocomplete="email" placeholder="you@example.com" required />
+
+      <label class="select-label" for="fb-message">Message</label>
+      <textarea id="fb-message" rows="7" maxlength="4000"
+        placeholder="What happened, or what would you like Klaxon to do? If it's a bug, the room code and what you were doing help a lot."
+        required></textarea>
+
+      <p class="hint" id="fb-context"></p>
+      <button type="submit" class="primary" id="fb-send">Send</button>
+      <p id="fb-msg" class="msg" role="status"></p>
+    </form>
+
+    <p><a href="/" class="back">&larr; Back to Klaxon</a></p>
+  </main>
+
+  <footer class="site-foot">
+    <a href="/about">About</a>
+  </footer>
+  <script type="module" src="/js/feedback.js"></script>
+</body>
+</html>

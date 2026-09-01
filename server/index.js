@@ -11,6 +11,7 @@ import * as artifacts from './artifacts.js';
 import { computeStats, liveGameRows, protestRows } from './stats.js';
 import { renderReport, PAGES } from './yellowfruit.js';
 import { computeBuzzpoints, renderBuzzpointsCsv, renderBuzzpointsHtml } from './buzzpoints.js';
+import { sendEmail, emailEnabled, feedbackBody, FEEDBACK_TO } from './email.js';
 import { buildZip } from './zip.js';
 import * as accounts from './accounts.js';
 import { parseYellowFruit, planImport } from './yfimport.js';
@@ -141,6 +142,52 @@ app.post('/api/tournaments', (req, res) => {
   });
   res.json({ code: t.code, directorToken: t.directorToken, name: t.name, defaults: t.roomDefaults, format: t.format });
 });
+
+// --- feedback / bug reports -------------------------------------------------
+// Mailed straight through; nothing is stored. Rate-limited per IP so the form
+// can't be used to send mail in bulk.
+const FEEDBACK_MAX = 4000;
+const FEEDBACK_WINDOW_MS = 10 * 60 * 1000;
+const FEEDBACK_PER_WINDOW = 5;
+const recentFeedback = new Map();   // ip -> [timestamps]
+
+function feedbackThrottled(ip) {
+  const now = Date.now();
+  const hits = (recentFeedback.get(ip) || []).filter((t) => now - t < FEEDBACK_WINDOW_MS);
+  hits.push(now);
+  recentFeedback.set(ip, hits);
+  if (recentFeedback.size > 500) {
+    for (const [k, v] of recentFeedback) if (!v.some((t) => now - t < FEEDBACK_WINDOW_MS)) recentFeedback.delete(k);
+  }
+  return hits.length > FEEDBACK_PER_WINDOW;
+}
+
+app.post('/api/feedback', ah(async (req, res) => {
+  const message = String(req.body?.message ?? '').trim();
+  if (!message) return res.status(400).json({ error: 'Write a message first.' });
+  if (message.length > FEEDBACK_MAX) return res.status(400).json({ error: `Please keep it under ${FEEDBACK_MAX} characters.` });
+
+  // An address is required so the report can be answered.
+  const replyTo = String(req.body?.email ?? '').trim().slice(0, 200);
+  if (!replyTo) return res.status(400).json({ error: 'Add your email so Michael can reply.' });
+  if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(replyTo)) return res.status(400).json({ error: "That email address doesn't look right." });
+
+  const kind = req.body?.kind === 'bug' ? 'bug' : 'feedback';
+  const page = String(req.body?.page ?? '').trim().slice(0, 300);
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim() || 'unknown';
+  if (feedbackThrottled(ip)) return res.status(429).json({ error: "That's a lot of messages at once — try again in a few minutes." });
+
+  if (!emailEnabled()) return res.status(503).json({ error: "This form isn't set up to send mail yet." });
+  const sent = await sendEmail({
+    to: FEEDBACK_TO,
+    subject: kind === 'bug' ? `Klaxon bug report from ${replyTo}` : `Klaxon feedback from ${replyTo}`,
+    html: feedbackBody({ from: replyTo, kind, page, message }),
+    text: `From: ${replyTo}\nPage: ${page || '-'}\n\n${message}`,
+    replyTo
+  });
+  if (!sent) return res.status(502).json({ error: "Couldn't send that just now." });
+  res.json({ ok: true });
+}));
 
 // Public directory of listed tournaments (browse + request to moderate).
 app.get('/api/tournaments', (_req, res) => {
@@ -959,6 +1006,9 @@ app.get('/t/:code/stats.zip', ah(async (req, res) => {
 app.get('/healthz', (_req, res) => res.json({ ok: true, t: Date.now() }));
 
 app.get('/about', (_req, res) => res.sendFile(path.join(publicDir, 'about.html')));
+
+// feedback / bug report form
+app.get('/feedback', (_req, res) => res.sendFile(path.join(publicDir, 'feedback.html')));
 
 // advanced room creation (the options the home page leaves out)
 app.get('/advanced', (_req, res) => res.sendFile(path.join(publicDir, 'advanced.html')));

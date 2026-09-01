@@ -474,6 +474,10 @@ function renderPipButton() {
 
 $('#pip-open')?.addEventListener('click', openPip);
 
+// Report a problem from inside the room, with the room page as context.
+const reportLink = $('#report-link');
+if (reportLink) reportLink.href = `/feedback?from=${encodeURIComponent(location.href)}`;
+
 // ---- copy player join link (everyone) ----
 $('#copy-link').onclick = async (e) => {
   const url = `${location.origin}/${code}`;
