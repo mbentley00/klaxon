@@ -372,6 +372,87 @@ $('#compact-toggle').onclick = () => {
   applyCompact(on);
 };
 
+// ---- pop-out buzzer (floats above Zoom) ----
+// Document Picture-in-Picture gives us a small always-on-top window. A page
+// still only receives keystrokes while it has focus — no browser lets a web
+// page claim a system-wide hotkey — but this removes the need to alt-tab: the
+// buzzer stays visible over a fullscreen call and one click buzzes.
+const pipSupported = 'documentPictureInPicture' in window;
+let pipWin = null;
+
+const PIP_CSS = `
+  html, body { margin: 0; height: 100%; }
+  body { font-family: system-ui, "Segoe UI", sans-serif; background: #f3efe6; color: #17130d;
+         display: flex; align-items: center; justify-content: center; }
+  .pip { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px; width: 100%; }
+  .pip-phase { font-weight: 700; font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; text-align: center; }
+  .pip-phase.ready { color: #6d6456; }
+  .pip-phase.buzzed { color: #d8401f; }
+  .pip-buzz { flex: 1; width: min(74vw, 74vh); aspect-ratio: 1; border-radius: 50%;
+              border: 3px solid #17130d; box-shadow: 6px 6px 0 #17130d; background: #fffdf7;
+              font-family: inherit; font-weight: 700; font-size: clamp(1rem, 9vw, 2rem);
+              letter-spacing: .04em; text-transform: uppercase; cursor: pointer; }
+  .pip-buzz.buzzed { background: #d8401f; color: #fff; }
+  .pip-buzz:not(:disabled):active { transform: translate(4px, 4px); box-shadow: 0 0 0 #17130d; }
+  .pip-buzz:disabled { opacity: .5; cursor: default; box-shadow: 3px 3px 0 #17130d; }
+  .pip-code { font-size: .7rem; letter-spacing: .12em; color: #6d6456; }
+`;
+
+async function openPip() {
+  if (!pipSupported) return;
+  if (pipWin) { pipWin.focus(); return; }
+  try {
+    pipWin = await documentPictureInPicture.requestWindow({ width: 260, height: 300 });
+  } catch { return; }             // dismissed, or blocked by the browser
+  const d = pipWin.document;
+  d.title = `Klaxon ${code}`;
+  d.head.append(Object.assign(d.createElement('style'), { textContent: PIP_CSS }));
+
+  const wrap = d.createElement('div');
+  wrap.className = 'pip';
+  const phase = Object.assign(d.createElement('div'), { id: 'pip-phase', className: 'pip-phase' });
+  const btn = Object.assign(d.createElement('button'), { id: 'pip-buzz', className: 'pip-buzz' });
+  const label = Object.assign(d.createElement('div'), { className: 'pip-code', textContent: `Room ${code}` });
+  wrap.append(phase, btn, label);
+  d.body.append(wrap);
+
+  // Same action as the page's own buzzer, so every rule (role, phase, the
+  // optimistic lock) is enforced in exactly one place.
+  btn.addEventListener('click', buzzerAction);
+  d.addEventListener('keydown', (e) => {
+    if ((e.code === 'Space' || e.key === ' ') && !e.repeat) { e.preventDefault(); buzzerAction(); }
+  });
+  pipWin.addEventListener('pagehide', () => { pipWin = null; renderPipButton(); });
+  renderPip();
+  renderPipButton();
+}
+
+// Mirror the page's buzzer into the floating window.
+function renderPip() {
+  const d = pipWin?.document;
+  const phase = d?.getElementById('pip-phase');
+  const btn = d?.getElementById('pip-buzz');
+  if (!phase || !btn) return;
+  phase.textContent = $('#phase-label').textContent;
+  phase.className = 'pip-phase ' + (buzzer.classList.contains('buzzed') ? 'buzzed' : 'ready');
+  btn.textContent = $('#buzzer-label').textContent;
+  btn.className = 'pip-buzz ' + (buzzer.classList.contains('buzzed') ? 'buzzed' : 'ready');
+  btn.disabled = buzzer.disabled;
+}
+
+function renderPipButton() {
+  const b = $('#pip-open');
+  if (!b) return;
+  // Players are the ones stuck behind a fullscreen call; staff drive the room
+  // from this page (or MODAQ) with it in front of them.
+  const show = pipSupported && state.role === 'player';
+  b.classList.toggle('hidden', !show);
+  $('#pip-hint')?.classList.toggle('hidden', !show);
+  b.textContent = pipWin ? 'Buzzer popped out ✓' : 'Pop out buzzer ↗';
+}
+
+$('#pip-open')?.addEventListener('click', openPip);
+
 // ---- copy player join link (everyone) ----
 $('#copy-link').onclick = async (e) => {
   const url = `${location.origin}/${code}`;
@@ -911,6 +992,8 @@ function renderBuzzer(s) {
     buzzer.disabled = true;
     setBuzzer(has ? 'BUZZED' : '—');
   }
+  renderPip();
+  renderPipButton();
 }
 
 function buzzerAction() {
@@ -928,6 +1011,7 @@ function fireBuzz() {
   soundCycle(state.snapshot?.cycleNo);
   socket.emit('buzz', { pressServerTime: clock.now() }); // best estimate of server-time press
   buzzer.disabled = true; // optimistic; the next state update confirms
+  renderPip();
 }
 
 // One buzz sound per cycle, whether it comes from our own press or the room's

@@ -138,6 +138,11 @@ routed to `/modaq?room=CODE`.
   nothing for the moderator to link up. Anyone genuinely not on the roster can
   still join under their own name, and the director is told (in the console,
   and live in the room) that someone new turned up.
+- **Pop-out buzzer:** players can float the buzzer above everything else
+  (Document Picture-in-Picture) so a fullscreen Zoom call doesn't hide it —
+  click it, or press Space while it's focused. No browser lets a web page claim
+  a system-wide hotkey, so this removes the alt-tab rather than the focus rule;
+  the button appears only where the browser supports it (Chrome/Edge today).
 - **Short links:** `klaxonbuzz.com/CODE` is all a player needs — a room code
   lands on the join page, a tournament code on its public stats. Copy-link
   buttons hand out the short form.
