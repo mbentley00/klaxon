@@ -64,6 +64,16 @@
       </div>
     </section>
 
+    <!-- What the checks found. Sits above the result so a packet that lost a
+         question is read before the Download button is clicked. -->
+    <section class="panel hidden" id="yapp-checks-panel">
+      <h3>Checks <span id="yapp-checks-meta" class="muted-count"></span></h3>
+      <p class="hint">The parser refuses a packet it can't read at all. These are the quieter failures — a numbered
+        question that never came through, a bonus that lost a part, a power marker that didn't survive Word, a
+        pronunciation guide that swallowed the rest of the sentence.</p>
+      <div id="yapp-checks"></div>
+    </section>
+
     <section class="panel hidden" id="yapp-result-panel">
       <h3>Result <span id="yapp-result-meta" class="muted-count"></span></h3>
       <div class="row">

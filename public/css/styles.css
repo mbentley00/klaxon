@@ -483,3 +483,35 @@ body.compact .report-link { display: none; }
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .yapp-preview:empty { display: none; }
+
+/* Packet checks on the parser page: what the conversion may have damaged.
+   Levels read at a glance -- an error means a reader will hit it, a note is
+   just worth an eye. Question numbers sit in the label so a director can find
+   the question in the document without opening the JSON. */
+.yapp-pk { margin-top: 12px; }
+.yapp-pk + .yapp-pk { border-top: 1px solid var(--soft); padding-top: 12px; }
+.yapp-pk-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  font-family: var(--display); font-weight: 700; font-size: .9rem; min-width: 0;
+}
+.yapp-pk-name { overflow-wrap: anywhere; }
+.yapp-pk-stats { font-family: var(--sans); font-weight: 400; font-size: .82rem; color: var(--muted); }
+.yapp-clean { color: var(--ok); font-size: .85rem; margin: 4px 0 0; }
+.yapp-finds { list-style: none; margin: 6px 0 0; padding: 0; }
+.yapp-finds li {
+  display: flex; gap: 8px; align-items: baseline;
+  padding: 5px 0 5px 9px; border-left: 3px solid var(--soft);
+  font-size: .87rem; margin-bottom: 4px; overflow-wrap: anywhere;
+}
+.yapp-finds li.lvl-error { border-left-color: var(--bad); }
+.yapp-finds li.lvl-warning { border-left-color: var(--warn); }
+.yapp-finds li.lvl-note { border-left-color: var(--soft); }
+.yapp-where {
+  flex: none; font-family: var(--mono); font-size: .72rem; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--muted); padding-top: 2px;
+}
+.yapp-finds li.lvl-error .yapp-where { color: var(--bad); }
+.yapp-finds li.lvl-warning .yapp-where { color: var(--warn); }
+@media (max-width: 480px) {
+  .yapp-finds li { flex-direction: column; gap: 2px; }
+}

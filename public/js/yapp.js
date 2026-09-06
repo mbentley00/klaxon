@@ -1,7 +1,9 @@
 // The packet parser page: hand a .docx (or a .zip of them) to YAPP and give the
 // result back as a file. Klaxon proxies the call (see /api/yapp/parse in
 // server/index.js) so this page never has to reach a third-party origin.
-import { $ } from './util.js';
+import { $, el } from './util.js';
+import { lintPacket, lintSet } from './packet-lint.js';
+import { readZip } from './unzip.js';
 
 const msg = $('#yapp-msg');
 const say = (t, ok = true) => { msg.textContent = t; msg.className = 'msg ' + (ok ? 'good' : 'bad'); };
@@ -50,6 +52,8 @@ function hideResult() {
   result = null;
   $('#yapp-result-panel').classList.add('hidden');
   $('#yapp-errors').classList.add('hidden');
+  $('#yapp-checks-panel').classList.add('hidden');
+  $('#yapp-checks').replaceChildren();
 }
 
 // The name to save under: the packet's own name with the new extension.
@@ -110,9 +114,13 @@ $('#yapp-parse').addEventListener('click', async () => {
       typeof parsed.result === 'string' && typeof parsed.contentType === 'string';
     if (envelope) {
       showZipResult(file, format, parsed);
+      // A zip has to be opened before the packets inside it can be checked, and
+      // that's async — the result is already on screen either way.
+      checkZip(parsed, format);
     } else {
       showResult(file, format, raw, type || 'text/plain', false);
       say('Parsed.', true);
+      checkOne(raw, format, file.name);
     }
   } catch (e) {
     status.textContent = '';
@@ -172,6 +180,94 @@ function showResult(file, format, text, contentType, isZip, blob) {
   $('#yapp-preview-note').textContent = text.length > CAP
     ? `First ${CAP.toLocaleString()} characters of ${text.length.toLocaleString()}.`
     : '';
+}
+
+// --- checks ------------------------------------------------------------------
+// The parser only refuses a packet it can't read at all. What gets through can
+// still be damaged — see packet-lint.js for what's looked for and why. HTML
+// output isn't a packet, so there's nothing to check there.
+
+function checkOne(text, format, fileName) {
+  if (format === 'html') return;
+  let packet;
+  try { packet = JSON.parse(text); } catch { return; }
+  renderChecks([lintPacket(packet, { name: fileName })], 1);
+}
+
+async function checkZip(envelope, format) {
+  if (format === 'html') return;
+  // Merging several packets gives one JSON document, not a zip.
+  if (envelope.contentType !== 'application/zip') return checkOne(envelope.result, format, '');
+
+  const note = $('#yapp-checks');
+  try {
+    const bytes = Uint8Array.from(atob(envelope.result), (c) => c.charCodeAt(0));
+    const entries = await readZip(bytes);
+    const packets = [];
+    for (const entry of entries) {
+      if (!entry.text) continue;
+      try { packets.push({ name: entry.name.replace(/\.json$/i, ''), packet: JSON.parse(entry.text) }); }
+      catch { /* not a packet we can read; the parser's own error list covers it */ }
+    }
+    if (!packets.length) return;
+    renderChecks(lintSet(packets), packets.length);
+  } catch {
+    // An old browser without DecompressionStream, or a zip we can't walk. The
+    // download is unaffected; say so rather than implying the set is clean.
+    $('#yapp-checks-panel').classList.remove('hidden');
+    $('#yapp-checks-meta').textContent = '';
+    note.replaceChildren(el('p', { className: 'hint' },
+      "This browser can't open the zip, so the packets inside it weren't checked. Parse a single .docx to check one."));
+  }
+}
+
+const LEVEL_WORD = { error: 'error', warning: 'warning', note: 'note' };
+
+function renderChecks(reports, packetCount) {
+  const panel = $('#yapp-checks-panel');
+  const box = $('#yapp-checks');
+  box.replaceChildren();
+  panel.classList.remove('hidden');
+
+  const errors = reports.reduce((n, r) => n + r.findings.filter((f) => f.level === 'error').length, 0);
+  const warnings = reports.reduce((n, r) => n + r.findings.filter((f) => f.level === 'warning').length, 0);
+  const notes = reports.reduce((n, r) => n + r.findings.filter((f) => f.level === 'note').length, 0);
+  const bits = [];
+  if (errors) bits.push(`${errors} error${errors === 1 ? '' : 's'}`);
+  if (warnings) bits.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
+  if (notes) bits.push(`${notes} note${notes === 1 ? '' : 's'}`);
+  $('#yapp-checks-meta').textContent = bits.length
+    ? bits.join(', ')
+    : `nothing flagged in ${packetCount} packet${packetCount === 1 ? '' : 's'}`;
+
+  for (const r of reports) {
+    const stats = [
+      `${r.summary.tossups} tossup${r.summary.tossups === 1 ? '' : 's'}`,
+      `${r.summary.bonuses} bonus${r.summary.bonuses === 1 ? '' : 'es'}`
+    ];
+    if (r.summary.powered) stats.push('powered');
+    if (r.summary.categories) stats.push('categories');
+
+    // Only a set needs each packet named; for one file the page already says
+    // which file it was.
+    const head = el('div', { className: 'yapp-pk-head' });
+    if (reports.length > 1) head.append(el('span', { className: 'yapp-pk-name', textContent: r.name || 'packet' }));
+    head.append(el('span', { className: 'yapp-pk-stats', textContent: stats.join(' · ') }));
+    const block = el('div', { className: 'yapp-pk' }, head);
+
+    if (!r.findings.length) {
+      block.append(el('p', { className: 'yapp-clean', textContent: 'Nothing looks wrong.' }));
+    } else {
+      const list = el('ul', { className: 'yapp-finds' });
+      for (const f of r.findings) {
+        list.append(el('li', { className: `lvl-${f.level}` },
+          el('span', { className: 'yapp-where', textContent: f.where || LEVEL_WORD[f.level] }),
+          el('span', { textContent: f.message })));
+      }
+      block.append(list);
+    }
+    box.append(block);
+  }
 }
 
 $('#yapp-download').addEventListener('click', () => {
