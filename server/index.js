@@ -542,6 +542,23 @@ app.put('/api/tournaments/:code/packets/:round/tiebreaker', ah(async (req, res) 
   res.json(saved);
 }));
 
+// Director breaks one round into a tiebreaker per tossup. The rounds it makes
+// are hidden, so nothing reaches a moderator until the director releases the
+// one question a room needs.
+app.post('/api/tournaments/:code/packets/:round/split-tiebreakers', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  try {
+    const out = await artifacts.splitPacketIntoTiebreakers({ kind: 't', code: t.code }, req.params.round);
+    res.json(out);
+  } catch (e) {
+    if (e.message === 'no_packet') return res.status(404).json({ error: 'No such round.' });
+    if (e.message === 'no_tossups') return res.status(400).json({ error: 'That round has no tossups to split.' });
+    if (e.message === 'already_single') return res.status(400).json({ error: 'That round is already a single question.' });
+    throw e;
+  }
+}));
+
 // TD view of tiebreaker packets + which questions have been used, by whom.
 app.get('/api/tournaments/:code/tiebreakers', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;

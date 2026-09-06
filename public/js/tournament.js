@@ -551,10 +551,20 @@ async function refreshPackets() {
       const nameWrap = el('span', { className: 'pname' });
       nameWrap.append(document.createTextNode(`Round ${p.round}`));
       if (p.tiebreaker) nameWrap.append(el('span', { className: 'offline-badge' }, 'TB'));
+      // Rounds uploaded before the count was recorded don't have one.
+      if (p.tossups > 0) {
+        nameWrap.append(el('span', { className: 'muted-count' },
+          ` ${p.tossups} tossup${p.tossups === 1 ? '' : 's'}`));
+      }
       li.append(nameWrap);
       const controls = el('span', { className: 'sound-row' });
       controls.append(packetToggle(p, 'visibility', 'visible', 'Visible'));
       controls.append(packetToggle(p, 'tiebreaker', 'tiebreaker', 'Tiebreaker'));
+      // Only on a tiebreaker pool with something to split: a playing round isn't
+      // meant to leave the rotation, and a round that is already one question
+      // has nothing to gain. An older round with no recorded count still offers
+      // it — the server refuses if there's nothing there.
+      if (p.tiebreaker && p.tossups !== 1) controls.append(splitButton(p));
       li.append(controls);
       ul.append(li);
     }
@@ -592,6 +602,33 @@ function updateReleaseNext(packets) {
       btn.disabled = false;
     }
   };
+}
+
+// Breaks a tiebreaker round into one round per question, so each can be
+// released on its own. Confirmed first: it makes twenty rounds out of one, and
+// that's a lot of list to undo by hand.
+function splitButton(p) {
+  const btn = el('button', { className: 'ghost tiny', textContent: 'Split' });
+  btn.title = 'Make one releasable round per tossup';
+  btn.onclick = async () => {
+    const count = p.tossups > 0 ? `${p.tossups} ` : '';
+    if (!confirm(`Split "Round ${p.round}" into ${count}hidden tiebreaker rounds, one per tossup?
+
+`
+      + "The round itself stays, but is hidden so its questions don't reach the pool twice.")) return;
+    btn.disabled = true;
+    try {
+      const { created } = await api('POST', `/api/tournaments/${code}/packets/${qt(p.round)}/split-tiebreakers`,
+        { directorToken });
+      msay(`Split "Round ${p.round}" into ${created.length} tiebreaker round${created.length === 1 ? '' : 's'}, all hidden — release the one a room needs.`);
+      refreshPackets();
+      refreshTiebreakers();
+    } catch (e) {
+      msay('Could not split: ' + e.message, false);
+      btn.disabled = false;
+    }
+  };
+  return btn;
 }
 
 // A labeled checkbox that flips one flag (visibility/tiebreaker) on a round.

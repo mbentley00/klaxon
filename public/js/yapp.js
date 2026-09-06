@@ -3,7 +3,8 @@
 // server/index.js) so this page never has to reach a third-party origin.
 import { $, el } from './util.js';
 import { lintPacket, lintSet } from './packet-lint.js';
-import { readZip } from './unzip.js';
+import { readZip, writeZip } from './zip.js';
+import { splitIntoTiebreakers } from './packet-split.js';
 
 const msg = $('#yapp-msg');
 const say = (t, ok = true) => { msg.textContent = t; msg.className = 'msg ' + (ok ? 'good' : 'bad'); };
@@ -22,8 +23,17 @@ const FORMAT_NOTES = {
   json: 'The packet format MODAQ loads and Klaxon stores for a round.',
   yapp2: 'The same JSON plus an “anchored” copy of any question with a pronunciation guide, ' +
     'marking which words the guide covers. Readers that don’t know yapp2 ignore the extra field.',
-  html: 'A formatted packet for reading, not for loading into a reader.'
+  html: 'A formatted packet for reading, not for loading into a reader.',
+  tiebreakers: 'A zip of one JSON per tossup. Upload them all at once in the director console with ' +
+    '“tiebreaker” ticked, and each question becomes a round you can release on its own — so the pool ' +
+    'stays hidden until the moment a room needs one question out of it. Bonuses are dropped: a tiebreaker ' +
+    'is a tossup.'
 };
+
+// The parser has no tiebreaker mode — that split happens here, on the JSON it
+// gives back. Everything else is a format it knows.
+const TIEBREAKERS = 'tiebreakers';
+const parseFormat = (format) => (format === TIEBREAKERS ? 'json' : format);
 
 // The parsed file, kept so Download and Copy don't re-parse.
 let result = null;   // { blob, name, text, type }
@@ -34,8 +44,10 @@ function refresh() {
   $('#yapp-file-note').textContent = file
     ? `${file.name} · ${size(file.size)}`
     : 'A .docx packet, or a .zip holding up to 30 of them.';
-  // Merging only means something for a zip of several packets.
-  $('#yapp-merge-row').classList.toggle('hidden', !isZip);
+  // Merging only means something for a zip of several packets — and never when
+  // splitting into tiebreakers, where merging first would renumber the
+  // questions across packets and lose which round each one came from.
+  $('#yapp-merge-row').classList.toggle('hidden', !isZip || formatSel.value === TIEBREAKERS);
   $('#yapp-format-note').textContent = FORMAT_NOTES[formatSel.value] || '';
   $('#yapp-parse').disabled = !file;
 }
@@ -56,9 +68,12 @@ function hideResult() {
   $('#yapp-checks').replaceChildren();
 }
 
+const fileStem = (file) => file.name.replace(/\.(docx|zip)$/i, '') || 'packet';
+
 // The name to save under: the packet's own name with the new extension.
 function outputName(file, format, isZipResult) {
-  const stem = file.name.replace(/\.(docx|zip)$/i, '') || 'packet';
+  const stem = fileStem(file);
+  if (format === TIEBREAKERS) return `${stem} tiebreakers.zip`;
   if (isZipResult) return `${stem}.zip`;
   return `${stem}.${format === 'html' ? 'html' : 'json'}`;
 }
@@ -77,9 +92,9 @@ $('#yapp-parse').addEventListener('click', async () => {
 
   const format = formatSel.value;
   const params = new URLSearchParams({
-    format,
+    format: parseFormat(format),
     prettyPrint: String($('#yapp-pretty').checked),
-    mergeMultiple: String($('#yapp-merge').checked),
+    mergeMultiple: String(format !== TIEBREAKERS && $('#yapp-merge').checked),
     // Ask for the JSON envelope rather than a raw zip stream: it carries the
     // per-packet errors alongside the result, so a set where two packets failed
     // still hands back the other twenty-eight and says which two didn't.
@@ -112,16 +127,28 @@ $('#yapp-parse').addEventListener('click', async () => {
     // successCount } — `result` is base64 for a zip and plain text otherwise.
     const envelope = parsed && !Array.isArray(parsed) &&
       typeof parsed.result === 'string' && typeof parsed.contentType === 'string';
-    if (envelope) {
-      showZipResult(file, format, parsed);
-      // A zip has to be opened before the packets inside it can be checked, and
-      // that's async — the result is already on screen either way.
-      checkZip(parsed, format);
-    } else {
+    // Splitting into tiebreakers replaces the parser's own output entirely, so
+    // that result is never put on screen — only the zip of split files is. Any
+    // packet the parser refused is still worth listing either way.
+    const splitting = format === TIEBREAKERS;
+    if (envelope) showZipResult(file, format, parsed, { keepResult: !splitting });
+    else if (!splitting) {
       showResult(file, format, raw, type || 'text/plain', false);
       say('Parsed.', true);
-      checkOne(raw, format, file.name);
     }
+
+    // HTML isn't a packet, so there is nothing to open, check or split.
+    if (format === 'html') return;
+    // Opening a zip is async, and both the checks and the split want the packets
+    // rather than the bytes — so gather them once.
+    const packets = await parsedPackets(file, envelope ? parsed : null, raw);
+    if (packets === null) return unopenableZip();
+    if (!packets.length) {
+      if (splitting) say('Nothing to split — no packet came out of that file.', false);
+      return;
+    }
+    showChecks(packets);
+    if (splitting) splitIntoFiles(file, packets);
   } catch (e) {
     status.textContent = '';
     say('Could not reach the parser: ' + e.message, false);
@@ -131,18 +158,23 @@ $('#yapp-parse').addEventListener('click', async () => {
   }
 });
 
-function showZipResult(file, format, body) {
+// `keepResult` is false when the caller is going to replace the parser's output
+// with something built from it — the per-file failures below still belong on
+// screen, but the parser's own zip does not.
+function showZipResult(file, format, body, { keepResult = true } = {}) {
   const isZip = body.contentType === 'application/zip';
-  let blob;
-  let text = '';
-  if (isZip) {
-    const bytes = Uint8Array.from(atob(body.result), (c) => c.charCodeAt(0));
-    blob = new Blob([bytes], { type: 'application/zip' });
-  } else {
-    text = body.result;
-    blob = new Blob([text], { type: body.contentType });
+  if (keepResult) {
+    let blob;
+    let text = '';
+    if (isZip) {
+      const bytes = Uint8Array.from(atob(body.result), (c) => c.charCodeAt(0));
+      blob = new Blob([bytes], { type: 'application/zip' });
+    } else {
+      text = body.result;
+      blob = new Blob([text], { type: body.contentType });
+    }
+    showResult(file, format, text, body.contentType, isZip, blob);
   }
-  showResult(file, format, text, body.contentType, isZip, blob);
 
   const failed = Object.entries(body.errors || {});
   const ok = body.successCount ?? 0;
@@ -182,43 +214,81 @@ function showResult(file, format, text, contentType, isZip, blob) {
     : '';
 }
 
-// --- checks ------------------------------------------------------------------
-// The parser only refuses a packet it can't read at all. What gets through can
-// still be damaged — see packet-lint.js for what's looked for and why. HTML
-// output isn't a packet, so there's nothing to check there.
+// --- the packets themselves --------------------------------------------------
+// Both the checks and the tiebreaker split work on parsed packets rather than on
+// what the parser sent, and the parser sends three different shapes: a bare JSON
+// document for one .docx, an envelope holding one for a merged set, and an
+// envelope holding a base64 zip for a set kept as separate files.
+//
+// Returns [{ name, packet }], or null when a zip is there but can't be opened —
+// which the caller has to say out loud rather than treat as an empty set.
+async function parsedPackets(file, envelope, raw) {
+  const one = (text, name) => {
+    try { return [{ name, packet: JSON.parse(text) }]; } catch { return []; }
+  };
+  if (!envelope) return one(raw, fileStem(file));
+  if (envelope.contentType !== 'application/zip') return one(envelope.result, fileStem(file));
 
-function checkOne(text, format, fileName) {
-  if (format === 'html') return;
-  let packet;
-  try { packet = JSON.parse(text); } catch { return; }
-  renderChecks([lintPacket(packet, { name: fileName })], 1);
-}
-
-async function checkZip(envelope, format) {
-  if (format === 'html') return;
-  // Merging several packets gives one JSON document, not a zip.
-  if (envelope.contentType !== 'application/zip') return checkOne(envelope.result, format, '');
-
-  const note = $('#yapp-checks');
   try {
     const bytes = Uint8Array.from(atob(envelope.result), (c) => c.charCodeAt(0));
-    const entries = await readZip(bytes);
-    const packets = [];
-    for (const entry of entries) {
+    const out = [];
+    for (const entry of await readZip(bytes)) {
       if (!entry.text) continue;
-      try { packets.push({ name: entry.name.replace(/\.json$/i, ''), packet: JSON.parse(entry.text) }); }
-      catch { /* not a packet we can read; the parser's own error list covers it */ }
+      // A file we can't parse is one the parser already reported; its own error
+      // list covers it, so it's dropped rather than mentioned twice.
+      try { out.push({ name: entry.name.replace(/\.json$/i, ''), packet: JSON.parse(entry.text) }); }
+      catch { /* see above */ }
     }
-    if (!packets.length) return;
-    renderChecks(lintSet(packets), packets.length);
+    return out;
   } catch {
-    // An old browser without DecompressionStream, or a zip we can't walk. The
-    // download is unaffected; say so rather than implying the set is clean.
-    $('#yapp-checks-panel').classList.remove('hidden');
-    $('#yapp-checks-meta').textContent = '';
-    note.replaceChildren(el('p', { className: 'hint' },
-      "This browser can't open the zip, so the packets inside it weren't checked. Parse a single .docx to check one."));
+    return null;
   }
+}
+
+// An old browser without DecompressionStream, or a zip we can't walk. The
+// download still works; say so rather than implying the set came back clean.
+function unopenableZip() {
+  $('#yapp-checks-panel').classList.remove('hidden');
+  $('#yapp-checks-meta').textContent = '';
+  $('#yapp-checks').replaceChildren(el('p', { className: 'hint' },
+    "This browser can't open the zip, so the packets inside it weren't checked. Parse a single .docx to check one."));
+}
+
+// --- checks ------------------------------------------------------------------
+// The parser only refuses a packet it can't read at all. What gets through can
+// still be damaged — see packet-lint.js for what's looked for and why.
+function showChecks(packets) {
+  // A set gets the extra check a single packet can't make: the one round that
+  // is a question shorter than all the others.
+  const reports = packets.length > 1
+    ? lintSet(packets)
+    : [lintPacket(packets[0].packet, { name: packets[0].name })];
+  renderChecks(reports, packets.length);
+}
+
+// --- tiebreakers -------------------------------------------------------------
+// One JSON per tossup, zipped, because a browser won't hand over twenty
+// downloads. See packet-split.js for what each file holds and why.
+function splitIntoFiles(file, packets) {
+  const pretty = $('#yapp-pretty').checked;
+  const files = [];
+  for (const { name, packet } of packets) {
+    // A single .docx is labelled by the file it came from; a set labels each
+    // question with its own round, so "Round 3 TB 07" says where to find it.
+    for (const tb of splitIntoTiebreakers(packet, { label: name })) {
+      files.push({ name: `${tb.name}.json`, text: JSON.stringify(tb.packet, null, pretty ? 2 : 0) });
+    }
+  }
+  if (!files.length) return say('Nothing to split — no tossups came out of this packet.', false);
+
+  showResult(file, TIEBREAKERS, '', 'application/zip', true, writeZip(files));
+  $('#yapp-preview-note').textContent =
+    `${files.length} file${files.length === 1 ? '' : 's'}, one per tossup — upload them all at once in the ` +
+    'director console with “tiebreaker” ticked.';
+  // Any packet the parser refused is listed on its own above; this counts what
+  // actually got split, so the two numbers can be read together.
+  const from = packets.length > 1 ? ` from ${packets.length} packets` : '';
+  say(`Split into ${files.length} tiebreaker${files.length === 1 ? '' : 's'}${from}.`, true);
 }
 
 const LEVEL_WORD = { error: 'error', warning: 'warning', note: 'note' };

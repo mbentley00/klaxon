@@ -18,6 +18,10 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+// The same split the /yapp page does, so a packet broken up here and one broken
+// up in the browser produce identical files. It lives under public/ because the
+// browser has to be able to fetch it; nothing in it is browser-specific.
+import { splitIntoTiebreakers } from '../public/js/packet-split.js';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -156,10 +160,14 @@ export async function savePacket(bucket, round, jsonText, opts = {}) {
   meta[name] = {
     visible: typeof opts.visible === 'boolean' ? opts.visible : (prev.visible ?? false),
     tiebreaker: typeof opts.tiebreaker === 'boolean' ? opts.tiebreaker : (prev.tiebreaker ?? false),
+    // Counted here because the packet is already parsed; the console uses it to
+    // know a round has more than one question in it, and so is worth splitting.
+    // Rounds uploaded before this was recorded simply don't have it.
+    tossups: packet.tossups.length,
     uploadedAt: Date.now(),
   };
   await setPacketMeta(bucket, meta);
-  return { round: name, visible: meta[name].visible, tiebreaker: meta[name].tiebreaker };
+  return { round: name, visible: meta[name].visible, tiebreaker: meta[name].tiebreaker, tossups: meta[name].tossups };
 }
 
 // Returns [{ round, visible, tiebreaker }] for every stored round.
@@ -172,7 +180,13 @@ export async function listPackets(bucket) {
       .filter((f) => f.endsWith('.json') && f !== '_meta.json')
       .map((f) => f.replace(/\.json$/, ''))
       .sort()
-      .map((round) => ({ round, visible: !!meta[round]?.visible, tiebreaker: !!meta[round]?.tiebreaker }));
+      .map((round) => ({
+        round,
+        visible: !!meta[round]?.visible,
+        tiebreaker: !!meta[round]?.tiebreaker,
+        // undefined for a round saved before the count was recorded
+        tossups: meta[round]?.tossups
+      }));
   } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
 }
 
@@ -242,6 +256,40 @@ export async function addTiebreakerUsage(bucket, entry) {
 export async function getPacket(bucket, round) {
   const name = safeName(round, 'round');
   return readTextOrNull(path.join(bucketDir(bucket), 'packets', `${name}.json`));
+}
+
+// Breaks a stored packet into one round per tossup, each marked as a tiebreaker
+// and hidden. Tiebreaker visibility is per-round, so a twenty-question pool in
+// one file is released all at once or not at all; split up, a director can hold
+// the whole pool back and release the single question a room needs.
+//
+// The source round is left on disk and hidden, which takes it out of the pool
+// (only VISIBLE tiebreaker rounds feed it) so its questions can't also arrive
+// the old way. It keeps its tiebreaker flag: dropping that would leave it
+// looking like an ordinary unreleased round, and it would turn up in the
+// "release the next round" rotation. Nothing is deleted — hiding the new rounds
+// and making the old one visible again puts everything back.
+export async function splitPacketIntoTiebreakers(bucket, round) {
+  const text = await getPacket(bucket, round);
+  if (text == null) throw new Error('no_packet');
+  const packet = parseJsonOrThrow(text);
+  const label = safeName(round, 'round');
+  const parts = splitIntoTiebreakers(packet, { label });
+  if (!parts.length) throw new Error('no_tossups');
+  // Splitting a single question just renames it, and leaves a round behind that
+  // offers to split itself again.
+  if (parts.length < 2) throw new Error('already_single');
+
+  const created = [];
+  for (const part of parts) {
+    const saved = await savePacket(bucket, part.name, JSON.stringify(part.packet, null, 2),
+      { visible: false, tiebreaker: true });
+    created.push(saved.round);
+  }
+  // Only once every new round is safely on disk: if a write had failed halfway,
+  // the source is still the pool it was.
+  await setPacketFlag(bucket, round, 'visible', false);
+  return { round: label, created };
 }
 
 // --- off-roster joins -------------------------------------------------------
