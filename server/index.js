@@ -138,7 +138,8 @@ app.post('/api/tournaments', (req, res) => {
   const { name, schedule, defaults, format, requireReaderAccounts, date, listed } = req.body || {};
   const t = store.createTournament({
     name, schedule, defaults, format, requireReaderAccounts, date, listed,
-    playerScoresheet: req.body?.playerScoresheet !== false
+    playerScoresheet: req.body?.playerScoresheet !== false,
+    scoresheetCategories: req.body?.scoresheetCategories === true
   });
   res.json({ code: t.code, directorToken: t.directorToken, name: t.name, defaults: t.roomDefaults, format: t.format });
 });
@@ -151,16 +152,25 @@ const FEEDBACK_WINDOW_MS = 10 * 60 * 1000;
 const FEEDBACK_PER_WINDOW = 5;
 const recentFeedback = new Map();   // ip -> [timestamps]
 
-function feedbackThrottled(ip) {
+// Sliding-window count of one caller's recent hits. Returns true once they're
+// over the limit. The map is swept when it grows so a long-running process
+// doesn't accumulate an entry per IP that ever called.
+function throttled(seen, ip, windowMs, perWindow) {
   const now = Date.now();
-  const hits = (recentFeedback.get(ip) || []).filter((t) => now - t < FEEDBACK_WINDOW_MS);
+  const hits = (seen.get(ip) || []).filter((t) => now - t < windowMs);
   hits.push(now);
-  recentFeedback.set(ip, hits);
-  if (recentFeedback.size > 500) {
-    for (const [k, v] of recentFeedback) if (!v.some((t) => now - t < FEEDBACK_WINDOW_MS)) recentFeedback.delete(k);
+  seen.set(ip, hits);
+  if (seen.size > 500) {
+    for (const [k, v] of seen) if (!v.some((t) => now - t < windowMs)) seen.delete(k);
   }
-  return hits.length > FEEDBACK_PER_WINDOW;
+  return hits.length > perWindow;
 }
+
+const feedbackThrottled = (ip) => throttled(recentFeedback, ip, FEEDBACK_WINDOW_MS, FEEDBACK_PER_WINDOW);
+
+// The caller's own address, as far behind Fly's proxy as we can see.
+const callerIp = (req) =>
+  String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim() || 'unknown';
 
 app.post('/api/feedback', ah(async (req, res) => {
   const message = String(req.body?.message ?? '').trim();
@@ -174,8 +184,7 @@ app.post('/api/feedback', ah(async (req, res) => {
 
   const kind = req.body?.kind === 'bug' ? 'bug' : 'feedback';
   const page = String(req.body?.page ?? '').trim().slice(0, 300);
-  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim() || 'unknown';
-  if (feedbackThrottled(ip)) return res.status(429).json({ error: "That's a lot of messages at once — try again in a few minutes." });
+  if (feedbackThrottled(callerIp(req))) return res.status(429).json({ error: "That's a lot of messages at once — try again in a few minutes." });
 
   if (!emailEnabled()) return res.status(503).json({ error: "This form isn't set up to send mail yet." });
   const sent = await sendEmail({
@@ -187,6 +196,80 @@ app.post('/api/feedback', ah(async (req, res) => {
   });
   if (!sent) return res.status(502).json({ error: "Couldn't send that just now." });
   res.json({ ok: true });
+}));
+
+// --- YAPP packet parser -----------------------------------------------------
+// YAPP (Yet Another Packet Parser) turns a Word packet into the JSON a reader
+// loads. It's a .NET service deployed as its own Fly app, so Klaxon proxies to
+// it rather than sending browsers to a second origin: the /yapp page and the
+// MODAQ moderator view both call this route, which keeps the parser's address a
+// deployment detail and means no CORS in either.
+//
+// KLAXON_YAPP_URL points at our own instance; the default is the public one the
+// MODAQ project runs, so a Klaxon that hasn't deployed a parser still works.
+const YAPP_URL = (process.env.KLAXON_YAPP_URL || 'https://www.quizbowlreader.com/yapp/api/parse').trim();
+const YAPP_MAX_BYTES = 3 * 1024 * 1024;   // the parser's own ceiling
+// Generous: a 30-packet zip takes a while, and the parser's Fly machine may be
+// stopped (auto_stop_machines) and need to boot for the first request.
+const YAPP_TIMEOUT_MS = 90 * 1000;
+const YAPP_WINDOW_MS = 10 * 60 * 1000;
+const YAPP_PER_WINDOW = 20;
+const recentYapp = new Map();   // ip -> [timestamps]
+
+// Only the parser's own options travel upstream — never an arbitrary query
+// string a caller appended to our URL.
+const YAPP_PARAMS = ['format', 'prettyPrint', 'mergeMultiple', 'version', 'modaq'];
+
+// `type: () => true` rather than '*/*': MODAQ posts the .docx as a bare
+// ArrayBuffer, which the browser sends with NO Content-Type at all, and the
+// usual matcher treats a missing type as "doesn't match" and hands us no body.
+app.post('/api/yapp/parse', express.raw({ type: () => true, limit: YAPP_MAX_BYTES }), ah(async (req, res) => {
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    return res.status(400).json({ errorMessages: ['Send the packet file as the request body.'] });
+  }
+  const ip = callerIp(req);
+  if (throttled(recentYapp, ip, YAPP_WINDOW_MS, YAPP_PER_WINDOW)) {
+    return res.status(429).json({ errorMessages: ["That's a lot of packets at once — try again in a few minutes."] });
+  }
+
+  const upstream = new URL(YAPP_URL);
+  for (const key of YAPP_PARAMS) {
+    const v = req.query[key];
+    if (typeof v === 'string') upstream.searchParams.set(key, v);
+  }
+
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), YAPP_TIMEOUT_MS);
+  let r;
+  try {
+    r = await fetch(upstream, {
+      method: 'POST',
+      // The parser reads the raw body; it isn't a multipart upload.
+      headers: {
+        'content-type': 'application/octet-stream',
+        // The parser rate-limits per IP and reads this header for it. Without
+        // it every request looks like it came from this one machine, and the
+        // whole site would share one caller's budget.
+        'x-real-ip': ip
+      },
+      body: req.body,
+      signal: abort.signal
+    });
+  } catch (e) {
+    const timedOut = e?.name === 'AbortError';
+    return res.status(504).json({
+      errorMessages: [timedOut ? 'The parser took too long to answer.' : 'Could not reach the parser.']
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  // Pass the answer through as-is: JSON for results and errors alike, and raw
+  // bytes when the parser streams back a zip of a whole set.
+  const body = Buffer.from(await r.arrayBuffer());
+  res.status(r.status);
+  res.type(r.headers.get('content-type') || 'application/octet-stream');
+  res.send(body);
 }));
 
 // Public directory of listed tournaments (browse + request to moderate).
@@ -202,7 +285,8 @@ app.get('/api/tournaments/:code', (req, res) => {
     defaults: t.roomDefaults, format: t.format, requireReaderAccounts: !!t.requireReaderAccounts,
     links: t.links || { schedule: '', discord: '' },
     autoRelease: t.autoRelease === true,
-    playerScoresheet: t.playerScoresheet !== false
+    playerScoresheet: t.playerScoresheet !== false,
+    scoresheetCategories: t.scoresheetCategories === true
   });
 });
 
@@ -368,6 +452,26 @@ app.put('/api/tournaments/:code/player-scoresheet', (req, res) => {
   // Rooms show or hide the sheet straight away.
   for (const code of t.roomCodes) { const room = store.getRoom(code); if (room) emitState(room); }
   res.json({ playerScoresheet: on });
+});
+
+// Name each tossup's category on that scoresheet. Off by default; the server
+// still only releases a category once the room is past the cycle (store's
+// category gate), so turning this on mid-round can't reveal anything ahead.
+app.put('/api/tournaments/:code/scoresheet-categories', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const on = store.setScoresheetCategories(t, req.body?.enabled === true);
+  // Categories only appear (or disappear) on the reader's next game update, so
+  // clear them from the sheet the rooms are showing right now.
+  for (const code of t.roomCodes) {
+    const room = store.getRoom(code);
+    if (!room) continue;
+    if (!on && room.scoresheet) {
+      for (const row of room.scoresheet.rows || []) row.category = null;
+    }
+    emitState(room);
+  }
+  res.json({ scoresheetCategories: on });
 });
 
 // Toggle automatic packet release (see maybeAutoRelease).
@@ -1025,6 +1129,9 @@ app.get('/account', (_req, res) => res.sendFile(path.join(publicDir, 'account.ht
 // public tournament directory (browse + request to moderate)
 app.get('/tournaments', (_req, res) => res.sendFile(path.join(publicDir, 'directory.html')));
 
+// packet parser (.docx -> the JSON a reader loads); calls /api/yapp/parse
+app.get('/yapp', (_req, res) => res.sendFile(path.join(publicDir, 'yapp.html')));
+
 // tournament director console
 app.get('/t/:code', (_req, res) => res.sendFile(path.join(publicDir, 'tournament.html')));
 
@@ -1507,7 +1614,7 @@ io.on('connection', (socket) => {
       // the player-safe scoresheet (see store.buildPlayerScoresheet) before
       // it goes anywhere near a player. `qbj: null` clears it.
       case 'modaq_game': {
-        store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false, payload.protests);
+        store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false, payload.protests, payload.categories);
         break;
       }
       // MODAQ's serialized game from one moderator, fanned out to the others

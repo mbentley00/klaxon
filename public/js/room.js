@@ -201,10 +201,16 @@ function showGate(mode, staffRole) {
 }
 
 // Rooms this browser has been in, newest first — the home page offers them
-// back (the ones still running). Codes only; nothing about who was in them.
+// back (the ones still running, joined within the last day). Codes only;
+// nothing about who was in them. Entries older than a day are dropped here as
+// well as on the home page, so the list doesn't carry stale rooms around.
+const RECENT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 function rememberRecentRoom() {
   try {
-    const list = JSON.parse(recall('recentRooms') || '[]').filter((r) => r?.code && r.code !== code);
+    const cutoff = Date.now() - RECENT_MAX_AGE_MS;
+    const list = JSON.parse(recall('recentRooms') || '[]')
+      .filter((r) => r?.code && r.code !== code && Number(r.at) > cutoff);
     list.unshift({ code, at: Date.now() });
     remember('recentRooms', JSON.stringify(list.slice(0, 8)));
   } catch {
@@ -574,6 +580,10 @@ function renderScoresheet(s) {
     num.append(n === sheet.current ? el('u', {}, String(n)) : String(n));
     const ev = el('td', { className: 'ss-ev' });
     if (row) {
+      // The tossup's category, when the director asked for it. The server only
+      // sends one for a cycle the room has finished (store's category gate), so
+      // there's nothing to hold back here.
+      if (row.category) ev.append(el('div', { className: 'ss-cat' }, row.category));
       // Same order and wording as MODAQ's cycle items.
       if (row.thrownOut) ev.append(el('div', { className: 'ss-item' }, `Threw out tossup #${row.thrownOut}`));
       for (const z of row.buzzes) {

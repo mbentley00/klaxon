@@ -110,6 +110,8 @@
       <div class="modaq-block">
         <label class="vol"><input type="checkbox" id="player-scoresheet" />
           players see a live scoresheet while the moderator reads (questions already read only)</label>
+        <label class="vol"><input type="checkbox" id="scoresheet-categories" />
+          name each tossup's category on that scoresheet, once the room is past the cycle</label>
       </div>
 
       <div class="modaq-block">
@@ -135,7 +137,9 @@
           <button id="packet-upload" class="primary tiny">Upload packets</button>
         </div>
         <p class="hint">Each file's name becomes the round label. New rounds are hidden from moderators —
-          toggle a round visible to release it. Tiebreaker packets are a pool moderators can sub in.</p>
+          toggle a round visible to release it. Tiebreaker packets are a pool moderators can sub in.
+          Got Word files? Turn them into JSON with the
+          <a href="/yapp" target="_blank" rel="noopener">packet parser</a>.</p>
         <div class="sound-row">
           <button id="release-next" class="primary tiny" disabled>Release next packet</button>
           <label class="vol"><input type="checkbox" id="auto-release" />

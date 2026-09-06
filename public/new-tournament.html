@@ -32,8 +32,10 @@
       <input id="tournament-name" placeholder="e.g. Fall Invitational" />
       <label class="select-label" for="t-date">Date</label>
       <input id="t-date" type="date" />
-      <label class="toggle"><input type="checkbox" id="t-listed" checked /> List in the public tournament
-        directory (moderators can find it and request to join)</label>
+      <label class="toggle"><input type="checkbox" id="t-listed" checked /> List on Klaxon's own public
+        tournament directory, so moderators browsing Klaxon can find this tournament and request to join it</label>
+      <p class="hint">That's the <a href="/tournaments" target="_blank" rel="noopener">Tournaments page</a> here on
+        Klaxon — nothing is published to any other site.</p>
     </section>
 
     <section class="panel">
@@ -45,26 +47,34 @@
         <option value="20/10/0">20 / 10 / 0 &nbsp;(20 power, get, no negs)</option>
       </select>
       <label class="toggle"><input type="checkbox" id="fmt-bonuses" checked /> Tournament has bonuses</label>
-      <label class="toggle"><input type="checkbox" id="fmt-massinger" /> MASSINGER pick/ban before each game
-        (teams alternate protecting and banning subcategories until 20 tossups remain)</label>
-      <label class="select-label" for="fmt-massinger-control">Who makes the pick/ban picks</label>
-      <select id="fmt-massinger-control">
-        <option value="captain">Each team's captain</option>
-        <option value="anyone">Anyone on the team</option>
-        <option value="moderator">Moderator only</option>
-      </select>
-      <label class="select-label" for="fmt-massinger-timer">Pick/ban timer (seconds per pick, 0 = no timer)</label>
-      <input type="number" id="fmt-massinger-timer" value="30" min="0" max="300" style="width:6em" />
       <label class="toggle"><input type="checkbox" id="fmt-player-scoresheet" checked /> Show players a live scoresheet
         while the moderator reads in MODAQ mode (only questions already read — never anything ahead)</label>
-      <p class="hint">Moderators reading in MODAQ mode will score with this format by default.
-        MASSINGER needs packets whose tossups carry a subcategory in their metadata.</p>
+      <label class="toggle"><input type="checkbox" id="fmt-scoresheet-categories" /> Name each tossup's category on that
+        scoresheet, once the room has finished the cycle (a category is never shown for the question being read)</label>
+      <p class="hint">Moderators reading in MODAQ mode will score with this format by default.</p>
+
+      <!-- MASSINGER last: most tournaments don't use it, and its two settings
+           only appear once it's switched on (see new-tournament.js). -->
+      <label class="toggle"><input type="checkbox" id="fmt-massinger" /> MASSINGER pick/ban before each game
+        (teams alternate protecting and banning subcategories until 20 tossups remain)</label>
+      <div id="massinger-options" class="hidden">
+        <label class="select-label" for="fmt-massinger-control">Who makes the pick/ban picks</label>
+        <select id="fmt-massinger-control">
+          <option value="captain">Each team's captain</option>
+          <option value="anyone">Anyone on the team</option>
+          <option value="moderator">Moderator only</option>
+        </select>
+        <label class="select-label" for="fmt-massinger-timer">Pick/ban timer (seconds per pick, 0 = no timer)</label>
+        <input type="number" id="fmt-massinger-timer" value="30" min="0" max="300" style="width:6em" />
+        <p class="hint">MASSINGER needs packets whose tossups carry a subcategory in their metadata.</p>
+      </div>
     </section>
 
     <section class="panel">
       <h3>Round packets <span class="muted-count">optional</span></h3>
       <p class="hint">Upload several <code>.json</code> packets at once — each file's name becomes the round
-        label. Rounds start hidden from moderators; release them from the director console.</p>
+        label. Rounds start hidden from moderators; release them from the director console. Still have
+        <code>.docx</code> files? The <a href="/yapp" target="_blank" rel="noopener">packet parser</a> converts them.</p>
       <input type="file" id="t-packet-files" accept=".json,application/json" multiple />
       <label class="toggle"><input type="checkbox" id="t-require-accounts" /> Require readers to have a
         director-approved account to access these packets</label>

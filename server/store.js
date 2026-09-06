@@ -89,7 +89,8 @@ export function hydrate({ tournaments: tournamentRecords = [], rooms: roomRecord
       schedule: normalizeSchedule(t.schedule),
       links: normalizeLinks(t.links),
       autoRelease: t.autoRelease === true,
-      playerScoresheet: t.playerScoresheet !== false
+      playerScoresheet: t.playerScoresheet !== false,
+      scoresheetCategories: t.scoresheetCategories === true
     });
   }
   for (const r of roomRecords) {
@@ -185,7 +186,7 @@ export function bucketForRoom(room) {
   return { kind: 'r', code: room.code };
 }
 
-export function createTournament({ name, schedule = [], defaults = {}, format = {}, requireReaderAccounts = false, date = '', listed = false, playerScoresheet = true }) {
+export function createTournament({ name, schedule = [], defaults = {}, format = {}, requireReaderAccounts = false, date = '', listed = false, playerScoresheet = true, scoresheetCategories = false }) {
   let code;
   do { code = roomCode(5); } while (tournaments.has(code));
   const t = {
@@ -215,7 +216,11 @@ export function createTournament({ name, schedule = [], defaults = {}, format = 
     autoRelease: false,
     // Players in MODAQ-mode rooms see a live scoresheet of the game (built
     // server-side from the reader's game, see playerScoresheet). Default on.
-    playerScoresheet: playerScoresheet !== false
+    playerScoresheet: playerScoresheet !== false,
+    // Put each tossup's category on that scoresheet, once the room is safely
+    // past the cycle (see the category gate below). Default OFF: a category is
+    // a hint, so a director opts into it.
+    scoresheetCategories: scoresheetCategories === true
   };
   tournaments.set(code, t);
   persistTournament(t);
@@ -325,11 +330,24 @@ export function setPlayerScoresheet(tournament, enabled) {
   return tournament.playerScoresheet;
 }
 
+export function setScoresheetCategories(tournament, enabled) {
+  tournament.scoresheetCategories = enabled === true;
+  persistTournament(tournament);
+  return tournament.scoresheetCategories;
+}
+
 // Do this room's players get the live scoresheet? A tournament-level choice
 // (default on); a room outside any tournament (MODAQ lite) always shows it.
 export function playerScoresheetOn(room) {
   const t = room?.tournamentCode ? tournaments.get(room.tournamentCode) : null;
   return !t || t.playerScoresheet !== false;
+}
+
+// Does that scoresheet name each tossup's category? Off unless the director
+// turned it on, so a room outside any tournament (MODAQ lite) never shows one.
+export function scoresheetCategoriesOn(room) {
+  const t = room?.tournamentCode ? tournaments.get(room.tournamentCode) : null;
+  return t?.scoresheetCategories === true;
 }
 
 // Secret key for the player landing page (/tp/CODE?key=...): shareable by the
@@ -937,7 +955,60 @@ const SCORESHEET_MAX_PLAYERS = 12;
 const label = (v) => String(v ?? '').slice(0, 80);
 const pts = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
-export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true, protests = []) {
+// --- Category gate -----------------------------------------------------------
+// Naming the category of each tossup is a nice touch for players, but the
+// category of a question nobody has heard is a spoiler — and readers do skip
+// ahead in the packet (Next twice, the question chooser, a mis-click) to look
+// at something later. So a category is released only for a cycle the room has
+// DEMONSTRABLY finished:
+//
+//   * never the question being read, nor any later one: the ceiling is clamped
+//     to `current - 1` every time the sheet is built, so navigating back
+//     re-hides whatever the reader had moved past;
+//   * a cycle with a recorded buzz was played in front of the room, so
+//     everything up to the last such cycle is released — this is what lets a
+//     reconnecting or co-reading moderator pick up where the sheet left off;
+//   * a dead tossup leaves no buzz behind, so it is released only when the
+//     reader LEAVES it for the very next question after sitting on it for at
+//     least CATEGORY_DWELL_MS. A jump forward isn't the next question, and a
+//     fly-by isn't long enough, so neither releases anything.
+//
+// The gate lives on the room (`room.catGate`) and starts over with each game.
+// It is runtime state, not persisted: after a restart it rebuilds itself from
+// the buzzes on the record, which is the conservative half of the rule anyway.
+const CATEGORY_DWELL_MS = 12000;
+const CATEGORY_MAX = 240;          // packet tossups we'll keep categories for
+const category = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+
+function categoryCeiling(room, match, through, categories, now = Date.now()) {
+  if (!room) return 0;
+  const key = JSON.stringify((Array.isArray(match?.match_teams) ? match.match_teams : [])
+    .slice(0, 2).map((mt) => label(mt?.team?.name)));
+  let g = room.catGate;
+  // A different game (or a game restarted at question 1) releases nothing yet.
+  if (!g || typeof g !== 'object' || g.key !== key || through <= 1) {
+    g = room.catGate = { key, played: 0, question: 0, since: now };
+  }
+  if (g.question !== through) {
+    // Credit the question just left only if the reader stepped forward by one
+    // (so a jump into the rest of the packet credits nothing) and stayed long
+    // enough to have actually read it.
+    if (through === g.question + 1 && g.question >= 1 && now - g.since >= CATEGORY_DWELL_MS) {
+      g.played = Math.max(g.played, g.question);
+    }
+    g.question = through;
+    g.since = now;
+  }
+  // Cycles with a buzz on the record were heard by the room, full stop.
+  for (const q of Array.isArray(match?.match_questions) ? match.match_questions : []) {
+    const n = Number(q?.question_number);
+    if (!Number.isFinite(n) || n < 1 || n >= through) continue;
+    if ((Array.isArray(q.buzzes) ? q.buzzes.length : 0) > 0) g.played = Math.max(g.played, n);
+  }
+  return categories.length === 0 ? 0 : Math.max(0, Math.min(g.played, through - 1));
+}
+
+export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true, protests = [], categories = [], ceiling = 0) {
   // Protests, whitelisted field by field. Everything here was said out loud in
   // the room (who protested, on what, the answer they gave) — the moderator's
   // free-text reasoning stays out.
@@ -1010,12 +1081,16 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
     // the row's tossup number, so the thrown-out one is the number before.)
     const replaced = q.replacement_tossup_question != null;
     const thrownOut = replaced ? Math.max(1, pts(q.tossup_question?.question_number) - 1) : null;
+    // The category of the tossup actually read here (its packet position, which
+    // a throw-out shifts) — only for cycles the gate has released.
+    const cat = n <= ceiling ? category(categories[pts(q.tossup_question?.question_number) - 1]) : '';
     rows.push({
       n,
       buzzes,
       bonus,
       replaced,
       thrownOut,
+      category: cat || null,
       protests: protestsByCycle.get(n) || [],
       scores: [totals[0], totals[1]]
     });
@@ -1026,8 +1101,22 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
 
 // The reader's page pushes its game on every change; keep the players' view.
 // Clearing (a null match) hides the sheet, e.g. when the reader leaves a game.
-export function setScoresheet(room, match, currentQuestion, hasBonuses = true, protests = []) {
-  room.scoresheet = match == null ? null : buildPlayerScoresheet(match, currentQuestion, hasBonuses, protests);
+export function setScoresheet(room, match, currentQuestion, hasBonuses = true, protests = [], categories = []) {
+  if (match == null) {
+    room.scoresheet = null;
+    room.catGate = null;
+    persistRooms();
+    return { ok: true };
+  }
+  // The reader's page sends the WHOLE packet's categories; the gate decides how
+  // far down them the room may see, and only when the director asked for them.
+  const cats = scoresheetCategoriesOn(room) && Array.isArray(categories)
+    ? categories.slice(0, CATEGORY_MAX).map(category)
+    : [];
+  const cur = Number(currentQuestion);
+  const through = Number.isFinite(cur) && cur >= 1 ? Math.floor(cur) : 0;
+  const ceiling = categoryCeiling(room, match, through, cats);
+  room.scoresheet = buildPlayerScoresheet(match, currentQuestion, hasBonuses, protests, cats, ceiling);
   persistRooms();
   return { ok: true };
 }

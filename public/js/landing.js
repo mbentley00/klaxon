@@ -12,7 +12,7 @@ const sessionToken = localStorage.getItem('bz_sessionToken');
 if (sessionToken) {
   api('GET', `/api/accounts/me?sessionToken=${encodeURIComponent(sessionToken)}`)
     .then(({ account }) => {
-      $('#account-link').textContent = `Account: ${account.displayName || account.username} →`;
+      $('#account-link').textContent = `Account: ${account.displayName || account.username}`;
       $('#account-link').href = '/account';
       if (account.displayName) remember('name', account.displayName);
       for (const [k, v] of Object.entries(account.prefs || {})) remember(k, v);
@@ -27,20 +27,24 @@ function go(code, extra = '') {
 
 // Rooms this browser joined before, if they're still running. Minimal: code,
 // name, how many players are in there now, and when we were last in.
+//
+// Only the last day of them: this list is for getting back into the game you
+// just stepped out of, and a room you were in last week isn't that — even on
+// the rare occasion its code is still live. room.js prunes on the way in too.
+const RECENT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 const ago = (ms) => {
-  const mins = Math.round((Date.now() - ms) / 60000);
+  const mins = Math.floor((Date.now() - ms) / 60000);
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins} min ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  const days = Math.round(hours / 24);
-  return days === 1 ? 'yesterday' : `${days} days ago`;
+  return `${Math.floor(mins / 60)} hr ago`;   // nothing older than a day is listed
 };
 
 async function showRecentRooms() {
   let recent = [];
   try { recent = JSON.parse(recall('recentRooms') || '[]'); } catch { return; }
-  recent = recent.filter((r) => r?.code);
+  const cutoff = Date.now() - RECENT_MAX_AGE_MS;
+  recent = recent.filter((r) => r?.code && Number(r.at) > cutoff);
   if (!recent.length) return;
   let live = [];
   try {

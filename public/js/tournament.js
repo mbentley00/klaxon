@@ -146,6 +146,27 @@ function initPlayerScoresheet(t) {
       cb.checked = !cb.checked;
     }
   };
+  initScoresheetCategories(t);
+}
+
+// Name each tossup's category on the players' scoresheet (default off). The
+// server only releases a category once the room is past that cycle, so this
+// can't reveal anything the moderator has skipped ahead to.
+function initScoresheetCategories(t) {
+  const cb = $('#scoresheet-categories');
+  if (!cb) return;
+  cb.checked = t.scoresheetCategories === true;
+  cb.onchange = async () => {
+    try {
+      await api('PUT', `/api/tournaments/${code}/scoresheet-categories`, { directorToken, enabled: cb.checked });
+      msay(cb.checked
+        ? 'Categories will appear on the players’ scoresheet for cycles the room has finished.'
+        : 'Categories off — the scoresheet lists events only.');
+    } catch (e) {
+      msay('Could not change the scoresheet categories: ' + e.message, false);
+      cb.checked = !cb.checked;
+    }
+  };
 }
 
 // Temporary share links to the stats/buzzpoint reports.

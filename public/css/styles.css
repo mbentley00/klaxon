@@ -405,30 +405,60 @@ body.has-sheet .stage > #scoresheet-view { grid-column: 2; grid-row: 1 / span 40
   font-family: "Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
   color: #323130; font-size: 14px;
 }
-.scoresheet .ss-score { font-weight: 600; font-size: 1.1rem; text-align: center; margin: 0 0 10px; color: #201f1e; }
+/* Team and player names are whatever a moderator typed, so every text cell here
+   has to survive a 60-character team name without pushing the page sideways:
+   the panel may shrink (min-width: 0), the table splits the width itself
+   (table-layout: fixed) and long words break rather than overflow. */
+.scoresheet { min-width: 0; }
+.scoresheet .ss-score {
+  font-weight: 600; font-size: 1.1rem; text-align: center; margin: 0 0 10px; color: #201f1e;
+  min-width: 0; overflow-wrap: anywhere;
+}
 .scoresheet .ss-scroll { border: 1px solid #000; max-height: 90vh; overflow-y: auto; background: #fff; }
-.scoresheet table.ss-events { width: 100%; border-collapse: collapse; }
+.scoresheet table.ss-events { width: 100%; table-layout: fixed; border-collapse: collapse; }
 .scoresheet .ss-events th {
   text-align: left; font-weight: 600; font-size: 14px; padding: 11px 12px 11px; color: #323130;
   border-bottom: 1px solid #edebe9; background: #fff; position: sticky; top: 0;
 }
-.scoresheet .ss-events td { padding: 11px 12px; vertical-align: top; border-bottom: 1px solid #edebe9; line-height: 20px; }
+.scoresheet .ss-events td {
+  padding: 11px 12px; vertical-align: top; border-bottom: 1px solid #edebe9; line-height: 20px;
+  overflow-wrap: anywhere; hyphens: auto;
+}
 .scoresheet .ss-events .ss-num { width: 2.6em; font-weight: 600; color: #323130; }
 .scoresheet .ss-events tr.ss-current td { background: #edebe9; }
 .scoresheet .ss-item { margin-bottom: 4px; }
 .scoresheet .ss-score-line { color: #323130; }
+/* The tossup's category (director opt-in). Quiet: it labels the cycle, it isn't
+   one of the events. Never shown for the question being read — see the server's
+   category gate in store.buildPlayerScoresheet. */
+.scoresheet .ss-cat {
+  font-size: 12px; font-weight: 600; letter-spacing: .02em; color: #605e5c;
+  margin-bottom: 4px; overflow-wrap: anywhere;
+}
 body.compact .scoresheet { display: none; }
 @media (max-width: 900px) {
   body.has-sheet .stage { grid-template-columns: 1fr; }
   body.has-sheet .stage > #scoresheet-view { grid-column: 1; grid-row: auto; position: static; }
   .scoresheet .ss-scroll { max-height: 50vh; }
 }
+/* Phones: the sheet sits under the buzzer, so it gets the full width but has to
+   stay out of the way — a shorter scroller, tighter cells, and a header row
+   that wraps to two lines instead of squeezing the Hide button off the edge. */
+@media (max-width: 480px) {
+  .scoresheet .ss-scroll { max-height: 44vh; }
+  .scoresheet .ss-events th { padding: 8px 10px; }
+  .scoresheet .ss-events td { padding: 8px 10px; }
+  .scoresheet .ss-events .ss-num { width: 2.2em; }
+  .scoresheet .ss-head { flex-wrap: wrap; row-gap: 6px; }
+  .scoresheet .ss-score { font-size: 1rem; }
+}
 
 .scoresheet .ss-protest { color: var(--warn); font-style: italic; }
 
 /* Scoresheet header row: score line + the player's own hide/show toggle. */
-.scoresheet .ss-head { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 0 10px; }
-.scoresheet .ss-head .ss-score { margin: 0; }
+.scoresheet .ss-head { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 0 10px; flex-wrap: wrap; }
+.scoresheet .ss-head .ss-score { margin: 0; flex: 1 1 auto; min-width: 0; }
+.scoresheet .ss-head .tiny { flex: 0 0 auto; }
 .scoresheet.ss-collapsed .ss-scroll { display: none; }
 
 /* Home page: rooms this browser has joined that are still running. */
@@ -444,3 +474,12 @@ body.compact .scoresheet { display: none; }
 .report-link { display: inline-block; margin-top: 6px; color: var(--muted); }
 .report-link:hover { color: var(--ink); }
 body.compact .report-link { display: none; }
+
+/* Packet parser page: the parsed packet, shown before you download it. */
+.yapp-preview {
+  margin: 8px 0 0; padding: 10px 12px; max-height: 40vh; overflow: auto;
+  background: var(--surface); border: 1.5px solid var(--soft); border-radius: var(--radius);
+  font-family: var(--mono); font-size: .78rem; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.yapp-preview:empty { display: none; }

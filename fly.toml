@@ -15,6 +15,12 @@ primary_region = 'iad'
 [env]
   KLAXON_DATA_DIR = '/data'
   KLAXON_CANONICAL_HOST = 'klaxonbuzz.com'
+  # Our own YAPP (Yet Another Packet Parser) deployment — the .docx -> JSON
+  # service behind /yapp and the MODAQ moderator's packet loader. It is a
+  # separate Fly app ('klaxon-yapp', built from the YAPP fork's Dockerfile);
+  # Klaxon proxies to it in /api/yapp/parse so no browser talks to it directly.
+  # Unset, Klaxon falls back to the public instance the MODAQ project runs.
+  KLAXON_YAPP_URL = 'https://klaxon-yapp.fly.dev/api/parse'
 
 [[mounts]]
   source = 'klaxon_data'

@@ -15,6 +15,15 @@ $('#t-packet-files').addEventListener('change', (e) => {
   }
 });
 
+// MASSINGER's two settings are noise for the tournaments that don't run it, so
+// they only appear once the checkbox is on. They keep their values either way —
+// the payload below reads them regardless, and the server ignores them when
+// massinger is off.
+const massingerBox = $('#fmt-massinger');
+const showMassingerOptions = () => $('#massinger-options').classList.toggle('hidden', !massingerBox.checked);
+massingerBox.addEventListener('change', showMassingerOptions);
+showMassingerOptions();
+
 $('#create-tournament').addEventListener('click', async () => {
   const btn = $('#create-tournament');
   btn.disabled = true;
@@ -44,7 +53,8 @@ $('#create-tournament').addEventListener('click', async () => {
       requireReaderAccounts: $('#t-require-accounts').checked,
       date: $('#t-date').value || undefined,
       listed: $('#t-listed').checked,
-      playerScoresheet: $('#fmt-player-scoresheet').checked
+      playerScoresheet: $('#fmt-player-scoresheet').checked,
+      scoresheetCategories: $('#fmt-scoresheet-categories').checked
     });
     remember('directorToken:' + r.code, r.directorToken);
 
