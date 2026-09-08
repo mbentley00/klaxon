@@ -568,3 +568,19 @@ body.compact .report-link { display: none; }
 .protest-side { font-size: .82rem; color: var(--muted); margin-bottom: 4px; }
 .protest-box { width: 100%; min-width: 0; font-family: var(--sans); font-size: .9rem; padding: 6px 8px; }
 body.compact #protest-view { display: none; }
+
+/* Typed answers. The box turns amber for the last seconds, when it stops
+   accepting deletions — the state is visible rather than only enforced, so a
+   rejected keystroke never reads as the page eating your typing. */
+#answer-view #answer-box { width: 100%; min-width: 0; font-size: 1rem; padding: .5em .6em; }
+#answer-box.append-only { border-color: var(--warn); background: #fffaf0; }
+#answer-clock { font-variant-numeric: tabular-nums; }
+.answer-spoken {
+  margin-top: 8px; padding: 6px 8px; border-left: 3px solid var(--soft);
+  font-size: .85rem; overflow-wrap: anywhere;
+}
+.answer-said-label {
+  font-family: var(--mono); font-size: .7rem; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--muted);
+}
+body.compact #answer-view { display: none; }

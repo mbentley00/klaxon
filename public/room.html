@@ -110,6 +110,19 @@
       </div>
     </aside>
 
+    <!-- Typed answers. Everyone behind the buzzer commits an answer before the
+         player with the floor gives theirs, so nobody can wait to hear it. The
+         box stops accepting deletions for the last couple of seconds (see
+         server/answers.js) — you can finish a word, not take one back. -->
+    <section id="answer-view" class="panel answer hidden">
+      <h3>Your answer <span id="answer-clock" class="muted-count"></span></h3>
+      <p class="hint" id="answer-hint"></p>
+      <input id="answer-box" type="text" maxlength="120" autocomplete="off"
+             placeholder="Type your answer" />
+      <p class="hint" id="answer-note"></p>
+      <div id="answer-spoken" class="answer-spoken hidden"></div>
+    </section>
+
     <!-- Protests. A player raises one in a press (ACF H.2 — "quickly and
          unobtrusively"); the arguments come later, once the moderator opens it
          (H.3), and both teams write, because a protest is argued in front of
@@ -206,6 +219,15 @@
       <label class="toggle"><input type="checkbox" id="opt-queue" /> Buzzer queue mode</label>
       <label class="toggle hidden" id="opt-withdraw-row"><input type="checkbox" id="opt-withdraw" /> Allow players to withdraw</label>
       <label class="toggle"><input type="checkbox" id="opt-autoclear" /> Auto-clear buzzer 5s after a buzz</label>
+      <label class="toggle"><input type="checkbox" id="opt-typed" /> Players type their answer instead of saying it</label>
+      <label class="toggle hidden" id="opt-locked-row"><input type="checkbox" id="opt-locked" /> ...and everyone else in the
+        queue commits one first, in secret, before the buzzed-in player answers</label>
+      <div class="row hidden" id="opt-answer-timing">
+        <label class="select-label" for="opt-answer-secs">Seconds to answer</label>
+        <input type="number" id="opt-answer-secs" min="1" max="60" style="width:5em" />
+        <label class="select-label" for="opt-answer-grace">No-delete grace (s)</label>
+        <input type="number" id="opt-answer-grace" min="0" max="10" style="width:5em" />
+      </div>
       <label class="toggle"><input type="checkbox" id="opt-require-team" /> Require team name to join</label>
       <label class="toggle"><input type="checkbox" id="opt-player-alerts" /> Let players alert me that the buzzer isn't clear</label>
       <label class="select-label" for="opt-modaq-mode">Moderator view</label>

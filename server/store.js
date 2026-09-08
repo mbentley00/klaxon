@@ -1,6 +1,7 @@
 import { DEFAULTS } from './config.js';
 import { roomCode, secretToken, uuid } from './ids.js';
 import * as protests from './protests.js';
+import * as answers from './answers.js';
 
 // ---------------------------------------------------------------------------
 // In-memory authoritative store.
@@ -153,7 +154,17 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
       rosterJoin: eff.rosterJoin === true,
       playerAlerts: eff.playerAlerts !== false, // players may flag a stuck buzzer (on by default)
       modaqMode: !!eff.modaqMode,         // reader gets the embedded MODAQ reader + buzz panel
-      modaqLite: !!eff.modaqLite          // lightweight MODAQ: reader + buzzer only, no tournament artifacts
+      modaqLite: !!eff.modaqLite,         // lightweight MODAQ: reader + buzzer only, no tournament artifacts
+      // --- typed answers (see answers.js), all off unless asked for -------
+      // The player with the floor types their answer instead of saying it.
+      typedAnswers: eff.typedAnswers === true,
+      // ...and everyone else in the queue commits one in secret first.
+      lockedAnswers: eff.lockedAnswers === true,
+      answerSeconds: clampNum(eff.answerSeconds, 1, 60, DEFAULTS.answerSeconds),
+      answerGraceSeconds: clampNum(eff.answerGraceSeconds, 0, 10, DEFAULTS.answerGraceSeconds),
+      // Every connected buzzer is its own scored individual rather than part of
+      // a team — a Discord shootout, where usernames are the players.
+      shootout: eff.shootout === true
     },
     // Roster loaded from a QBJ registration file, so buzzers can be labelled
     // with the real player who is sitting behind them (see setRoster).
@@ -266,6 +277,11 @@ function normalizeRoomDefaults(d = {}) {
   if (typeof d.playerAlerts === 'boolean') out.playerAlerts = d.playerAlerts;
   if (typeof d.modaqMode === 'boolean') out.modaqMode = d.modaqMode;
   if (typeof d.modaqLite === 'boolean') out.modaqLite = d.modaqLite;
+  if (typeof d.typedAnswers === 'boolean') out.typedAnswers = d.typedAnswers;
+  if (typeof d.lockedAnswers === 'boolean') out.lockedAnswers = d.lockedAnswers;
+  if (typeof d.shootout === 'boolean') out.shootout = d.shootout;
+  if (d.answerSeconds != null) out.answerSeconds = clampNum(d.answerSeconds, 1, 60, DEFAULTS.answerSeconds);
+  if (d.answerGraceSeconds != null) out.answerGraceSeconds = clampNum(d.answerGraceSeconds, 0, 10, DEFAULTS.answerGraceSeconds);
   return out;
 }
 
@@ -748,12 +764,20 @@ export function nextBuzz(room) {
 }
 
 // Queue mode: a player removes themselves (only if the room allows it).
+// A player takes their buzz back. In a room with locked answers this also says
+// whether it was free (see answers.withdrawal): a reaction buzz withdrawn
+// before anything was said costs nothing, and neither does one whose committed
+// answer has already been given by somebody else. The server does not apply a
+// penalty — what a neg is worth is MODAQ's business — it reports which kind of
+// withdrawal the moderator just saw.
 export function withdraw(room, playerId) {
-  if (!room.settings.allowWithdraw) return false;
+  if (!room.settings.allowWithdraw) return { ok: false };
   const before = room.queue.length;
+  const verdict = room.settings.lockedAnswers ? answers.withdrawal(room, playerId) : { free: true, reason: 'no_answers' };
   room.queue = room.queue.filter((q) => q.playerId !== playerId);
-  if (room.queue.length !== before) pushLog(room, { type: 'withdraw', playerId });
-  return room.queue.length !== before;
+  if (room.queue.length === before) return { ok: false };
+  pushLog(room, { type: 'withdraw', playerId, free: verdict.free, reason: verdict.reason });
+  return { ok: true, ...verdict };
 }
 
 // Record an incoming buzz intent. Returns { accepted, reason, firstOfWindow }.
@@ -892,6 +916,13 @@ export function setOptions(room, opts = {}) {
   if (typeof opts.playerAlerts === 'boolean') room.settings.playerAlerts = opts.playerAlerts;
   if (typeof opts.modaqMode === 'boolean') room.settings.modaqMode = opts.modaqMode;
   if (typeof opts.modaqLite === 'boolean') room.settings.modaqLite = opts.modaqLite;
+  if (typeof opts.typedAnswers === 'boolean') room.settings.typedAnswers = opts.typedAnswers;
+  if (typeof opts.lockedAnswers === 'boolean') room.settings.lockedAnswers = opts.lockedAnswers;
+  if (typeof opts.shootout === 'boolean') room.settings.shootout = opts.shootout;
+  if (opts.answerSeconds != null) room.settings.answerSeconds = clampNum(opts.answerSeconds, 1, 60, DEFAULTS.answerSeconds);
+  if (opts.answerGraceSeconds != null) {
+    room.settings.answerGraceSeconds = clampNum(opts.answerGraceSeconds, 0, 10, DEFAULTS.answerGraceSeconds);
+  }
   // Leaving queue mode collapses any queue back to the standard locked state.
   if (!room.settings.queueMode && room.queue.length) room.phase = 'locked';
   pushLog(room, { type: 'set_options', settings: room.settings });
@@ -971,6 +1002,10 @@ export function publicState(room) {
     // players in the room have already heard.
     scoresheet: playerScoresheetOn(room) ? room.scoresheet || null : null,
     queue: room.queue,
+    // The typed-answer window, when the room uses one (answers.js). Nobody's
+    // committed answer is in here — a page knows its own because it typed it.
+    answers: (room.settings.typedAnswers || room.settings.lockedAnswers)
+      ? answers.publicWindow(room) : null,
     // Protests the teams lodged, as the whole room may see them (protests.js).
     // Which side a given viewer is on is worked out on their own page from the
     // team they're on — it isn't fanned out per socket.
@@ -1004,6 +1039,12 @@ export function protestActor(room, playerId) {
   if (!member || member.role !== 'player') return null;
   return { id: member.id, name: displayName(member), team: effectiveTeam(member) || null };
 }
+
+// What to call a buzzer in a moderator-facing list.
+export const memberName = (room, playerId) => {
+  const m = room.members.get(playerId);
+  return m ? displayName(m) : null;
+};
 
 // The two teams playing here, for working out who a protest is against.
 export function activeTeams(room) {

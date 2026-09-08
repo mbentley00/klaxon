@@ -530,6 +530,7 @@ function applyState(s) {
   renderMassinger(s);
   renderScoresheet(s);
   renderProtests(s);
+  renderAnswers(s);
   announceBuzz(s);
   if (roomInfo) roomInfo.requireTeam = !!s.settings?.requireTeam;
   if (s.tournamentCode) loadTournament(s.tournamentCode);
@@ -634,6 +635,101 @@ function msCountdownText(m) {
   const left = Math.max(0, Math.ceil((m.deadline - clock.now()) / 1000));
   return left > 0 ? ` — ${left}s` : ' — TIME’S UP';
 }
+
+
+// ---- Typed answers ----
+// Everyone behind the buzzer commits an answer before the player with the floor
+// gives theirs. The last couple of seconds are append-only: you can finish the
+// word you're typing, but you can't take an answer back once you might have
+// heard something. The server enforces that (see answers.js) — this only makes
+// the box behave the way the rule already does, so it doesn't feel broken.
+let answerTick = null;
+let answerSent = '';
+let answerCommitted = '';   // the last text the server accepted
+
+function renderAnswers(s) {
+  const view = $('#answer-view');
+  const a = s.answers;
+  const inQueue = (s.queue || []).some((q) => q.playerId === state.me?.id);
+  if (!a || !a.open || !inQueue || state.role !== 'player') {
+    view.classList.add('hidden');
+    if (answerTick) { clearInterval(answerTick); answerTick = null; }
+    renderSpoken(a);
+    return;
+  }
+  view.classList.remove('hidden');
+  const box = $('#answer-box');
+  const active = a.activePlayerId === state.me?.id;
+  $('#answer-hint').textContent = active
+    ? "You have the buzzer. Type your answer — it's shown to the moderator when the clock runs out."
+    : 'Commit an answer before the player with the buzzer gives theirs. Only the moderator sees it.';
+
+  // The countdown, and the moment the box stops taking deletions.
+  if (!answerTick) {
+    answerTick = setInterval(() => {
+      const now = Date.now();
+      const left = Math.max(0, a.closesAt - now);
+      const appendOnly = now > a.deadline;
+      $('#answer-clock').textContent = left > 0 ? `${(left / 1000).toFixed(1)}s` : 'closed';
+      box.classList.toggle('append-only', appendOnly);
+      $('#answer-note').textContent = appendOnly
+        ? 'Finish your word — you can add to your answer, but not take any of it back.'
+        : '';
+      if (left <= 0) {
+        box.disabled = true;
+        clearInterval(answerTick);
+        answerTick = null;
+      }
+    }, 100);
+  }
+  renderSpoken(a);
+}
+
+function renderSpoken(a) {
+  const box = $('#answer-spoken');
+  const said = a?.spoken || [];
+  box.classList.toggle('hidden', !said.length);
+  if (said.length) {
+    box.replaceChildren(
+      el('span', { className: 'answer-said-label', textContent: said.length === 1 ? 'Given: ' : 'Given so far: ' }),
+      el('span', { textContent: said.join(' · ') }));
+  }
+}
+
+// How many people have committed, updated on its own small event rather than a
+// whole state broadcast — this changes on every keystroke in the room.
+socket.on('answers_committed', ({ cycleNo, committed }) => {
+  const s = state.snapshot;
+  if (!s?.answers || s.cycleNo !== cycleNo) return;
+  s.answers.committed = committed;
+  renderAnswers(s);
+});
+
+// Send on every keystroke: an answer is committed as it is typed, not when a
+// button is pressed, so nothing depends on remembering to submit before the
+// clock runs out.
+$('#answer-box').addEventListener('input', () => {
+  const box = $('#answer-box');
+  // Mirror the server's append-only rule locally so a rejected keystroke never
+  // looks like the box eating your typing.
+  if (box.classList.contains('append-only') && !box.value.startsWith(answerCommitted)) {
+    box.value = answerCommitted;
+    return;
+  }
+  const text = box.value;
+  if (text === answerSent) return;
+  answerSent = text;
+  socket.emit('answer_type', { text }, (res) => {
+    if (res?.ok) { answerCommitted = res.text; return; }
+    if (res?.error === 'no_deleting') {
+      // The server kept what it had; put it back rather than leaving the box
+      // showing something that was never committed.
+      answerCommitted = res.text ?? answerCommitted;
+      box.value = answerCommitted;
+      $('#answer-note').textContent = "You can't take an answer back now — only add to it.";
+    }
+  });
+});
 
 // ---- Protests ----
 // A player raises a protest in one press (ACF H.2: at a pause, "quickly and
@@ -1366,7 +1462,28 @@ function renderOptions(s) {
   $('#opt-autoclear').closest('.toggle').classList.toggle('hidden', !!s.settings?.queueMode);
   const modaq = $('#opt-modaq-mode');
   if (modaq) modaq.value = s.settings?.modaqLite ? 'lite' : s.settings?.modaqMode ? 'full' : 'off';
+  // Typed answers, and the locked-answer rule that only means anything when
+  // there is a queue for people to be waiting in.
+  const typed = !!s.settings?.typedAnswers;
+  $('#opt-typed').checked = typed;
+  $('#opt-locked').checked = !!s.settings?.lockedAnswers;
+  $('#opt-locked-row').classList.toggle('hidden', !typed || !s.settings?.queueMode);
+  $('#opt-answer-timing').classList.toggle('hidden', !typed);
+  if (document.activeElement !== $('#opt-answer-secs')) {
+    $('#opt-answer-secs').value = s.settings?.answerSeconds ?? 7;
+  }
+  if (document.activeElement !== $('#opt-answer-grace')) {
+    $('#opt-answer-grace').value = s.settings?.answerGraceSeconds ?? 2;
+  }
 }
+$('#opt-typed').onchange = (e) =>
+  socket.emit('reader_action', { action: 'set_options', options: { typedAnswers: e.target.checked } });
+$('#opt-locked').onchange = (e) =>
+  socket.emit('reader_action', { action: 'set_options', options: { lockedAnswers: e.target.checked } });
+$('#opt-answer-secs').onchange = (e) =>
+  socket.emit('reader_action', { action: 'set_options', options: { answerSeconds: Number(e.target.value) } });
+$('#opt-answer-grace').onchange = (e) =>
+  socket.emit('reader_action', { action: 'set_options', options: { answerGraceSeconds: Number(e.target.value) } });
 $('#opt-queue').onchange = (e) =>
   socket.emit('reader_action', { action: 'set_options', options: { queueMode: e.target.checked } });
 $('#opt-withdraw').onchange = (e) =>

@@ -41,7 +41,19 @@ export const DEFAULTS = {
   autoClearMs: 5000,
 
   // Number of clock-sync samples a client takes on join.
-  clockSyncSamples: 9
+  clockSyncSamples: 9,
+
+  // --- typed answers (see answers.js) ------------------------------------
+  // How long the players behind the buzzer get to type an answer once a cycle
+  // opens for them. Seven seconds is enough to type a name under pressure and
+  // short enough that a shootout still moves.
+  answerSeconds: 7,
+
+  // The tail of that window in which a typed answer may still GROW but not
+  // shrink. Without it, everyone would sit on a full answer and delete it the
+  // instant they heard the active player say the same thing; a keystroke-level
+  // "no going back" is what makes a locked answer mean something.
+  answerGraceSeconds: 2
 };
 
 // Room/tournament codes: unambiguous uppercase alphabet (no O/0, I/1).

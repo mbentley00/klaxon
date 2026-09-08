@@ -10,6 +10,7 @@ import * as store from './store.js';
 import * as artifacts from './artifacts.js';
 import { computeStats, liveGameRows, protestRows } from './stats.js';
 import * as protests from './protests.js';
+import * as answers from './answers.js';
 import { renderReport, PAGES } from './yellowfruit.js';
 import { computeBuzzpoints, renderBuzzpointsCsv, renderBuzzpointsHtml } from './buzzpoints.js';
 import { sendEmail, emailEnabled, feedbackBody, FEEDBACK_TO } from './email.js';
@@ -1551,6 +1552,23 @@ io.on('connection', (socket) => {
       setTimeout(() => {
         if (room.phase !== 'open') return; // already reset/changed
         const queue = store.resolveWindow(room);
+        // With typed answers the clock starts only now: until the order is
+        // settled nobody knows who has the floor and who is behind them.
+        if (room.settings.typedAnswers || room.settings.lockedAnswers) {
+          const window = answers.open(room, queue[0]?.playerId);
+          // Close it on the clock, not on a click: everyone committed before
+          // the floor's answer was knowable, and the rule that makes a late
+          // withdrawal cost something must not depend on the moderator's
+          // reaction time. The cycle guard makes this a no-op if the room has
+          // moved on.
+          const cycleAtOpen = room.cycleNo;
+          setTimeout(() => {
+            if (room.cycleNo !== cycleAtOpen) return;
+            answers.close(room);
+            emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));
+            emitState(room);
+          }, Math.max(0, window.closesAt - Date.now()) + 50);
+        }
         io.to(room.code).emit('buzz_result', { cycleNo: room.cycleNo, queue });
         emitState(room);
 
@@ -1876,14 +1894,66 @@ io.on('connection', (socket) => {
     ack?.({ ok: true, side: res.statement.side });
   });
 
+  // --- typed answers (see answers.js) ------------------------------------
+  // A player commits (or extends) their answer. Past the deadline the server
+  // only accepts text that still starts with what was already there — the
+  // append-only tail. Checked here, not in the browser, because a page that
+  // lies about its own input box must not be able to walk an answer back.
+  socket.on('answer_type', (payload, ack) => {
+    const ctx = sock.get(socket.id);
+    const room = ctx && store.getRoom(ctx.roomCode);
+    if (!room || !ctx.playerId) return ack?.({ error: 'no_room' });
+    if (!room.settings.typedAnswers && !room.settings.lockedAnswers) return ack?.({ error: 'disabled' });
+    const res = answers.type(room, ctx.playerId, payload?.text);
+    if (res.error) return ack?.({ error: res.error, text: res.text });
+    // Only the moderator ever sees what was typed — an answer in flight is the
+    // answer to the question, so it never goes near another player.
+    emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));
+    // The room only learns HOW MANY have committed, which is what tells it
+    // whether it is still waiting on someone. Sent as its own small event
+    // rather than a state broadcast: this fires on every keystroke.
+    const window = answers.state(room);
+    if (window) io.to(room.code).emit('answers_committed', { cycleNo: room.cycleNo, committed: window.locked.size });
+    ack?.({ ok: true, text: res.text, appendOnly: res.appendOnly });
+  });
+
+  // The player with the floor says their answer out loud (or the moderator
+  // records what they said). It goes on the record so a later withdrawal can
+  // be judged against what the room has already heard.
+  socket.on('answer_spoken', (payload, ack) => {
+    const ctx = sock.get(socket.id);
+    const room = ctx && store.getRoom(ctx.roomCode);
+    if (!room) return ack?.({ error: 'no_room' });
+    const staff = isStaff(socket, room);
+    const playerId = staff ? (payload?.playerId ?? null) : ctx.playerId;
+    // A player may only speak for themselves, and only when they have the floor.
+    if (!staff && room.queue[0]?.playerId !== ctx.playerId) return ack?.({ error: 'not_your_turn' });
+    const res = answers.speak(room, playerId, payload?.text);
+    if (res.error) return ack?.({ error: res.error });
+    emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));
+    emitState(room);
+    ack?.({ ok: true });
+  });
+
   // --- player withdraw (queue mode, only if the room allows it) ----------
   socket.on('withdraw', (_payload, ack) => {
     const ctx = sock.get(socket.id);
     const room = ctx && store.getRoom(ctx.roomCode);
     if (!room || !ctx.playerId) return ack?.({ error: 'no_room' });
-    const ok = store.withdraw(room, ctx.playerId);
-    if (ok) emitState(room);
-    ack?.({ ok });
+    const res = store.withdraw(room, ctx.playerId);
+    if (res.ok) {
+      // The moderator needs to know which kind of withdrawal that was: a
+      // reaction buzz taken back before anything was said costs nothing, and
+      // neither does one that would only have repeated an answer already
+      // given. Anything else is theirs to penalise.
+      if (room.settings.lockedAnswers) {
+        emitToStaff(room.code, 'withdraw_verdict', {
+          playerId: ctx.playerId, free: res.free, reason: res.reason
+        });
+      }
+      emitState(room);
+    }
+    ack?.({ ok: res.ok, free: res.free, reason: res.reason });
   });
 
   socket.on('disconnect', () => {
