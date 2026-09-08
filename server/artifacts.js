@@ -292,6 +292,41 @@ export async function splitPacketIntoTiebreakers(bucket, round) {
   return { round: label, created };
 }
 
+// --- buzz points ------------------------------------------------------------
+// The full buzz log of every room in the tournament, kept per room so two rooms
+// syncing at once can't clobber each other. A room's file is REPLACED on each
+// sync rather than appended to: the room already holds the whole log, so the
+// latest copy is the complete one, and a re-sync of the same game can't
+// duplicate its buzzes.
+function buzzPointsDir(bucket) {
+  return path.join(bucketDir(bucket), 'buzzpoints');
+}
+
+export async function saveRoomBuzzPoints(bucket, roomCode, payload) {
+  const dir = buzzPointsDir(bucket);
+  await ensureDir(dir);
+  await writeAtomic(path.join(dir, `${safeName(roomCode, 'room')}.json`), JSON.stringify(payload));
+  return { ok: true };
+}
+
+// Every room's buzzes, flattened. Rooms still in memory are better read live
+// (see the route) — this is what's left of the ones that have gone.
+export async function readAllBuzzPoints(bucket) {
+  const dir = buzzPointsDir(bucket);
+  let files;
+  try { files = await fs.readdir(dir); } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+  const out = [];
+  for (const f of files.filter((n) => n.endsWith('.json'))) {
+    const text = await readTextOrNull(path.join(dir, f));
+    if (text == null) continue;
+    try {
+      const rec = JSON.parse(text);
+      if (rec && Array.isArray(rec.buzzes)) out.push(rec);
+    } catch { /* a half-written file is skipped, not fatal */ }
+  }
+  return out;
+}
+
 // --- off-roster joins -------------------------------------------------------
 // Players who joined a roster room under a name the roster doesn't have. Kept
 // with the tournament so a director who was away still sees them; capped so a

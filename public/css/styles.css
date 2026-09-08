@@ -515,3 +515,17 @@ body.compact .report-link { display: none; }
 @media (max-width: 480px) {
   .yapp-finds li { flex-direction: column; gap: 2px; }
 }
+
+/* "optional" beside a section heading. It is a label ABOUT the section, not the
+   second half of its name — and an h3 is uppercase and muted already, so a
+   plain muted span next to one reads as "ROUND PACKETS OPTIONAL". Giving it a
+   shape of its own is what separates the two. */
+.optional {
+  display: inline-block; vertical-align: 2px; margin-left: .7em;
+  padding: .15em .55em; border: 1px solid var(--soft); border-radius: 999px;
+  font-family: var(--sans); font-size: .62rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+  background: var(--bg);
+}
+/* On a field label (sentence case, not a heading) it sits inline and quieter. */
+.select-label .optional { vertical-align: 1px; margin-left: .5em; }

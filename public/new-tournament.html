@@ -51,6 +51,8 @@
         while the moderator reads in MODAQ mode (only questions already read — never anything ahead)</label>
       <label class="toggle"><input type="checkbox" id="fmt-scoresheet-categories" /> Name each tossup's category on that
         scoresheet, once the room has finished the cycle (a category is never shown for the question being read)</label>
+      <label class="toggle"><input type="checkbox" id="fmt-buzz-points" /> Record buzz points for the whole tournament —
+        every buzz in every room, including the ones that lost the race to the lock and never reached the moderator</label>
       <p class="hint">Moderators reading in MODAQ mode will score with this format by default.</p>
 
       <!-- MASSINGER last: most tournaments don't use it, and its two settings
@@ -71,7 +73,7 @@
     </section>
 
     <section class="panel">
-      <h3>Round packets <span class="muted-count">optional</span></h3>
+      <h3>Round packets <span class="optional">optional</span></h3>
       <p class="hint">Upload several <code>.json</code> packets at once — each file's name becomes the round
         label. Rounds start hidden from moderators; release them from the director console. Still have
         <code>.docx</code> files? The <a href="/yapp" target="_blank" rel="noopener">packet parser</a> converts them.</p>
@@ -81,7 +83,7 @@
     </section>
 
     <section class="panel">
-      <h3>Roster <span class="muted-count">optional</span></h3>
+      <h3>Roster <span class="optional">optional</span></h3>
       <p class="hint">A registration QBJ (teams + players). MODAQ rooms default to it.</p>
       <input type="file" id="t-roster-file" accept=".qbj,.json,application/json" />
     </section>

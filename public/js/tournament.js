@@ -147,6 +147,7 @@ function initPlayerScoresheet(t) {
     }
   };
   initScoresheetCategories(t);
+  initBuzzPoints(t);
 }
 
 // Name each tossup's category on the players' scoresheet (default off). The
@@ -166,6 +167,42 @@ function initScoresheetCategories(t) {
       msay('Could not change the scoresheet categories: ' + e.message, false);
       cb.checked = !cb.checked;
     }
+  };
+}
+
+// Collect every room's buzz log for the whole tournament (default off). Worth
+// having because it holds what nothing else does: the buzzes that lost the race
+// to the lock. MODAQ only ever hears about the buzz that got the floor, so a
+// player who knew the answer and was beaten to it appears nowhere else.
+function initBuzzPoints(t) {
+  const cb = $('#buzz-points');
+  if (!cb) return;
+  const note = $('#buzz-points-note');
+  const dl = $('#buzz-points-download');
+  const show = (on) => {
+    dl.disabled = !on;
+    note.textContent = on
+      ? 'Every buzz in every room of this tournament, as JSON.'
+      : 'Turn this on before the tournament — buzzes are only kept centrally while it is on.';
+  };
+  cb.checked = t.buzzPoints === true;
+  show(cb.checked);
+  cb.onchange = async () => {
+    try {
+      await api('PUT', `/api/tournaments/${code}/buzz-points`, { directorToken, enabled: cb.checked });
+      show(cb.checked);
+      msay(cb.checked
+        ? "Recording buzz points — every room's buzzes, including the ones that lost the lock."
+        : 'Buzz points off. What has already been collected is kept.');
+    } catch (e) {
+      msay('Could not change buzz points: ' + e.message, false);
+      cb.checked = !cb.checked;
+      show(cb.checked);
+    }
+  };
+  // The endpoint sets Content-Disposition, so navigating to it downloads it.
+  dl.onclick = () => {
+    window.location = `/api/tournaments/${code}/buzz-points?directorToken=${qt(directorToken)}`;
   };
 }
 

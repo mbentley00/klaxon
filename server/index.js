@@ -139,7 +139,8 @@ app.post('/api/tournaments', (req, res) => {
   const t = store.createTournament({
     name, schedule, defaults, format, requireReaderAccounts, date, listed,
     playerScoresheet: req.body?.playerScoresheet !== false,
-    scoresheetCategories: req.body?.scoresheetCategories === true
+    scoresheetCategories: req.body?.scoresheetCategories === true,
+    buzzPoints: req.body?.buzzPoints === true
   });
   res.json({ code: t.code, directorToken: t.directorToken, name: t.name, defaults: t.roomDefaults, format: t.format });
 });
@@ -286,7 +287,8 @@ app.get('/api/tournaments/:code', (req, res) => {
     links: t.links || { schedule: '', discord: '' },
     autoRelease: t.autoRelease === true,
     playerScoresheet: t.playerScoresheet !== false,
-    scoresheetCategories: t.scoresheetCategories === true
+    scoresheetCategories: t.scoresheetCategories === true,
+    buzzPoints: t.buzzPoints === true
   });
 });
 
@@ -473,6 +475,53 @@ app.put('/api/tournaments/:code/scoresheet-categories', (req, res) => {
   }
   res.json({ scoresheetCategories: on });
 });
+
+// Collect every room's buzz log for the whole tournament (see store.buzzPoints).
+app.put('/api/tournaments/:code/buzz-points', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const on = store.setBuzzPoints(t, req.body?.enabled === true);
+  // Turning it on mid-tournament shouldn't lose what the running rooms have
+  // already collected — they keep the whole log in memory, so flush it now.
+  if (on) {
+    for (const code of t.roomCodes) {
+      const room = store.getRoom(code);
+      if (room) await flushBuzzPoints(room).catch(() => {});
+    }
+  }
+  res.json({ buzzPoints: on });
+}));
+
+// Every buzz attempt in every room of the tournament, including the ones that
+// lost to the lock — which exist nowhere else, since MODAQ only ever sees the
+// buzz that got the floor. Rooms still in memory are read live so the download
+// is current; rooms that have since gone come off disk.
+app.get('/api/tournaments/:code/buzz-points', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const live = new Map();
+  for (const code of t.roomCodes) {
+    const room = store.getRoom(code);
+    if (room) live.set(code, store.fullBuzzExport(room));
+  }
+  for (const saved of await artifacts.readAllBuzzPoints({ kind: 't', code: t.code })) {
+    if (!live.has(saved.room)) live.set(saved.room, saved);
+  }
+  const buzzes = [];
+  for (const rec of live.values()) {
+    for (const b of rec.buzzes) buzzes.push({ room: rec.room, roomName: rec.name, ...b });
+  }
+  buzzes.sort((a, b) => a.at - b.at);
+  res.setHeader('Content-Disposition', `attachment; filename="klaxon_${t.code}_buzz_points.json"`);
+  res.json({
+    format: 'klaxon-tournament-buzzpoints-1',
+    tournament: t.code,
+    name: t.name,
+    rooms: [...live.keys()],
+    exportedAt: Date.now(),
+    buzzes
+  });
+}));
 
 // Toggle automatic packet release (see maybeAutoRelease).
 app.put('/api/tournaments/:code/auto-release', (req, res) => {
@@ -821,6 +870,15 @@ app.post('/api/rooms/:code/tiebreaker-used', ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Copy a room's full buzz log up to its tournament, when the director asked for
+// buzz points. A no-op otherwise: a room outside a tournament, or one whose
+// director didn't opt in, keeps its log to itself.
+async function flushBuzzPoints(room) {
+  if (!room.tournamentCode || !store.buzzPointsOn(room)) return;
+  await artifacts.saveRoomBuzzPoints({ kind: 't', code: room.tournamentCode },
+    room.code, store.fullBuzzExport(room));
+}
+
 app.post('/api/rooms/:code/export', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
   if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
@@ -836,6 +894,9 @@ app.post('/api/rooms/:code/export', ah(async (req, res) => {
     const match = typeof req.body.qbj === 'string' ? JSON.parse(req.body.qbj) : req.body.qbj;
     await artifacts.addMatchPlayersToRoster(store.bucketForRoom(room), match);
   } catch { /* roster sync must never fail the export */ }
+  // The room's buzz log goes up with the game, so a room that is closed or
+  // restarted later doesn't take its buzz points with it.
+  await flushBuzzPoints(room).catch(() => { /* never fail the export */ });
   // A final sync may complete its round; auto-release the next packet if the
   // director opted in (best-effort).
   if (req.body?.inProgress !== true) {

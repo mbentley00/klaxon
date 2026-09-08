@@ -90,7 +90,8 @@ export function hydrate({ tournaments: tournamentRecords = [], rooms: roomRecord
       links: normalizeLinks(t.links),
       autoRelease: t.autoRelease === true,
       playerScoresheet: t.playerScoresheet !== false,
-      scoresheetCategories: t.scoresheetCategories === true
+      scoresheetCategories: t.scoresheetCategories === true,
+      buzzPoints: t.buzzPoints === true
     });
   }
   for (const r of roomRecords) {
@@ -186,7 +187,7 @@ export function bucketForRoom(room) {
   return { kind: 'r', code: room.code };
 }
 
-export function createTournament({ name, schedule = [], defaults = {}, format = {}, requireReaderAccounts = false, date = '', listed = false, playerScoresheet = true, scoresheetCategories = false }) {
+export function createTournament({ name, schedule = [], defaults = {}, format = {}, requireReaderAccounts = false, date = '', listed = false, playerScoresheet = true, scoresheetCategories = false, buzzPoints = false }) {
   let code;
   do { code = roomCode(5); } while (tournaments.has(code));
   const t = {
@@ -220,7 +221,12 @@ export function createTournament({ name, schedule = [], defaults = {}, format = 
     // Put each tossup's category on that scoresheet, once the room is safely
     // past the cycle (see the category gate below). Default OFF: a category is
     // a hint, so a director opts into it.
-    scoresheetCategories: scoresheetCategories === true
+    scoresheetCategories: scoresheetCategories === true,
+    // Collect every room's full buzz log centrally, so the director can pull
+    // the whole tournament's buzz points including the buzzes that never got
+    // the floor. Default OFF: it's a decision a director makes before the
+    // tournament, and it records the timing of every player in every room.
+    buzzPoints: buzzPoints === true
   };
   tournaments.set(code, t);
   persistTournament(t);
@@ -328,6 +334,20 @@ export function setPlayerScoresheet(tournament, enabled) {
   tournament.playerScoresheet = enabled !== false;
   persistTournament(tournament);
   return tournament.playerScoresheet;
+}
+
+export function setBuzzPoints(tournament, enabled) {
+  tournament.buzzPoints = enabled === true;
+  persistTournament(tournament);
+  return tournament.buzzPoints;
+}
+
+// Is this room's buzz log collected for its tournament? A room outside any
+// tournament keeps its log for the moderator's own download, but has nowhere
+// central to send it.
+export function buzzPointsOn(room) {
+  const t = room?.tournamentCode ? tournaments.get(room.tournamentCode) : null;
+  return t?.buzzPoints === true;
 }
 
 export function setScoresheetCategories(tournament, enabled) {
@@ -761,15 +781,25 @@ function logBuzzAttempt(room, member, { clampedTime, arrival, accepted, reason }
 export function recordBuzz(room, { playerId, clampedTime, arrival }) {
   const member = room.members.get(playerId);
   if (!member || member.role !== 'player') return { accepted: false, reason: 'not_player' };
+  // Every attempt below is logged, whatever became of it. A buzz that lost to
+  // the lock is the one that matters most for buzz points — it's a player who
+  // knew the answer and was beaten to it, and it exists nowhere else: MODAQ
+  // only ever hears about the buzz that got the floor.
+  const rejected = (reason) => {
+    logBuzzAttempt(room, member, { clampedTime, arrival, accepted: false, reason });
+    return { accepted: false, reason };
+  };
   if (room.phase !== 'open') {
     // Locked to an earlier buzz: still worth remembering that they tried.
     logBuzzAttempt(room, member, { clampedTime, arrival, accepted: false, reason: 'locked' });
     return { accepted: false, reason: 'not_open' };
   }
-  if (room.queue.some((q) => q.playerId === playerId)) return { accepted: false, reason: 'queued' };
+  // Already waiting in the queue, or out of attempts for this cycle. Neither
+  // reaches the floor, and both say something about how the room was buzzing.
+  if (room.queue.some((q) => q.playerId === playerId)) return rejected('queued');
 
   const already = room.cycle.collected.filter((b) => b.playerId === playerId).length;
-  if (already >= DEFAULTS.maxBuzzAttemptsPerCycle) return { accepted: false, reason: 'duplicate' };
+  if (already >= DEFAULTS.maxBuzzAttemptsPerCycle) return rejected('duplicate');
 
   const firstOfWindow = room.cycle.collected.length === 0;
   if (firstOfWindow) room.cycle.windowOpenedAt = arrival;

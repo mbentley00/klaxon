@@ -115,6 +115,15 @@
       </div>
 
       <div class="modaq-block">
+        <label class="vol"><input type="checkbox" id="buzz-points" />
+          record buzz points for every room, including buzzes that lost the race to the lock</label>
+        <div class="sound-row">
+          <button id="buzz-points-download" class="ghost tiny">Download buzz points</button>
+          <span class="hint" id="buzz-points-note"></span>
+        </div>
+      </div>
+
+      <div class="modaq-block">
         <h4>Roster <span id="roster-status" class="muted-count"></span></h4>
         <div id="roster-alerts" class="roster-alerts hidden">
           <h5>Players not on the roster <span id="roster-alerts-count" class="muted-count"></span></h5>
