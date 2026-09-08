@@ -529,3 +529,42 @@ body.compact .report-link { display: none; }
 }
 /* On a field label (sentence case, not a heading) it sits inline and quieter. */
 .select-label .optional { vertical-align: 1px; margin-left: .5em; }
+
+/* Protests, as the room sees them. Both teams read the whole board: under the
+   ACF rules the arguments are made in front of the room, so a team that can't
+   see what was said against it can't answer it. */
+.protest-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.protest-item {
+  border: 1.5px solid var(--soft); border-radius: var(--radius);
+  padding: 8px 10px; margin-bottom: 8px; background: var(--surface); min-width: 0;
+}
+.protest-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; font-size: .85rem; }
+.protest-q { font-family: var(--display); font-weight: 700; }
+.protest-by { color: var(--muted); overflow-wrap: anywhere; }
+.protest-reason { flex: 1 1 100%; color: var(--ink); overflow-wrap: anywhere; }
+.protest-status {
+  margin-left: auto; flex: none; font-family: var(--mono); font-size: .68rem;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+}
+.protest-status.st-open { color: var(--accent); font-weight: 600; }
+.protest-status.st-filed { color: var(--ok); }
+/* The protested question, once the moderator has filed and chosen to show it. */
+.protest-question {
+  margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--accent);
+  background: var(--bg); font-size: .88rem; line-height: 1.5; overflow-wrap: anywhere;
+}
+.protest-says { list-style: none; margin: 8px 0 0; padding: 0; font-size: .85rem; }
+.protest-says li {
+  padding: 4px 0 4px 9px; border-left: 3px solid var(--soft); margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+.protest-says li.says-for { border-left-color: var(--ok); }
+.protest-says li.says-against { border-left-color: var(--warn); }
+.says-who {
+  display: block; font-family: var(--mono); font-size: .68rem; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--muted);
+}
+.protest-mine { margin-top: 8px; }
+.protest-side { font-size: .82rem; color: var(--muted); margin-bottom: 4px; }
+.protest-box { width: 100%; min-width: 0; font-family: var(--sans); font-size: .9rem; padding: 6px 8px; }
+body.compact #protest-view { display: none; }

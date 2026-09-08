@@ -529,6 +529,7 @@ function applyState(s) {
   renderPlayers(s);
   renderMassinger(s);
   renderScoresheet(s);
+  renderProtests(s);
   announceBuzz(s);
   if (roomInfo) roomInfo.requireTeam = !!s.settings?.requireTeam;
   if (s.tournamentCode) loadTournament(s.tournamentCode);
@@ -633,6 +634,151 @@ function msCountdownText(m) {
   const left = Math.max(0, Math.ceil((m.deadline - clock.now()) / 1000));
   return left > 0 ? ` — ${left}s` : ' — TIME’S UP';
 }
+
+// ---- Protests ----
+// A player raises a protest in one press (ACF H.2: at a pause, "quickly and
+// unobtrusively" — the moderator notes it and play goes on). The arguments come
+// later: once the moderator opens the protest (H.3), BOTH teams get a box,
+// because a protest is argued in front of the room and a team that can't see
+// what was said against it can't answer it.
+//
+// Nobody is asked which side they're on. The team that lodged it argues for;
+// the team across the table argues against. That falls out of who you are, and
+// the server settles it the same way (protests.sideFor) so a hand-rolled client
+// can't file for the other side.
+const PROTEST_REASONS = [
+  { id: 'rejected', label: 'A correct answer was rejected' },
+  { id: 'ambiguous', label: 'The question is ambiguous — our answer is also correct' },
+  { id: 'too-specific', label: 'The listed answer is too specific for the clues' },
+  { id: 'no-answer', label: 'The question has no single correct answer' },
+  { id: 'prompt', label: 'We should have been prompted' },
+  { id: 'opponent', label: 'The other team was given points for an incorrect answer' }
+];
+
+const protestNote = (t, ok = true) => {
+  const n = $('#protest-lodge-note');
+  n.textContent = t;
+  n.className = 'hint ' + (ok ? '' : 'bad');
+};
+
+function fillProtestReasons() {
+  const sel = $('#protest-reason');
+  if (sel.options.length) return;
+  for (const r of PROTEST_REASONS) sel.append(el('option', { value: r.id, textContent: r.label }));
+}
+
+$('#protest-send').addEventListener('click', () => {
+  const reason = $('#protest-reason').value;
+  protestNote('Telling the moderator…');
+  socket.emit('protest_lodge', { reason }, (res) => {
+    if (res?.error) return protestNote(PROTEST_ERRORS[res.error] || res.error, false);
+    protestNote(res.existed
+      ? 'Your team already has that protest on this question.'
+      : 'The moderator has been told. They will come to it at the next break.');
+  });
+});
+
+const PROTEST_ERRORS = {
+  no_team: "The room doesn't know which team you're on yet — ask the moderator to put you on one.",
+  no_question: 'There is no question to protest yet.',
+  cooldown: 'Just a moment — you protested a second ago.',
+  too_many: 'There are already a lot of protests in this room.',
+  not_player: 'Only players can protest.',
+  not_open: 'The moderator has not opened that protest yet.',
+  not_involved: 'Only the two teams playing can write on this protest.',
+  empty: 'Write something first.'
+};
+
+let protestDrafts = new Map();   // protest id -> what this browser has typed
+
+function renderProtests(s) {
+  const view = $('#protest-view');
+  const list = s.protests || [];
+  const mine = myTeam(s);
+  const playing = !!mine && (state.role === 'player');
+  // The panel appears once there is a game to protest, or a protest to watch.
+  const canLodge = playing && Number.isFinite(Number(s.scoresheet?.current));
+  if (!list.length && !canLodge) { view.classList.add('hidden'); return; }
+  view.classList.remove('hidden');
+  fillProtestReasons();
+  $('#protest-lodge').classList.toggle('hidden', !canLodge);
+  $('#protest-count').textContent = list.length ? `(${list.length})` : '';
+
+  const ul = $('#protest-list');
+  ul.replaceChildren();
+  for (const p of list) {
+    // Which way this browser would argue, worked out the same way the server
+    // does: for the protest your team lodged, against the other team's.
+    const side = sameTeam(mine, p.byTeam) ? 'for'
+      : (p.againstTeam && sameTeam(mine, p.againstTeam) ? 'against' : null);
+    const li = el('li', { className: 'protest-item' });
+
+    const head = el('div', { className: 'protest-head' },
+      el('span', { className: 'protest-q', textContent: `Question ${p.cycle}` }),
+      el('span', { className: 'protest-by', textContent: `${p.byTeam}` }));
+    if (p.reasonLabel) head.append(el('span', { className: 'protest-reason', textContent: p.reasonLabel }));
+    head.append(el('span', { className: `protest-status st-${p.status}`, textContent: PROTEST_STATUS_WORD[p.status] || p.status }));
+    li.append(head);
+
+    // The question itself, once the moderator has filed the protest and chosen
+    // to show it. Deliberate: a live question can't be unseen.
+    if (p.questionShown && p.questionText) {
+      li.append(el('div', { className: 'protest-question' }, p.questionText));
+    }
+
+    if (p.statements.length) {
+      const sl = el('ul', { className: 'protest-says' });
+      for (const st of p.statements) {
+        sl.append(el('li', { className: `says-${st.side}` },
+          el('span', { className: 'says-who', textContent: `${st.name} · ${st.side === 'for' ? 'for' : 'against'}` }),
+          el('span', { className: 'says-text', textContent: st.text })));
+      }
+      li.append(sl);
+    }
+
+    // My box, when the moderator has opened this protest and I'm on one of the
+    // two teams. The label says which way I'm arguing so nobody has to guess.
+    if (side && p.status === 'open') {
+      const box = el('textarea', {
+        className: 'protest-box',
+        rows: 3,
+        placeholder: side === 'for'
+          ? 'Why should this protest be upheld?'
+          : 'Why should this protest be rejected?',
+        maxLength: 1500
+      });
+      const existing = p.statements.find((st) => st.playerId === state.me?.id);
+      box.value = protestDrafts.get(p.id) ?? existing?.text ?? '';
+      box.oninput = () => protestDrafts.set(p.id, box.value);
+      const send = el('button', { className: 'ghost tiny', textContent: existing ? 'Update' : 'Send' });
+      const note = el('span', { className: 'hint' });
+      send.onclick = () => {
+        const text = box.value.trim();
+        if (!text) { note.textContent = 'Write something first.'; return; }
+        note.textContent = 'Sending…';
+        socket.emit('protest_statement', { id: p.id, text }, (res) => {
+          if (res?.error) { note.textContent = PROTEST_ERRORS[res.error] || res.error; return; }
+          protestDrafts.delete(p.id);
+          note.textContent = 'Sent to the moderator.';
+        });
+      };
+      li.append(
+        el('div', { className: 'protest-mine' },
+          el('div', { className: 'protest-side' },
+            side === 'for' ? 'Your team lodged this — say why it should stand.'
+              : 'This is against your team — say why it should be rejected.'),
+          box,
+          el('div', { className: 'row' }, send, note)));
+    }
+    ul.append(li);
+  }
+}
+
+const PROTEST_STATUS_WORD = {
+  lodged: 'noted',
+  open: 'open — write now',
+  filed: 'filed'
+};
 
 // The team this browser counts as being on: the roster player the moderator
 // (or auto-linking) tied us to wins over whatever we typed on the join gate.

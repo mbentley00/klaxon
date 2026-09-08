@@ -1,5 +1,6 @@
 import { DEFAULTS } from './config.js';
 import { roomCode, secretToken, uuid } from './ids.js';
+import * as protests from './protests.js';
 
 // ---------------------------------------------------------------------------
 // In-memory authoritative store.
@@ -43,7 +44,10 @@ const serializeRoom = (r) => ({
   // The player-facing scoresheet of the game being read (already sanitized).
   scoresheet: r.scoresheet || null,
   // Every buzz attempt, for the full-buzz export (buzz-point tracking).
-  buzzLog: r.buzzLog || []
+  buzzLog: r.buzzLog || [],
+  // Protests the teams lodged (see protests.js). Durable: a protest outlives
+  // the game it was raised in — the director rules on it afterwards.
+  protests: r.protests || []
 });
 
 const persistTournament = (t) => persistence?.tournament(serializeTournament(t));
@@ -808,6 +812,28 @@ export function recordBuzz(room, { playerId, clampedTime, arrival }) {
   return { accepted: true, firstOfWindow };
 }
 
+// The buzz the room is currently held on was cleared. `judged` is true when
+// the clear came from a MODAQ ruling (the moderator scored it) and false when
+// the moderator simply cleared the buzzer — which is the room's way of saying
+// the buzz was accidental: a knocked buzzer, a misfire, nobody answering.
+//
+// Marked on the buzz log rather than inferred later, because after the reset
+// there is nothing left to tell the two apart. An accidental buzz is not a
+// buzz point, and the ACF rules make it the one ruling that is never
+// protestable (H.6), so it is worth knowing which ones they were.
+export function markAccidentalBuzz(room, judged) {
+  if (judged || !room.queue.length) return 0;
+  const held = new Set(room.queue.map((q) => q.playerId));
+  let marked = 0;
+  // Only this cycle's accepted buzzes, and only the ones still unresolved.
+  for (let i = room.buzzLog?.length ? room.buzzLog.length - 1 : 0; i >= 0; i--) {
+    const b = room.buzzLog[i];
+    if (b.cycleNo !== room.cycleNo) break;
+    if (b.accepted && held.has(b.playerId) && !b.accidental) { b.accidental = true; marked++; }
+  }
+  return marked;
+}
+
 // The room's buzz attempts with per-cycle ordering, ready to download.
 export function fullBuzzExport(room) {
   const byCycle = new Map();
@@ -945,6 +971,10 @@ export function publicState(room) {
     // players in the room have already heard.
     scoresheet: playerScoresheetOn(room) ? room.scoresheet || null : null,
     queue: room.queue,
+    // Protests the teams lodged, as the whole room may see them (protests.js).
+    // Which side a given viewer is on is worked out on their own page from the
+    // team they're on — it isn't fanned out per socket.
+    protests: protests.publicProtests(room),
     // Every team name (so the reader can pick who's playing here) but only the
     // active teams' player lists, which is all the per-buzzer picker needs and
     // keeps a whole-tournament roster out of every state broadcast.
@@ -962,6 +992,28 @@ export function publicState(room) {
       displayName: displayName(m)
     }))
   };
+}
+
+// --- protests ----------------------------------------------------------------
+// protests.js decides the rules; this settles WHO is asking. The team a person
+// counts as being on is the vouched-for one (see effectiveTeam), never what
+// they typed on the join gate — a protest is lodged by a team, so it has to be
+// a team somebody stood behind.
+export function protestActor(room, playerId) {
+  const member = room.members.get(playerId);
+  if (!member || member.role !== 'player') return null;
+  return { id: member.id, name: displayName(member), team: effectiveTeam(member) || null };
+}
+
+// The two teams playing here, for working out who a protest is against.
+export function activeTeams(room) {
+  if (room.rosterTeams?.length) return [...room.rosterTeams];
+  const seen = [];
+  for (const m of room.members.values()) {
+    const t = effectiveTeam(m);
+    if (m.role === 'player' && t && !seen.includes(t)) seen.push(t);
+  }
+  return seen;
 }
 
 // --- Player scoresheet -------------------------------------------------------

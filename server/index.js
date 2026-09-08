@@ -9,6 +9,7 @@ import { uuid, secretToken } from './ids.js';
 import * as store from './store.js';
 import * as artifacts from './artifacts.js';
 import { computeStats, liveGameRows, protestRows } from './stats.js';
+import * as protests from './protests.js';
 import { renderReport, PAGES } from './yellowfruit.js';
 import { computeBuzzpoints, renderBuzzpointsCsv, renderBuzzpointsHtml } from './buzzpoints.js';
 import { sendEmail, emailEnabled, feedbackBody, FEEDBACK_TO } from './email.js';
@@ -1580,6 +1581,14 @@ io.on('connection', (socket) => {
     switch (payload?.action) {
       case 'reset_buzzer':
       case 'clear_queue':
+        // A moderator who clears the buzzer WITHOUT scoring the buzz has
+        // declared it an accidental buzz — a knocked buzzer, a misfire — not a
+        // wrong answer. MODAQ says so by passing `judged` when the clear is the
+        // tail of a ruling; a bare clear from the buzz panel doesn't. The
+        // difference matters to buzz points (an accidental buzz is not a real
+        // buzz point) and it is the one thing the ACF rules single out as never
+        // protestable (H.6).
+        store.markAccidentalBuzz(room, payload?.judged === true);
         store.resetBuzzer(room);
         io.to(room.code).emit('buzzer_reset', { cycleNo: room.cycleNo });
         break;
@@ -1597,6 +1606,37 @@ io.on('connection', (socket) => {
         store.assignRosterPlayer(room, payload.playerId, payload.team, payload.player);
         emitState(room);
         return ack?.({ ok: true });
+      // The moderator takes the protest: from here both teams may write (H.3).
+      case 'protest_open': {
+        const res = protests.open(room, payload?.id);
+        if (res.error) return ack?.({ error: res.error });
+        emitState(room);
+        return ack?.({ ok: true });
+      }
+      // Entered in MODAQ and confirmed. Statements close: what the director
+      // rules on is what was said at the table.
+      case 'protest_file': {
+        const res = protests.file(room, payload?.id);
+        if (res.error) return ack?.({ error: res.error });
+        emitState(room);
+        return ack?.({ ok: true });
+      }
+      case 'protest_dismiss': {
+        const res = protests.dismiss(room, payload?.id);
+        if (res.error) return ack?.({ error: res.error });
+        emitState(room);
+        return ack?.({ ok: true });
+      }
+      // Show the room the question that was protested. The text comes from the
+      // moderator's MODAQ, which is the only side holding the packet — and only
+      // once the protest is filed, because a room that has seen a live question
+      // cannot unsee it.
+      case 'protest_show_question': {
+        const res = protests.showQuestion(room, payload?.id, payload?.text);
+        if (res.error) return ack?.({ error: res.error });
+        emitState(room);
+        return ack?.({ ok: true });
+      }
       case 'clear_roster':
         store.clearRoster(room);
         break;
@@ -1794,6 +1834,46 @@ io.on('connection', (socket) => {
       at: Date.now()
     });
     ack?.({ ok: true, delivered });
+  });
+
+  // --- protests (see protests.js for the ACF rules this follows) --------
+  // A team says it wants to protest (H.2). Deliberately one press: the rules
+  // have a player say the word at a pause, not stop the match to argue.
+  socket.on('protest_lodge', (payload, ack) => {
+    const ctx = sock.get(socket.id);
+    const room = ctx && store.getRoom(ctx.roomCode);
+    if (!room || !ctx.playerId) return ack?.({ error: 'no_room' });
+    const actor = store.protestActor(room, ctx.playerId);
+    if (!actor) return ack?.({ error: 'not_player' });
+    const res = protests.lodge(room, actor, {
+      // The question is the one the room has actually reached, from the
+      // scoresheet the server itself built — never a number a client sent.
+      cycle: room.scoresheet?.current ?? null,
+      round: room.modaqState?.round ?? null,
+      reason: payload?.reason,
+      teams: store.activeTeams(room)
+    });
+    if (res.error) return ack?.({ error: res.error });
+    emitToStaff(room.code, 'protest_lodged', { id: res.protest.id, byTeam: res.protest.byTeam,
+      cycle: res.protest.cycle, byName: res.protest.byName, reason: res.protest.reason });
+    emitState(room);
+    ack?.({ ok: true, id: res.protest.id, existed: res.existed === true });
+  });
+
+  // A player's reasoning. Which way it argues is settled by who they are
+  // (protests.sideFor) — they are only ever asked for the argument.
+  socket.on('protest_statement', (payload, ack) => {
+    const ctx = sock.get(socket.id);
+    const room = ctx && store.getRoom(ctx.roomCode);
+    if (!room || !ctx.playerId) return ack?.({ error: 'no_room' });
+    const actor = store.protestActor(room, ctx.playerId);
+    if (!actor) return ack?.({ error: 'not_player' });
+    const res = protests.addStatement(room, payload?.id, actor, payload?.text);
+    if (res.error) return ack?.({ error: res.error });
+    emitToStaff(room.code, 'protest_statement', { id: res.protest.id, side: res.statement.side,
+      name: res.statement.name, team: res.statement.team });
+    emitState(room);
+    ack?.({ ok: true, side: res.statement.side });
   });
 
   // --- player withdraw (queue mode, only if the room allows it) ----------

@@ -110,6 +110,23 @@
       </div>
     </aside>
 
+    <!-- Protests. A player raises one in a press (ACF H.2 — "quickly and
+         unobtrusively"); the arguments come later, once the moderator opens it
+         (H.3), and both teams write, because a protest is argued in front of
+         the room. See server/protests.js. -->
+    <section id="protest-view" class="panel protest hidden">
+      <h3>Protests <span id="protest-count" class="muted-count"></span></h3>
+      <div id="protest-lodge" class="hidden">
+        <label class="select-label" for="protest-reason">Protest this question</label>
+        <select id="protest-reason"></select>
+        <div class="row">
+          <button id="protest-send" class="ghost tiny">Tell the moderator</button>
+          <span class="hint" id="protest-lodge-note"></span>
+        </div>
+      </div>
+      <ul id="protest-list" class="protest-list"></ul>
+    </section>
+
     <!-- MASSINGER pick/ban board (tournament games only) — mirrors the board
          the moderator is driving so both teams watch picks land live. -->
     <section id="massinger-view" class="panel massinger hidden" aria-live="polite">
