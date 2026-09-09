@@ -1555,14 +1555,16 @@ io.on('connection', (socket) => {
         // With typed answers the clock starts only now: until the order is
         // settled nobody knows who has the floor and who is behind them.
         if (room.settings.typedAnswers || room.settings.lockedAnswers) {
-          const window = answers.open(room, queue[0]?.playerId);
+          const { window, started } = answers.open(room, queue[0]?.playerId);
           // Close it on the clock, not on a click: everyone committed before
           // the floor's answer was knowable, and the rule that makes a late
           // withdrawal cost something must not depend on the moderator's
           // reaction time. The cycle guard makes this a no-op if the room has
           // moved on.
           const cycleAtOpen = room.cycleNo;
-          setTimeout(() => {
+          // Only the buzz that opened the window arms the clock. A later buzz
+          // joins a window that is already ticking.
+          if (started) setTimeout(() => {
             if (room.cycleNo !== cycleAtOpen) return;
             answers.close(room);
             emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));

@@ -58,8 +58,23 @@ const secs = (room, key, fallback) => clamp(room.settings?.[key], 1, 60, fallbac
 /**
  * Open the answer window for this cycle. Called once the buzz order is settled,
  * because until then nobody knows who has the floor and who is behind them.
+ *
+ * A cycle gets ONE window. Buzzing late doesn't restart it and doesn't extend
+ * it: someone who joins the queue with two seconds left has two seconds to
+ * commit an answer, which is the cost of buzzing late. Anything else would let
+ * a player buy themselves more thinking time by waiting, and would reopen a
+ * window that has already put the floor's answer on the record.
+ *
+ * Returns { window, started } — `started` false when a window was already
+ * running, so the caller knows not to arm a second close timer.
  */
 export function open(room, activePlayerId) {
+  const live = state(room);
+  if (live) {
+    // Whoever got the floor keeps it; a late buzz only joins the queue behind.
+    if (!live.activePlayerId && activePlayerId) live.activePlayerId = activePlayerId;
+    return { window: live, started: false };
+  }
   const now = Date.now();
   const window = secs(room, 'answerSeconds', DEFAULTS.answerSeconds);
   const grace = secs(room, 'answerGraceSeconds', DEFAULTS.answerGraceSeconds);
@@ -75,7 +90,7 @@ export function open(room, activePlayerId) {
     spoken: [],
     endedAt: null
   };
-  return room.answers;
+  return { window: room.answers, started: true };
 }
 
 export function state(room) {
