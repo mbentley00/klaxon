@@ -91,8 +91,17 @@ async function loadRoomInfo() {
   }
   return roomInfo;
 }
-function applyTeamRequirement(required) {
+function applyTeamRequirement(required, shootout) {
   const team = $('#gate-team');
+  // In a shootout every competitor is their own team, named for themselves —
+  // there is nothing to type, so the box goes away rather than sitting there
+  // optional and confusing.
+  team.classList.toggle('hidden', !!shootout);
+  if (shootout) {
+    team.value = '';
+    team.required = false;
+    return;
+  }
   team.placeholder = required ? 'Team name (required)' : 'Team (optional)';
   team.required = !!required;
 }
@@ -192,7 +201,7 @@ function showGate(mode, staffRole) {
   $('#gate-name').focus();
   if (!staff) {
     loadRoomInfo().then((info) => {
-      applyTeamRequirement(info.requireTeam);
+      applyTeamRequirement(info.requireTeam, info.shootout);
       renderRosterGate(info);
     });
   } else {
@@ -534,7 +543,10 @@ function applyState(s) {
   renderShootout(s);
   renderChat(s);
   announceBuzz(s);
-  if (roomInfo) roomInfo.requireTeam = !!s.settings?.requireTeam;
+  if (roomInfo) {
+    roomInfo.requireTeam = !!s.settings?.requireTeam;
+    roomInfo.shootout = !!s.settings?.shootout;
+  }
   if (s.tournamentCode) loadTournament(s.tournamentCode);
 }
 
@@ -800,21 +812,47 @@ let chatSeen = '';
 
 function renderChat(s) {
   const view = $('#chat-view');
-  if (!s.shootout) { view.classList.add('hidden'); return; }
-  view.classList.remove('hidden');
+  const on = !!s.shootout;
+  view.classList.toggle('hidden', !on);
+  // Beside the buzzer, not under it: a player watching the chat should not
+  // have to scroll away from the thing they are about to press.
+  document.body.classList.toggle('has-chat', on && !document.body.classList.contains('compact'));
+  if (!on) return;
   const log = $('#chat-log');
   const messages = s.chat || [];
   const key = messages.length ? messages[messages.length - 1].id : '';
   if (key === chatSeen) return;
   chatSeen = key;
+  // Only follow the bottom if you were already at it — otherwise reading back
+  // through the log would be yanked away by every new message.
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
   log.replaceChildren();
-  for (const m of messages) log.append(chatLine(m));
-  log.scrollTop = log.scrollHeight;
+  let lastName = null;
+  for (const m of messages) {
+    // Discord's grouping: consecutive lines from the same person don't repeat
+    // the name, which is most of what makes a chat log readable.
+    log.append(chatLine(m, m.name === lastName));
+    lastName = m.name;
+  }
+  if (atBottom) log.scrollTop = log.scrollHeight;
 }
 
-const chatLine = (m) => el('li', { className: 'chat-line' + (m.staff ? ' chat-staff' : '') },
-  el('span', { className: 'chat-who', textContent: m.name }),
-  el('span', { className: 'chat-text', textContent: m.text }));
+function chatLine(m, grouped) {
+  const li = el('li', { className: 'chat-line' + (m.staff ? ' chat-staff' : '') + (grouped ? ' chat-cont' : '') });
+  if (!grouped) {
+    li.append(el('span', { className: 'chat-who' },
+      m.name,
+      el('span', { className: 'chat-when', textContent: chatTime(m.at) })));
+  }
+  li.append(el('span', { className: 'chat-text', textContent: m.text }));
+  return li;
+}
+
+const chatTime = (at) => {
+  try {
+    return ' ' + new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch { return ''; }
+};
 
 function sendChat() {
   const box = $('#chat-box');
@@ -1406,7 +1444,10 @@ function renderPlayers(s) {
     const mine = p.id === state.me?.id;
     // Once the reader has labelled this buzzer, the roster player IS the player.
     const shown = p.displayName || p.name;
-    const under = p.rosterPlayer ? p.rosterTeam : p.team;
+    let under = p.rosterPlayer ? p.rosterTeam : p.team;
+    // In a shootout a competitor's team IS their name, so showing both reads
+    // as "ann · ann".
+    if (under && under === shown) under = null;
     nameRow.append(el('span', { className: 'pname' },
       `${shown}${under ? ` · ${under}` : ''}${mine ? ' (you)' : ''}`));
     if (!p.connected) nameRow.append(el('span', { className: 'offline-badge' }, 'OFFLINE'));

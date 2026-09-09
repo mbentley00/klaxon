@@ -132,8 +132,10 @@ app.get('/api/rooms/:code', (req, res) => {
     // The join gate needs these before joining: whether a team is required,
     // and (when the room asks players to identify from the roster) the teams
     // and players to choose from.
-    requireTeam: !!room.settings.requireTeam,
+    requireTeam: !!room.settings.requireTeam && !room.settings.shootout,
     rosterJoin: !!room.settings.rosterJoin,
+    // A shootout has no teams to type, so the gate drops the box entirely.
+    shootout: !!room.settings.shootout,
     roster: store.joinRoster(room)
   });
 });
@@ -1553,7 +1555,7 @@ io.on('connection', (socket) => {
     // "Require team name": players must identify their team before the room
     // admits them. Staff and spectators are exempt, and a member who already
     // has a team on record keeps it across reconnects without resending it.
-    if (role === 'player' && room.settings.requireTeam) {
+    if (role === 'player' && room.settings.requireTeam && !room.settings.shootout) {
       const known = room.members.get(payload?.playerId)?.team;
       if (!String(payload?.team ?? known ?? '').trim()) return ack?.({ error: 'team_required' });
     }

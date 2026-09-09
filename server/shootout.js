@@ -23,7 +23,10 @@
 
 const MAX_CHAT = 120;              // messages kept per room
 const MAX_CHAT_TEXT = 400;
-const CHAT_COOLDOWN_MS = 700;      // per player, so one person can't flood it
+const CHAT_COOLDOWN_MS = 350;      // per player, so one person can't flood it
+// 350ms stops a script without getting in the way of a person: two short
+// lines in quick succession is ordinary conversation, and a chat that
+// refuses them is worse than one that occasionally carries a duplicate.
 
 const clean = (v, cap) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, cap);
 

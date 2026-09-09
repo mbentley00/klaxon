@@ -655,6 +655,40 @@ body.compact #answer-view { display: none; }
 #chat-box { flex: 1 1 auto; min-width: 0; }
 body.compact #shootout-view, body.compact #chat-view { display: none; }
 
+/* The chat lives beside the buzzer, in the same right-hand rail the scoresheet
+   uses — a player watching it shouldn't have to scroll away from the thing they
+   are about to press. With both on screen they stack in that rail, chat under
+   the scoresheet, because the chat is the one you keep glancing at. */
+body.has-chat .stage { max-width: 1100px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+body.has-chat .stage > * { grid-column: 1; }
+body.has-chat .stage > #chat-view { grid-column: 2; grid-row: 2 / span 40; position: sticky; top: 64px; }
+/* On its own the chat takes the whole rail; beside the scoresheet it sits under it. */
+body.has-chat:not(.has-sheet) .stage > #chat-view { grid-row: 1 / span 40; }
+
+#chat-view { display: flex; flex-direction: column; min-width: 0; }
+#chat-view h3 { flex: none; }
+.chat-log {
+  flex: 1 1 auto; list-style: none; margin: 0 0 8px; padding: 0;
+  min-height: 180px; max-height: 46vh; overflow-y: auto;
+  font-size: .86rem; line-height: 1.45;
+}
+/* Grouped like Discord: a run of messages from one person shows the name once,
+   and the continuation lines sit under it without repeating anything. */
+.chat-line { padding: 1px 0; overflow-wrap: anywhere; }
+.chat-line + .chat-line:not(.chat-cont) { margin-top: 8px; }
+.chat-who { display: block; font-weight: 700; font-size: .82rem; }
+.chat-when { font-weight: 400; font-size: .68rem; color: var(--muted); margin-left: 6px; }
+.chat-line.chat-staff .chat-who { color: var(--accent); }
+.chat-text { display: block; }
+.chat-line.chat-cont .chat-text { padding-left: 0; }
+
+@media (max-width: 900px) {
+  /* Narrow: the rail collapses and the chat goes back under everything. */
+  body.has-chat .stage { grid-template-columns: 1fr; }
+  body.has-chat .stage > #chat-view { grid-column: 1; grid-row: auto; position: static; }
+  .chat-log { max-height: 34vh; }
+}
+
 /* A question the room has finished with, folded away — a whole tossup in every
    row would bury the scoresheet it sits in. */
 .scoresheet .ss-question { margin: 4px 0; }

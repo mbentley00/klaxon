@@ -163,7 +163,10 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
       queueMode: !!eff.queueMode,        // accumulate a buzz queue vs lock to first
       allowWithdraw: !!eff.allowWithdraw, // (queue mode) players may remove themselves
       autoClear: !!eff.autoClear,         // auto-reset the buzzer a few seconds after a buzz
-      requireTeam: !!eff.requireTeam,     // players must supply a team name to join
+      // Players must supply a team name to join — never in a shootout, where
+      // a competitor is their own team and the roster is built from who is in
+      // the room (see shootout.js). Asking would be asking the wrong question.
+      requireTeam: !!eff.requireTeam && eff.shootout !== true,
       // Players pick their team (and name) from the roster instead of typing.
       rosterJoin: eff.rosterJoin === true,
       playerAlerts: eff.playerAlerts !== false, // players may flag a stuck buzzer (on by default)
@@ -969,13 +972,16 @@ export function setOptions(room, opts = {}) {
   if (typeof opts.queueMode === 'boolean') room.settings.queueMode = opts.queueMode;
   if (typeof opts.allowWithdraw === 'boolean') room.settings.allowWithdraw = opts.allowWithdraw;
   if (typeof opts.autoClear === 'boolean') room.settings.autoClear = opts.autoClear;
-  if (typeof opts.requireTeam === 'boolean') room.settings.requireTeam = opts.requireTeam;
+  if (typeof opts.requireTeam === 'boolean') room.settings.requireTeam = opts.requireTeam && !room.settings.shootout;
   if (typeof opts.playerAlerts === 'boolean') room.settings.playerAlerts = opts.playerAlerts;
   if (typeof opts.modaqMode === 'boolean') room.settings.modaqMode = opts.modaqMode;
   if (typeof opts.modaqLite === 'boolean') room.settings.modaqLite = opts.modaqLite;
   if (typeof opts.typedAnswers === 'boolean') room.settings.typedAnswers = opts.typedAnswers;
   if (typeof opts.lockedAnswers === 'boolean') room.settings.lockedAnswers = opts.lockedAnswers;
-  if (typeof opts.shootout === 'boolean') room.settings.shootout = opts.shootout;
+  if (typeof opts.shootout === 'boolean') {
+    room.settings.shootout = opts.shootout;
+    if (opts.shootout) room.settings.requireTeam = false;
+  }
   if (opts.answerSeconds != null) room.settings.answerSeconds = clampNum(opts.answerSeconds, 1, 60, DEFAULTS.answerSeconds);
   if (opts.answerGraceSeconds != null) {
     room.settings.answerGraceSeconds = clampNum(opts.answerGraceSeconds, 0, 10, DEFAULTS.answerGraceSeconds);
