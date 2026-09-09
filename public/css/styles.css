@@ -634,3 +634,23 @@ body.compact #answer-view { display: none; }
 .pt-tag.pt-early { border-color: var(--warn); color: var(--warn); }
 .pt-tag.pt-great { border-color: var(--ok); color: var(--ok); }
 .pt-text { color: var(--ink); }
+
+/* Discord shootout: the leaderboard across the whole session, and the chat. */
+.shootout-board { list-style: none; margin: 6px 0 0; padding: 0; }
+.sb-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 4px 0;
+  border-bottom: 1px solid var(--soft); font-size: .9rem;
+}
+.sb-row.sb-me { font-weight: 700; }
+.sb-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.sb-split { flex: none; font-family: var(--mono); font-size: .72rem; color: var(--muted); }
+.sb-total { flex: none; font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+.chat-log {
+  list-style: none; margin: 0 0 8px; padding: 0;
+  max-height: 30vh; overflow-y: auto; font-size: .88rem;
+}
+.chat-line { padding: 2px 0; overflow-wrap: anywhere; }
+.chat-who { font-weight: 600; margin-right: 6px; }
+.chat-line.chat-staff .chat-who { color: var(--accent); }
+#chat-box { flex: 1 1 auto; min-width: 0; }
+body.compact #shootout-view, body.compact #chat-view { display: none; }

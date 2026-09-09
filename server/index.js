@@ -1483,6 +1483,13 @@ io.on('connection', (socket) => {
       recordOffRosterJoin(room, member).catch((e) => console.error('off-roster alert failed:', e));
     }
 
+    // In a shootout the roster IS the room: whoever is connected is a
+    // competitor of their own, so someone arriving mid-session is in the next
+    // game the moderator starts without anybody typing anything.
+    if (role === 'player' && room.settings.shootout) {
+      try { store.refreshShootoutRoster(room); } catch { /* best-effort */ }
+    }
+
     // A player who joins after the teams were set still gets linked to their
     // MODAQ player, so their buzzes report the right name.
     if (role === 'player' && room.roster) {
@@ -1689,6 +1696,13 @@ io.on('connection', (socket) => {
       case 'protest_show_question': {
         const res = protests.showQuestion(room, payload?.id, payload?.text);
         if (res.error) return ack?.({ error: res.error });
+        emitState(room);
+        return ack?.({ ok: true });
+      }
+      // The evening starts again: the leaderboard goes back to nothing.
+      case 'shootout_reset': {
+        if (!room.settings.shootout) return ack?.({ error: 'disabled' });
+        store.resetShootout(room);
         emitState(room);
         return ack?.({ ok: true });
       }
@@ -1930,6 +1944,28 @@ io.on('connection', (socket) => {
       name: res.statement.name, team: res.statement.team });
     emitState(room);
     ack?.({ ok: true, side: res.statement.side });
+  });
+
+  // --- shootout chat (see shootout.js) -----------------------------------
+  // Nothing to do with answering, and gated on nothing in the game. In a room
+  // where everyone is on their own, the talking is why people are there — and
+  // without somewhere to put it, it ends up in the answer box.
+  socket.on('chat_say', (payload, ack) => {
+    const ctx = sock.get(socket.id);
+    const room = ctx && store.getRoom(ctx.roomCode);
+    if (!room || !ctx.playerId) return ack?.({ error: 'no_room' });
+    if (!room.settings.shootout) return ack?.({ error: 'disabled' });
+    const member = room.members.get(ctx.playerId);
+    const actor = {
+      id: ctx.playerId,
+      name: store.memberName(room, ctx.playerId) || 'someone',
+      staff: member ? member.role !== 'player' : false
+    };
+    const res = store.chatSay(room, actor, payload?.text);
+    if (res.error) return ack?.({ error: res.error });
+    io.to(room.code).emit('chat_message', res.message);
+    emitToStaff(room.code, 'chat_message', res.message);
+    ack?.({ ok: true });
   });
 
   // --- playtest feedback (see playtest.js) -------------------------------

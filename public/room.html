@@ -110,6 +110,25 @@
       </div>
     </aside>
 
+    <!-- Discord shootout: the leaderboard across every packet of the session,
+         and a chat that has nothing to do with answering. -->
+    <section id="shootout-view" class="panel shootout hidden">
+      <h3>Leaderboard <span id="shootout-meta" class="muted-count"></span></h3>
+      <ol id="shootout-board" class="shootout-board"></ol>
+      <div class="row hidden" id="shootout-controls">
+        <button id="shootout-reset" class="ghost tiny">Reset scores</button>
+      </div>
+    </section>
+
+    <section id="chat-view" class="panel chat hidden">
+      <h3>Chat</h3>
+      <ul id="chat-log" class="chat-log"></ul>
+      <div class="row">
+        <input id="chat-box" type="text" maxlength="400" autocomplete="off" placeholder="Say something" />
+        <button id="chat-send" class="ghost tiny">Send</button>
+      </div>
+    </section>
+
     <!-- Typed answers. Everyone behind the buzzer commits an answer before the
          player with the floor gives theirs, so nobody can wait to hear it. The
          box stops accepting deletions for the last couple of seconds (see

@@ -531,6 +531,8 @@ function applyState(s) {
   renderScoresheet(s);
   renderProtests(s);
   renderAnswers(s);
+  renderShootout(s);
+  renderChat(s);
   announceBuzz(s);
   if (roomInfo) roomInfo.requireTeam = !!s.settings?.requireTeam;
   if (s.tournamentCode) loadTournament(s.tournamentCode);
@@ -555,8 +557,11 @@ function renderScoresheet(s) {
   if (tog) tog.textContent = wanted ? 'Hide' : 'Show scoresheet';
   if (!on) { ssLastKey = ''; return; }
 
-  const [a, b] = sheet.teams;
-  $('#ss-status').textContent = `${a.name}: ${sheet.scores[0]}, ${b.name}: ${sheet.scores[1]}`;
+  // However many sides the game has — two reads as "A: 120, B: 95", and a
+  // shootout lists every competitor.
+  $('#ss-status').textContent = sheet.teams
+    .map((t, i) => `${t.name}: ${sheet.scores[i] ?? 0}`)
+    .join(', ');
   if (!wanted) { ssLastKey = ''; return; }   // collapsed: the table isn't drawn
   // State broadcasts arrive on every buzz; only redraw when the sheet changed.
   const key = JSON.stringify([sheet.teams, sheet.rows, sheet.scores, sheet.current, sheet.total]);
@@ -573,7 +578,7 @@ function renderScoresheet(s) {
   const byN = new Map(sheet.rows.map((r) => [r.n, r]));
   const total = Math.max(sheet.total || 0, sheet.rows.length);
   const tbody = el('tbody');
-  let carried = [0, 0];
+  let carried = sheet.teams.map(() => 0);
   let currentRow = null;
   for (let n = 1; n <= total; n++) {
     const row = byN.get(n);
@@ -617,7 +622,8 @@ function renderScoresheet(s) {
       }
       carried = row.scores;
     }
-    ev.append(el('div', { className: 'ss-score-line' }, `(${carried[0]} - ${carried[1]})`));
+    ev.append(el('div', { className: 'ss-score-line' },
+      `(${sheet.teams.map((_t, i) => carried[i] ?? 0).join(' - ')})`));
     tr.append(num, ev);
     tbody.append(tr);
     if (n === sheet.current) currentRow = tr;
@@ -739,6 +745,98 @@ $('#answer-box').addEventListener('input', () => {
   });
 });
 
+
+
+// ---- Discord shootout ----
+// Everyone plays for themselves, so the score is a leaderboard rather than a
+// match score, and it runs across every packet of the session: what is on the
+// board is what has been banked from finished packets plus whatever the game in
+// progress has so far (see server/shootout.js).
+function renderShootout(s) {
+  const view = $('#shootout-view');
+  const board = s.shootout;
+  if (!board) { view.classList.add('hidden'); return; }
+  view.classList.remove('hidden');
+  $('#shootout-meta').textContent = board.packets
+    ? `${board.packets} packet${board.packets === 1 ? '' : 's'} banked`
+    : 'this packet';
+
+  const ol = $('#shootout-board');
+  ol.replaceChildren();
+  for (const row of board.rows) {
+    const me = row.name === (state.me?.name || '');
+    ol.append(el('li', { className: 'sb-row' + (me ? ' sb-me' : '') },
+      el('span', { className: 'sb-name', textContent: row.name }),
+      // The banked half is shown separately so nobody has to wonder whether the
+      // number moved because of this packet or an earlier one.
+      el('span', { className: 'sb-split', textContent: row.banked ? `${row.banked} + ${row.current}` : '' }),
+      el('span', { className: 'sb-total', textContent: String(row.total) })));
+  }
+  if (!board.rows.length) ol.append(el('li', { className: 'empty' }, 'Nobody has scored yet.'));
+  $('#shootout-controls').classList.toggle('hidden', !isStaffRole(state.role));
+}
+
+$('#shootout-reset')?.addEventListener('click', () => {
+  if (!confirm('Reset the leaderboard? Every packet banked so far goes back to zero.')) return;
+  socket.emit('reader_action', { action: 'shootout_reset' }, (res) => {
+    if (res?.error) say('Could not reset: ' + res.error, false);
+  });
+});
+
+// ---- Chat ----
+// Deliberately nothing to do with the game: not an answer, not a protest, not
+// gated on anything. In a room where everyone is on their own, the talking is
+// why people are there — and without somewhere to put it, it ends up in the
+// answer box.
+let chatSeen = '';
+
+function renderChat(s) {
+  const view = $('#chat-view');
+  if (!s.shootout) { view.classList.add('hidden'); return; }
+  view.classList.remove('hidden');
+  const log = $('#chat-log');
+  const messages = s.chat || [];
+  const key = messages.length ? messages[messages.length - 1].id : '';
+  if (key === chatSeen) return;
+  chatSeen = key;
+  log.replaceChildren();
+  for (const m of messages) log.append(chatLine(m));
+  log.scrollTop = log.scrollHeight;
+}
+
+const chatLine = (m) => el('li', { className: 'chat-line' + (m.staff ? ' chat-staff' : '') },
+  el('span', { className: 'chat-who', textContent: m.name }),
+  el('span', { className: 'chat-text', textContent: m.text }));
+
+function sendChat() {
+  const box = $('#chat-box');
+  const text = box.value.trim();
+  if (!text) return;
+  box.value = '';
+  socket.emit('chat_say', { text }, (res) => {
+    // A message the server refused goes back in the box rather than vanishing.
+    if (res?.error) { box.value = text; say(CHAT_ERRORS[res.error] || res.error, false); }
+  });
+}
+
+const CHAT_ERRORS = {
+  too_fast: 'One at a time.',
+  empty: 'Nothing to say?',
+  disabled: 'This room has no chat.'
+};
+
+$('#chat-send')?.addEventListener('click', sendChat);
+$('#chat-box')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+
+// Messages arrive on their own event so a chat line doesn't wait for the next
+// state broadcast, and doesn't cause one.
+socket.on('chat_message', (m) => {
+  const s = state.snapshot;
+  if (!s?.shootout) return;
+  s.chat = [...(s.chat || []).filter((x) => x.id !== m.id), m].slice(-120);
+  chatSeen = '';
+  renderChat(s);
+});
 
 // ---- Playtest feedback ----
 // A playtest room is reading these questions to find out what is wrong with

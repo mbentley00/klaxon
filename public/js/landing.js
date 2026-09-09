@@ -106,3 +106,21 @@ $('#create-modaq').addEventListener('click', () => {
     location.href = `/modaq?room=${code}`;
   });
 });
+
+// A Discord shootout: everyone for themselves. The settings are the ones a
+// shootout always wants, so the host doesn't have to find them on /advanced —
+// a buzz queue (with several people racing, the order is the interesting part),
+// withdrawing allowed, because a reaction buzz in a shootout should cost
+// nothing, and MODAQ to read and keep score. The forced-answer mode is left
+// off: it changes the game, so it is the host's to switch on in the room.
+$('#create-shootout').addEventListener('click', () => {
+  createRoom({
+    modaqMode: true,
+    modaqLite: true,
+    shootout: true,
+    queueMode: true,
+    allowWithdraw: true
+  }, (code) => {
+    location.href = `/modaq?room=${code}`;
+  });
+});

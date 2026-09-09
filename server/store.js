@@ -3,6 +3,7 @@ import { roomCode, secretToken, uuid } from './ids.js';
 import * as protests from './protests.js';
 import * as answers from './answers.js';
 import * as playtest from './playtest.js';
+import * as shootout from './shootout.js';
 
 // ---------------------------------------------------------------------------
 // In-memory authoritative store.
@@ -52,7 +53,11 @@ const serializeRoom = (r) => ({
   protests: r.protests || [],
   // What the room thought of the questions (see playtest.js). The reason the
   // playtest happened, so it had better survive a restart.
-  playtestFeedback: r.playtestFeedback || []
+  playtestFeedback: r.playtestFeedback || [],
+  // A shootout's running leaderboard and its chat (see shootout.js). Both last
+  // the evening, so both outlive a restart.
+  shootout: r.shootout || null,
+  chat: r.chat || []
 });
 
 const persistTournament = (t) => persistence?.tournament(serializeTournament(t));
@@ -1029,6 +1034,12 @@ export function publicState(room) {
     // A playtest room shows answer lines once a cycle is over and asks the
     // room what it thought (see playtest.js).
     playtest: playtestOn(room),
+    // A shootout's leaderboard across every packet of the session, and its
+    // chat (see shootout.js). Null in a room that isn't one.
+    shootout: room.settings.shootout
+      ? shootout.board(room, shootout.currentScores(room.scoresheet))
+      : null,
+    chat: room.settings.shootout ? shootout.messages(room) : [],
     // The typed-answer window, when the room uses one (answers.js). Nobody's
     // committed answer is in here — a page knows its own because it typed it.
     answers: (room.settings.typedAnswers || room.settings.lockedAnswers)
@@ -1067,6 +1078,33 @@ export function protestActor(room, playerId) {
   return { id: member.id, name: displayName(member), team: effectiveTeam(member) || null };
 }
 
+// A shootout's roster IS the room: everyone connected is a competitor of their
+// own, named for themselves. Rebuilt whenever the room changes, so someone
+// arriving at question 9 is simply in the next game the moderator starts.
+export function refreshShootoutRoster(room) {
+  if (!room.settings.shootout) return false;
+  const next = shootout.roster([...room.members.values()], displayName);
+  const before = JSON.stringify(room.roster?.teams ?? null);
+  if (JSON.stringify(next?.teams ?? null) === before) return false;
+  room.roster = next;
+  room.rosterTeams = next ? next.teams.map((t) => t.name) : [];
+  persistRooms();
+  return true;
+}
+
+// The moderator wipes the leaderboard and starts the evening again.
+export function resetShootout(room) {
+  shootout.reset(room);
+  persistRooms();
+  return shootout.board(room, shootout.currentScores(room.scoresheet));
+}
+
+export function chatSay(room, actor, text) {
+  const res = shootout.say(room, actor, text);
+  if (res.ok) persistRooms();
+  return res;
+}
+
 // What to call a buzzer in a moderator-facing list.
 export const memberName = (room, playerId) => {
   const m = room.members.get(playerId);
@@ -1102,6 +1140,9 @@ export function activeTeams(room) {
 // it retracts the moment they navigate back.
 const SCORESHEET_MAX_ROWS = 100;
 const SCORESHEET_MAX_PLAYERS = 12;
+// A match is nearly always two sides, but MODAQ now reads games with more —
+// and a shootout is one per competitor, which is the whole point of it.
+const SCORESHEET_MAX_TEAMS = 16;
 const label = (v) => String(v ?? '').slice(0, 80);
 const pts = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
@@ -1136,7 +1177,7 @@ const answerLine = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 3
 function revealCeiling(room, match, through, hasContent, now = Date.now()) {
   if (!room) return 0;
   const key = JSON.stringify((Array.isArray(match?.match_teams) ? match.match_teams : [])
-    .slice(0, 2).map((mt) => label(mt?.team?.name)));
+    .slice(0, SCORESHEET_MAX_TEAMS).map((mt) => label(mt?.team?.name)));
   let g = room.catGate;
   // A different game (or a game restarted at question 1) releases nothing yet.
   if (!g || typeof g !== 'object' || g.key !== key || through <= 1) {
@@ -1181,7 +1222,7 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
     });
   }
   if (!match || typeof match !== 'object' || !Array.isArray(match.match_teams)) return null;
-  const teams = match.match_teams.slice(0, 2).map((mt) => ({
+  const teams = match.match_teams.slice(0, SCORESHEET_MAX_TEAMS).map((mt) => ({
     name: label(mt?.team?.name),
     players: (Array.isArray(mt?.match_players) ? mt.match_players : [])
       .slice(0, SCORESHEET_MAX_PLAYERS)
@@ -1198,7 +1239,8 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
   const total = Math.max(through, Math.min(SCORESHEET_MAX_ROWS, Math.floor(Number(match.tossups_read)) || 0));
 
   const questions = Array.isArray(match.match_questions) ? match.match_questions : [];
-  const totals = [0, 0];
+  // One running total per side, however many there are.
+  const totals = teams.map(() => 0);
   const rows = [];
   for (const q of questions) {
     const n = Number(q?.question_number);
@@ -1225,8 +1267,12 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
         const got = parts.reduce((a, b) => a + b, 0);
         const bounced = bounce.reduce((a, b) => a + b, 0);
         totals[winner.team] += got;
-        totals[1 - winner.team] += bounced;
-        bonus = { team: winner.team, parts, total: got, bounceback: bounced || 0 };
+        // A bounceback only means anything with two sides — with more, there
+        // is no single "other team" to give it to, and formats that read that
+        // way don't bounce bonuses anyway.
+        const other = teams.length === 2 ? 1 - winner.team : -1;
+        if (other >= 0) totals[other] += bounced;
+        bonus = { team: winner.team, parts, total: got, bounceback: (other >= 0 && bounced) || 0 };
       }
     }
     // A thrown-out tossup is something the room witnessed; nothing about the
@@ -1250,11 +1296,11 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
       category: cat || null,
       answer: answer || null,
       protests: protestsByCycle.get(n) || [],
-      scores: [totals[0], totals[1]]
+      scores: [...totals]
     });
   }
   rows.sort((a, b) => a.n - b.n);
-  return { teams, rows, through, current: through, total, scores: [totals[0], totals[1]], at: Date.now() };
+  return { teams, rows, through, current: through, total, scores: [...totals], at: Date.now() };
 }
 
 // The reader's page pushes its game on every change; keep the players' view.
@@ -1277,10 +1323,28 @@ export function setScoresheet(room, match, currentQuestion, hasBonuses = true, p
     : [];
   const cur = Number(currentQuestion);
   const through = Number.isFinite(cur) && cur >= 1 ? Math.floor(cur) : 0;
+  // A shootout runs over several packets in one sitting, so a new game is a
+  // new PACKET rather than the end of the session: bank what the last one
+  // finished with before the scoresheet is replaced by an empty game.
+  if (room.settings.shootout) bankIfNewGame(room, match);
   const ceiling = revealCeiling(room, match, through, cats.length > 0 || answerLines.length > 0);
   room.scoresheet = buildPlayerScoresheet(match, currentQuestion, hasBonuses, protests, cats, ceiling, answerLines);
   persistRooms();
   return { ok: true };
+}
+
+// Did the room just start a different game? A game with no events at all,
+// where the one on screen had some, is the next packet going in — the same
+// test the moderator page uses to decide it is no longer editing the old game.
+function bankIfNewGame(room, match) {
+  const events = (Array.isArray(match?.match_questions) ? match.match_questions : [])
+    .reduce((n, q) => n + (Array.isArray(q.buzzes) ? q.buzzes.length : 0), 0);
+  const had = (room.scoresheet?.rows || []).some((r) => r.buzzes?.length || r.bonus);
+  if (events === 0 && had) {
+    shootout.bank(room, shootout.currentScores(room.scoresheet));
+    const s = shootout.state(room);
+    s.packets = (s.packets || 0) + 1;
+  }
 }
 
 function clampNum(v, lo, hi, fallback) {
