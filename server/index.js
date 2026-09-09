@@ -11,6 +11,7 @@ import * as artifacts from './artifacts.js';
 import { computeStats, liveGameRows, protestRows } from './stats.js';
 import * as protests from './protests.js';
 import * as answers from './answers.js';
+import * as playtest from './playtest.js';
 import { renderReport, PAGES } from './yellowfruit.js';
 import { computeBuzzpoints, renderBuzzpointsCsv, renderBuzzpointsHtml } from './buzzpoints.js';
 import { sendEmail, emailEnabled, feedbackBody, FEEDBACK_TO } from './email.js';
@@ -142,7 +143,8 @@ app.post('/api/tournaments', (req, res) => {
     name, schedule, defaults, format, requireReaderAccounts, date, listed,
     playerScoresheet: req.body?.playerScoresheet !== false,
     scoresheetCategories: req.body?.scoresheetCategories === true,
-    buzzPoints: req.body?.buzzPoints === true
+    buzzPoints: req.body?.buzzPoints === true,
+    playtest: req.body?.playtest === true
   });
   res.json({ code: t.code, directorToken: t.directorToken, name: t.name, defaults: t.roomDefaults, format: t.format });
 });
@@ -290,7 +292,8 @@ app.get('/api/tournaments/:code', (req, res) => {
     autoRelease: t.autoRelease === true,
     playerScoresheet: t.playerScoresheet !== false,
     scoresheetCategories: t.scoresheetCategories === true,
-    buzzPoints: t.buzzPoints === true
+    buzzPoints: t.buzzPoints === true,
+    playtest: t.playtest === true
   });
 });
 
@@ -523,6 +526,38 @@ app.get('/api/tournaments/:code/buzz-points', ah(async (req, res) => {
     exportedAt: Date.now(),
     buzzes
   });
+}));
+
+// Turn a tournament into a playtest, or back.
+app.put('/api/tournaments/:code/playtest', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const on = store.setPlaytest(t, req.body?.enabled === true);
+  // Answer lines appear (or stop appearing) on the next game update, so clear
+  // what the rooms are showing right now.
+  for (const code of t.roomCodes) {
+    const room = store.getRoom(code);
+    if (!room) continue;
+    if (!on && room.scoresheet) for (const row of room.scoresheet.rows || []) row.answer = null;
+    emitState(room);
+  }
+  res.json({ playtest: on });
+}));
+
+// Everything the playtest rooms said about the questions, newest last.
+app.get('/api/tournaments/:code/playtest-feedback', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const feedback = [];
+  for (const code of t.roomCodes) {
+    const room = store.getRoom(code);
+    if (room) feedback.push(...playtest.all(room));
+  }
+  feedback.sort((a, b) => a.at - b.at);
+  if (req.query.download === '1') {
+    res.setHeader('Content-Disposition', `attachment; filename="klaxon_${t.code}_playtest_feedback.json"`);
+  }
+  res.json({ tournament: t.code, name: t.name, tags: playtest.FEEDBACK_TAGS, feedback });
 }));
 
 // Toggle automatic packet release (see maybeAutoRelease).
@@ -1752,7 +1787,8 @@ io.on('connection', (socket) => {
       // the player-safe scoresheet (see store.buildPlayerScoresheet) before
       // it goes anywhere near a player. `qbj: null` clears it.
       case 'modaq_game': {
-        store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false, payload.protests, payload.categories);
+        store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false,
+          payload.protests, payload.categories, payload.answers);
         break;
       }
       // MODAQ's serialized game from one moderator, fanned out to the others
@@ -1894,6 +1930,34 @@ io.on('connection', (socket) => {
       name: res.statement.name, team: res.statement.team });
     emitState(room);
     ack?.({ ok: true, side: res.statement.side });
+  });
+
+  // --- playtest feedback (see playtest.js) -------------------------------
+  // What one player thought of one question. Only for a cycle the room has
+  // finished — the same gate that releases the answer line — so this can't be
+  // used to fish for an answer to a question still in play.
+  socket.on('playtest_feedback', (payload, ack) => {
+    const ctx = sock.get(socket.id);
+    const room = ctx && store.getRoom(ctx.roomCode);
+    if (!room || !ctx.playerId) return ack?.({ error: 'no_room' });
+    if (!store.playtestOn(room)) return ack?.({ error: 'disabled' });
+    const actor = store.protestActor(room, ctx.playerId);
+    if (!actor) return ack?.({ error: 'not_player' });
+    const sheet = room.scoresheet;
+    const row = (sheet?.rows || []).find((r) => r.n === Number(payload?.cycle));
+    const res = playtest.record(room, actor, {
+      cycle: payload?.cycle,
+      tags: payload?.tags,
+      text: payload?.text,
+      // A row only carries an answer once the gate released it, so "has an
+      // answer line" IS "the room has finished this cycle".
+      released: (sheet?.rows || []).filter((r) => r.answer).reduce((max, r) => Math.max(max, r.n), 0),
+      round: room.modaqState?.round ?? null,
+      answer: row?.answer
+    });
+    if (res.error) return ack?.({ error: res.error });
+    emitToStaff(room.code, 'playtest_feedback', { cycle: Number(payload?.cycle), name: actor.name });
+    ack?.({ ok: true, mine: playtest.mine(room, ctx.playerId) });
   });
 
   // --- typed answers (see answers.js) ------------------------------------

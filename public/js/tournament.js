@@ -148,6 +148,7 @@ function initPlayerScoresheet(t) {
   };
   initScoresheetCategories(t);
   initBuzzPoints(t);
+  initPlaytest(t);
 }
 
 // Name each tossup's category on the players' scoresheet (default off). The
@@ -204,6 +205,69 @@ function initBuzzPoints(t) {
   dl.onclick = () => {
     window.location = `/api/tournaments/${code}/buzz-points?directorToken=${qt(directorToken)}`;
   };
+}
+
+// A playtest, rather than a tournament: the rooms are reading these questions
+// to find out what is wrong with them. Players get each answer line once their
+// room is past the cycle, and can flag the question in a tap. What comes back
+// is the point of the whole exercise, so it is on this page rather than buried
+// in a download.
+function initPlaytest(t) {
+  const cb = $('#playtest');
+  if (!cb) return;
+  const note = $('#playtest-note');
+  const list = $('#playtest-list');
+
+  const TAGS = {
+    error: 'Question error', early: 'Clue too early', hard: 'Too hard', great: 'Great question'
+  };
+
+  async function refresh() {
+    if (!cb.checked) { list.replaceChildren(); note.textContent = ''; return; }
+    try {
+      const { feedback } = await api('GET', `/api/tournaments/${code}/playtest-feedback?directorToken=${qt(directorToken)}`);
+      list.replaceChildren();
+      note.textContent = feedback.length
+        ? `${feedback.length} comment${feedback.length === 1 ? '' : 's'} so far.`
+        : 'Nothing from the rooms yet.';
+      // Newest first: during a playtest the useful end is the recent one.
+      for (const f of feedback.slice().reverse().slice(0, 100)) {
+        const li = el('li', { className: 'playtest-item' });
+        const head = el('div', { className: 'pt-head' },
+          el('span', { className: 'pt-q', textContent: `${f.round ? `R${f.round} ` : ''}Q${f.cycle}` }),
+          el('span', { className: 'pt-who', textContent: `${f.name}${f.team ? ` · ${f.team}` : ''}` }));
+        li.append(head);
+        if (f.answer) li.append(el('div', { className: 'pt-answer', textContent: f.answer }));
+        if (f.tags?.length) {
+          li.append(el('div', { className: 'pt-tags' },
+            ...f.tags.map((tag) => el('span', { className: `pt-tag pt-${tag}`, textContent: TAGS[tag] || tag }))));
+        }
+        if (f.text) li.append(el('div', { className: 'pt-text', textContent: f.text }));
+        list.append(li);
+      }
+    } catch (e) {
+      note.textContent = 'Could not load feedback: ' + e.message;
+    }
+  }
+
+  cb.checked = t.playtest === true;
+  cb.onchange = async () => {
+    try {
+      await api('PUT', `/api/tournaments/${code}/playtest`, { directorToken, enabled: cb.checked });
+      msay(cb.checked
+        ? 'Playtest on — rooms will show each answer line once they are past the cycle.'
+        : 'Playtest off. Answer lines stop; what was already said is kept.');
+      refresh();
+    } catch (e) {
+      msay('Could not change the playtest setting: ' + e.message, false);
+      cb.checked = !cb.checked;
+    }
+  };
+  $('#playtest-refresh').onclick = refresh;
+  $('#playtest-download').onclick = () => {
+    window.location = `/api/tournaments/${code}/playtest-feedback?download=1&directorToken=${qt(directorToken)}`;
+  };
+  refresh();
 }
 
 // Temporary share links to the stats/buzzpoint reports.

@@ -2,6 +2,7 @@ import { DEFAULTS } from './config.js';
 import { roomCode, secretToken, uuid } from './ids.js';
 import * as protests from './protests.js';
 import * as answers from './answers.js';
+import * as playtest from './playtest.js';
 
 // ---------------------------------------------------------------------------
 // In-memory authoritative store.
@@ -48,7 +49,10 @@ const serializeRoom = (r) => ({
   buzzLog: r.buzzLog || [],
   // Protests the teams lodged (see protests.js). Durable: a protest outlives
   // the game it was raised in — the director rules on it afterwards.
-  protests: r.protests || []
+  protests: r.protests || [],
+  // What the room thought of the questions (see playtest.js). The reason the
+  // playtest happened, so it had better survive a restart.
+  playtestFeedback: r.playtestFeedback || []
 });
 
 const persistTournament = (t) => persistence?.tournament(serializeTournament(t));
@@ -96,7 +100,8 @@ export function hydrate({ tournaments: tournamentRecords = [], rooms: roomRecord
       autoRelease: t.autoRelease === true,
       playerScoresheet: t.playerScoresheet !== false,
       scoresheetCategories: t.scoresheetCategories === true,
-      buzzPoints: t.buzzPoints === true
+      buzzPoints: t.buzzPoints === true,
+      playtest: t.playtest === true
     });
   }
   for (const r of roomRecords) {
@@ -202,7 +207,7 @@ export function bucketForRoom(room) {
   return { kind: 'r', code: room.code };
 }
 
-export function createTournament({ name, schedule = [], defaults = {}, format = {}, requireReaderAccounts = false, date = '', listed = false, playerScoresheet = true, scoresheetCategories = false, buzzPoints = false }) {
+export function createTournament({ name, schedule = [], defaults = {}, format = {}, requireReaderAccounts = false, date = '', listed = false, playerScoresheet = true, scoresheetCategories = false, buzzPoints = false, playtest = false }) {
   let code;
   do { code = roomCode(5); } while (tournaments.has(code));
   const t = {
@@ -241,7 +246,13 @@ export function createTournament({ name, schedule = [], defaults = {}, format = 
     // the whole tournament's buzz points including the buzzes that never got
     // the floor. Default OFF: it's a decision a director makes before the
     // tournament, and it records the timing of every player in every room.
-    buzzPoints: buzzPoints === true
+    buzzPoints: buzzPoints === true,
+    // A playtest, not a tournament: the room is reading these questions to
+    // find out what is wrong with them. Players get the answer line once a
+    // cycle is over and can say what they thought of the question. Off by
+    // default, because in a real tournament showing the answer line to the
+    // room mid-match would be a disaster.
+    playtest: playtest === true
   };
   tournaments.set(code, t);
   persistTournament(t);
@@ -368,6 +379,19 @@ export function setBuzzPoints(tournament, enabled) {
 export function buzzPointsOn(room) {
   const t = room?.tournamentCode ? tournaments.get(room.tournamentCode) : null;
   return t?.buzzPoints === true;
+}
+
+export function setPlaytest(tournament, enabled) {
+  tournament.playtest = enabled === true;
+  persistTournament(tournament);
+  return tournament.playtest;
+}
+
+// Is this room part of a playtest? Answer lines and question feedback hang off
+// this. A room outside any tournament is never one.
+export function playtestOn(room) {
+  const t = room?.tournamentCode ? tournaments.get(room.tournamentCode) : null;
+  return t?.playtest === true;
 }
 
 export function setScoresheetCategories(tournament, enabled) {
@@ -1002,6 +1026,9 @@ export function publicState(room) {
     // players in the room have already heard.
     scoresheet: playerScoresheetOn(room) ? room.scoresheet || null : null,
     queue: room.queue,
+    // A playtest room shows answer lines once a cycle is over and asks the
+    // room what it thought (see playtest.js).
+    playtest: playtestOn(room),
     // The typed-answer window, when the room uses one (answers.js). Nobody's
     // committed answer is in here — a page knows its own because it typed it.
     answers: (room.settings.typedAnswers || room.settings.lockedAnswers)
@@ -1078,11 +1105,12 @@ const SCORESHEET_MAX_PLAYERS = 12;
 const label = (v) => String(v ?? '').slice(0, 80);
 const pts = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
-// --- Category gate -----------------------------------------------------------
-// Naming the category of each tossup is a nice touch for players, but the
-// category of a question nobody has heard is a spoiler — and readers do skip
-// ahead in the packet (Next twice, the question chooser, a mis-click) to look
-// at something later. So a category is released only for a cycle the room has
+// --- Reveal gate -------------------------------------------------------------
+// Two things on the players' scoresheet are safe AFTER a cycle and a disaster
+// before it: the tossup's category, and — in a playtest — its answer line.
+// Both are spoilers for a question nobody has heard, and readers do skip ahead
+// in the packet (Next twice, the question chooser, a mis-click) to look at
+// something later. So either is released only for a cycle the room has
 // DEMONSTRABLY finished:
 //
 //   * never the question being read, nor any later one: the ceiling is clamped
@@ -1102,8 +1130,10 @@ const pts = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const CATEGORY_DWELL_MS = 12000;
 const CATEGORY_MAX = 240;          // packet tossups we'll keep categories for
 const category = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+// An answer line is longer than a category and carries its own markup.
+const answerLine = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
 
-function categoryCeiling(room, match, through, categories, now = Date.now()) {
+function revealCeiling(room, match, through, hasContent, now = Date.now()) {
   if (!room) return 0;
   const key = JSON.stringify((Array.isArray(match?.match_teams) ? match.match_teams : [])
     .slice(0, 2).map((mt) => label(mt?.team?.name)));
@@ -1128,10 +1158,10 @@ function categoryCeiling(room, match, through, categories, now = Date.now()) {
     if (!Number.isFinite(n) || n < 1 || n >= through) continue;
     if ((Array.isArray(q.buzzes) ? q.buzzes.length : 0) > 0) g.played = Math.max(g.played, n);
   }
-  return categories.length === 0 ? 0 : Math.max(0, Math.min(g.played, through - 1));
+  return hasContent ? Math.max(0, Math.min(g.played, through - 1)) : 0;
 }
 
-export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true, protests = [], categories = [], ceiling = 0) {
+export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true, protests = [], categories = [], ceiling = 0, answers = []) {
   // Protests, whitelisted field by field. Everything here was said out loud in
   // the room (who protested, on what, the answer they gave) — the moderator's
   // free-text reasoning stays out.
@@ -1206,7 +1236,11 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
     const thrownOut = replaced ? Math.max(1, pts(q.tossup_question?.question_number) - 1) : null;
     // The category of the tossup actually read here (its packet position, which
     // a throw-out shifts) — only for cycles the gate has released.
-    const cat = n <= ceiling ? category(categories[pts(q.tossup_question?.question_number) - 1]) : '';
+    const packetIndex = pts(q.tossup_question?.question_number) - 1;
+    const cat = n <= ceiling ? category(categories[packetIndex]) : '';
+    // In a playtest the answer line follows the same gate: the room may read
+    // what the answer was once it has finished the cycle, and not before.
+    const answer = n <= ceiling ? answerLine(answers[packetIndex]) : '';
     rows.push({
       n,
       buzzes,
@@ -1214,6 +1248,7 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
       replaced,
       thrownOut,
       category: cat || null,
+      answer: answer || null,
       protests: protestsByCycle.get(n) || [],
       scores: [totals[0], totals[1]]
     });
@@ -1224,7 +1259,7 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
 
 // The reader's page pushes its game on every change; keep the players' view.
 // Clearing (a null match) hides the sheet, e.g. when the reader leaves a game.
-export function setScoresheet(room, match, currentQuestion, hasBonuses = true, protests = [], categories = []) {
+export function setScoresheet(room, match, currentQuestion, hasBonuses = true, protests = [], categories = [], answers = []) {
   if (match == null) {
     room.scoresheet = null;
     room.catGate = null;
@@ -1236,10 +1271,14 @@ export function setScoresheet(room, match, currentQuestion, hasBonuses = true, p
   const cats = scoresheetCategoriesOn(room) && Array.isArray(categories)
     ? categories.slice(0, CATEGORY_MAX).map(category)
     : [];
+  // Answer lines only in a playtest, and only ever behind the same gate.
+  const answerLines = playtestOn(room) && Array.isArray(answers)
+    ? answers.slice(0, CATEGORY_MAX).map(answerLine)
+    : [];
   const cur = Number(currentQuestion);
   const through = Number.isFinite(cur) && cur >= 1 ? Math.floor(cur) : 0;
-  const ceiling = categoryCeiling(room, match, through, cats);
-  room.scoresheet = buildPlayerScoresheet(match, currentQuestion, hasBonuses, protests, cats, ceiling);
+  const ceiling = revealCeiling(room, match, through, cats.length > 0 || answerLines.length > 0);
+  room.scoresheet = buildPlayerScoresheet(match, currentQuestion, hasBonuses, protests, cats, ceiling, answerLines);
   persistRooms();
   return { ok: true };
 }

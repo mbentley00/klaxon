@@ -115,6 +115,17 @@
       </div>
 
       <div class="modaq-block">
+        <label class="vol"><input type="checkbox" id="playtest" />
+          playtest — players see the answer line once the room is past a cycle, and can flag the question</label>
+        <div class="sound-row">
+          <button id="playtest-refresh" class="ghost tiny">Refresh feedback</button>
+          <button id="playtest-download" class="ghost tiny">Download</button>
+          <span class="hint" id="playtest-note"></span>
+        </div>
+        <ul id="playtest-list" class="playtest-list"></ul>
+      </div>
+
+      <div class="modaq-block">
         <label class="vol"><input type="checkbox" id="buzz-points" />
           record buzz points for every room, including buzzes that lost the race to the lock</label>
         <div class="sound-row">

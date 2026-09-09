@@ -55,7 +55,8 @@ $('#create-tournament').addEventListener('click', async () => {
       listed: $('#t-listed').checked,
       playerScoresheet: $('#fmt-player-scoresheet').checked,
       scoresheetCategories: $('#fmt-scoresheet-categories').checked,
-      buzzPoints: $('#fmt-buzz-points').checked
+      buzzPoints: $('#fmt-buzz-points').checked,
+      playtest: $('#fmt-playtest').checked
     });
     remember('directorToken:' + r.code, r.directorToken);
 

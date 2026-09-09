@@ -584,3 +584,53 @@ body.compact #protest-view { display: none; }
   letter-spacing: .05em; color: var(--muted);
 }
 body.compact #answer-view { display: none; }
+
+/* Playtest: the answer line once the room has finished a cycle, and the strip
+   that asks what they made of the question. Both only ever appear on a row the
+   server has released (see the reveal gate in store.js). */
+.scoresheet .ss-answer {
+  font-weight: 600; color: var(--ink); margin: 2px 0 4px;
+  padding-left: 8px; border-left: 3px solid var(--ok); overflow-wrap: anywhere;
+}
+.ss-feedback { margin: 6px 0 2px; }
+.ss-fb-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.ss-fb-chip {
+  font-family: var(--sans); font-weight: 500; font-size: .72rem;
+  padding: .2em .5em; border: 1px solid var(--soft); border-radius: 999px;
+  background: var(--surface); color: var(--muted); box-shadow: none; cursor: pointer;
+}
+.ss-fb-chip:hover { border-color: var(--ink); color: var(--ink); }
+.ss-fb-chip.on { background: var(--ink); border-color: var(--ink); color: var(--surface); }
+.ss-fb-chip:active { transform: none; box-shadow: none; }
+.ss-fb-more {
+  font-family: var(--sans); font-size: .72rem; padding: 0; margin-top: 4px;
+  border: none; background: none; box-shadow: none; color: var(--muted);
+  text-decoration: underline; cursor: pointer;
+}
+.ss-fb-write { display: flex; gap: 4px; align-items: flex-start; margin-top: 4px; }
+.ss-fb-text { flex: 1 1 auto; min-width: 0; font-family: var(--sans); font-size: .8rem; padding: 4px 6px; }
+.ss-fb-note { font-size: .7rem; color: var(--muted); margin-left: 6px; }
+.ss-fb-mine {
+  font-size: .78rem; color: var(--muted); margin-top: 4px; padding-left: 8px;
+  border-left: 2px solid var(--soft); overflow-wrap: anywhere;
+}
+
+/* The director's live view of what the playtest rooms are saying. */
+.playtest-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 40vh; overflow-y: auto; }
+.playtest-item {
+  border-left: 3px solid var(--soft); padding: 5px 0 5px 8px; margin-bottom: 6px;
+  font-size: .85rem; overflow-wrap: anywhere;
+}
+.pt-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.pt-q { font-family: var(--mono); font-size: .72rem; color: var(--muted); }
+.pt-who { color: var(--muted); font-size: .78rem; }
+.pt-answer { font-weight: 600; }
+.pt-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 3px 0; }
+.pt-tag {
+  font-size: .68rem; padding: .1em .45em; border-radius: 999px;
+  border: 1px solid var(--soft); color: var(--muted);
+}
+.pt-tag.pt-error { border-color: var(--bad); color: var(--bad); }
+.pt-tag.pt-early { border-color: var(--warn); color: var(--warn); }
+.pt-tag.pt-great { border-color: var(--ok); color: var(--ok); }
+.pt-text { color: var(--ink); }

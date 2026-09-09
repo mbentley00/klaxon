@@ -586,6 +586,10 @@ function renderScoresheet(s) {
       // sends one for a cycle the room has finished (store's category gate), so
       // there's nothing to hold back here.
       if (row.category) ev.append(el('div', { className: 'ss-cat' }, row.category));
+      // In a playtest the answer line comes down once the room has finished the
+      // cycle — the server releases it on the same gate as the category, so
+      // its presence IS permission to show it.
+      if (row.answer) ev.append(el('div', { className: 'ss-answer' }, row.answer));
       // Same order and wording as MODAQ's cycle items.
       if (row.thrownOut) ev.append(el('div', { className: 'ss-item' }, `Threw out tossup #${row.thrownOut}`));
       for (const z of row.buzzes) {
@@ -600,6 +604,10 @@ function renderScoresheet(s) {
         if (row.bonus.bounceback) text += ` (stolen for ${row.bonus.bounceback} points)`;
         ev.append(el('div', { className: 'ss-item' }, text));
       }
+      // What this browser thought of the question, once the room has
+      // finished it. Sits after the events, so a row reads: the question, what
+      // happened on it, then what you made of it.
+      if (s.playtest && row.answer && state.role === 'player') ev.append(feedbackRow(row.n));
       // Protests, worded as MODAQ's own Events panel words them.
       for (const pr of row.protests || []) {
         const text = pr.type === 'bonus'
@@ -730,6 +738,115 @@ $('#answer-box').addEventListener('input', () => {
     }
   });
 });
+
+
+// ---- Playtest feedback ----
+// A playtest room is reading these questions to find out what is wrong with
+// them, so the room is the instrument. The cost of that feedback is normally
+// that somebody has to remember, after the round, which question it was and
+// what bothered them — by which point "the second clue gives it away" has
+// flattened into "that packet was rough". So it is taken in the moment, from
+// the scoresheet row, in one tap.
+//
+// Only on a cycle the room has finished: the answer line arriving is what says
+// so (the server releases both together), which is also why there is nothing
+// to hold back here.
+const PLAYTEST_TAGS = [
+  { id: 'error', label: 'Question error' },
+  { id: 'early', label: 'Clue too early' },
+  { id: 'hard', label: 'Too hard' },
+  { id: 'great', label: 'Great question' }
+];
+
+// This browser's own verdicts, by question. Kept here rather than read from the
+// room state because nobody else's opinion is ever sent to a player: a
+// playtester who can see that three people already said "too hard" is no longer
+// an independent opinion, and independence is the whole value of the room.
+let myFeedback = {};
+
+function sendFeedback(cycle, tags, text, onDone) {
+  socket.emit('playtest_feedback', { cycle, tags, text }, (res) => {
+    if (res?.ok) {
+      myFeedback = res.mine || myFeedback;
+      onDone?.(null);
+    } else {
+      onDone?.(res?.error || 'failed');
+    }
+  });
+}
+
+// The feedback strip under a finished question: four taps and a note.
+function feedbackRow(n) {
+  const mine = myFeedback[n] || { tags: [], text: '' };
+  const wrap = el('div', { className: 'ss-feedback' });
+  const note = el('span', { className: 'ss-fb-note' });
+
+  const chips = el('div', { className: 'ss-fb-tags' });
+  for (const tag of PLAYTEST_TAGS) {
+    const on = mine.tags.includes(tag.id);
+    const chip = el('button', {
+      className: 'ss-fb-chip' + (on ? ' on' : ''),
+      textContent: tag.label,
+      title: `Mark question ${n}: ${tag.label}`
+    });
+    chip.dataset.tag = tag.id;
+    chip.onclick = () => {
+      const current = (myFeedback[n]?.tags) || [];
+      // A tap toggles; several can be true at once (a question can be both
+      // too hard and a great question, and playtesters say so).
+      const tags = current.includes(tag.id)
+        ? current.filter((t) => t !== tag.id)
+        : [...current, tag.id];
+      note.textContent = 'Saving…';
+      sendFeedback(n, tags, myFeedback[n]?.text || '', (err) => {
+        note.textContent = err ? (PLAYTEST_ERRORS[err] || err) : 'Thanks.';
+        paint();
+      });
+    };
+    chips.append(chip);
+  }
+  wrap.append(chips);
+
+  const more = el('button', { className: 'ss-fb-more', textContent: mine.text ? 'Edit note' : 'Add a note' });
+  more.onclick = () => {
+    const box = el('textarea', { className: 'ss-fb-text', rows: 2, maxLength: 1000,
+      placeholder: 'What was wrong with it?' });
+    box.value = myFeedback[n]?.text || '';
+    const save = el('button', { className: 'ss-fb-chip', textContent: 'Save' });
+    save.onclick = () => {
+      note.textContent = 'Saving…';
+      sendFeedback(n, myFeedback[n]?.tags || [], box.value, (err) => {
+        note.textContent = err ? (PLAYTEST_ERRORS[err] || err) : 'Thanks.';
+        paint();
+      });
+    };
+    more.replaceWith(el('div', { className: 'ss-fb-write' }, box, save));
+  };
+  wrap.append(more, note);
+  const written = el('div', { className: 'ss-fb-mine' });
+  wrap.append(written);
+
+  // Repaint this strip in place. Rebuilding the whole scoresheet would work
+  // too, except that it replaces the very element the confirmation was just
+  // written into — so the player would never see it.
+  function paint() {
+    const now = myFeedback[n] || { tags: [], text: '' };
+    for (const chip of chips.children) {
+      chip.classList.toggle('on', now.tags.includes(chip.dataset.tag));
+    }
+    written.textContent = now.text || '';
+    more.textContent = now.text ? 'Edit note' : 'Add a note';
+  }
+  paint();
+  return wrap;
+}
+
+const PLAYTEST_ERRORS = {
+  not_finished: 'You can comment once the room has finished that question.',
+  disabled: 'This tournament is not a playtest.',
+  no_question: 'No question to comment on.',
+  too_many: 'That is a lot of feedback from one room already.'
+};
 
 // ---- Protests ----
 // A player raises a protest in one press (ACF H.2: at a pause, "quickly and
