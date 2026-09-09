@@ -1178,7 +1178,10 @@ export function resetShootout(room) {
 }
 
 export function chatSay(room, actor, text) {
-  const res = shootout.say(room, actor, text);
+  // Everyone who could be addressed: players by the name they are known by,
+  // and staff, so the room can get the reader's attention.
+  const people = [...room.members.values()].map((m) => ({ id: m.id, name: displayName(m) }));
+  const res = shootout.say(room, actor, text, people);
   if (res.ok) persistRooms();
   return res;
 }

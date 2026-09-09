@@ -645,13 +645,6 @@ body.compact #answer-view { display: none; }
 .sb-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .sb-split { flex: none; font-family: var(--mono); font-size: .72rem; color: var(--muted); }
 .sb-total { flex: none; font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
-.chat-log {
-  list-style: none; margin: 0 0 8px; padding: 0;
-  max-height: 30vh; overflow-y: auto; font-size: .88rem;
-}
-.chat-line { padding: 2px 0; overflow-wrap: anywhere; }
-.chat-who { font-weight: 600; margin-right: 6px; }
-.chat-line.chat-staff .chat-who { color: var(--accent); }
 #chat-box { flex: 1 1 auto; min-width: 0; }
 body.compact #shootout-view, body.compact #chat-view { display: none; }
 
@@ -668,10 +661,21 @@ body.has-chat:not(.has-sheet) .stage > #chat-view { grid-row: 1 / span 40; }
 #chat-view { display: flex; flex-direction: column; min-width: 0; }
 #chat-view h3 { flex: none; }
 .chat-log {
-  flex: 1 1 auto; list-style: none; margin: 0 0 8px; padding: 0;
-  min-height: 180px; max-height: 46vh; overflow-y: auto;
+  /* A fixed window with its own scrollbar. Not min/max height: a log that
+     grows as people talk moves the buzzer and everything under it down the
+     page, and a chat that reflows the thing you are about to press is worse
+     than no chat. */
+  flex: none; height: 42vh; min-height: 200px;
+  list-style: none; margin: 0 0 8px; padding: 0;
+  overflow-y: auto; overscroll-behavior: contain;
   font-size: .86rem; line-height: 1.45;
+  /* A half-empty chat sits at the BOTTOM, next to the box you type in, the way
+     a chat client does — not marooned at the top with a field of white under
+     it. `margin-top: auto` on the first line rather than justify-content,
+     which clips the top of an overflowing scroller in some browsers. */
+  display: flex; flex-direction: column;
 }
+.chat-log > li:first-child { margin-top: auto; }
 /* Grouped like Discord: a run of messages from one person shows the name once,
    and the continuation lines sit under it without repeating anything. */
 .chat-line { padding: 1px 0; overflow-wrap: anywhere; }
@@ -686,7 +690,7 @@ body.has-chat:not(.has-sheet) .stage > #chat-view { grid-row: 1 / span 40; }
   /* Narrow: the rail collapses and the chat goes back under everything. */
   body.has-chat .stage { grid-template-columns: 1fr; }
   body.has-chat .stage > #chat-view { grid-column: 1; grid-row: auto; position: static; }
-  .chat-log { max-height: 34vh; }
+  .chat-log { height: 30vh; min-height: 140px; }
 }
 
 /* A question the room has finished with, folded away — a whole tossup in every
@@ -722,3 +726,28 @@ body.has-chat:not(.has-sheet) .stage > #chat-view { grid-row: 1 / span 40; }
 }
 .replay-links h5 { margin: 0 0 4px; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
 .replay-links input { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: .78rem; }
+
+/* @mentions. The name is marked wherever it appears; a line that names YOU is
+   marked whole, because in a log that keeps moving it is the one you cannot
+   afford to scroll past. */
+.chat-at {
+  background: var(--soft); border-radius: 3px; padding: 0 3px; font-weight: 600;
+}
+.chat-at.chat-at-you { background: var(--accent); color: var(--surface); }
+.chat-line.chat-at-me {
+  border-left: 3px solid var(--accent); padding-left: 6px; margin-left: -9px;
+  background: #fff6f3;
+}
+/* The picker sits above the box, so it never covers what you are typing. */
+.chat-entry { position: relative; }
+.chat-mentions {
+  position: absolute; bottom: 100%; left: 0; right: 0; z-index: 5;
+  list-style: none; margin: 0 0 4px; padding: 4px;
+  background: var(--surface); border: 1.5px solid var(--ink); border-radius: var(--radius);
+  box-shadow: var(--shadow); max-height: 40vh; overflow-y: auto;
+}
+.chat-mention {
+  padding: 4px 6px; border-radius: 3px; font-size: .85rem; cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.chat-mention.on, .chat-mention:hover { background: var(--ink); color: var(--surface); }

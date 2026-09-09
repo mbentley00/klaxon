@@ -123,9 +123,12 @@
     <section id="chat-view" class="panel chat hidden">
       <h3>Chat</h3>
       <ul id="chat-log" class="chat-log"></ul>
-      <div class="row">
-        <input id="chat-box" type="text" maxlength="400" autocomplete="off" placeholder="Say something" />
-        <button id="chat-send" class="ghost tiny">Send</button>
+      <div class="chat-entry">
+        <ul id="chat-mentions" class="chat-mentions hidden"></ul>
+        <div class="row">
+          <input id="chat-box" type="text" maxlength="400" autocomplete="off" placeholder="Say something" />
+          <button id="chat-send" class="ghost tiny">Send</button>
+        </div>
       </div>
     </section>
 

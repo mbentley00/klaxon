@@ -838,15 +838,43 @@ function renderChat(s) {
 }
 
 function chatLine(m, grouped) {
-  const li = el('li', { className: 'chat-line' + (m.staff ? ' chat-staff' : '') + (grouped ? ' chat-cont' : '') });
+  // A line that names YOU is the one you must not miss in a moving log.
+  const mentionsMe = (m.mentions || []).some((x) => x.id === state.me?.id);
+  const li = el('li', {
+    className: 'chat-line' + (m.staff ? ' chat-staff' : '') + (grouped ? ' chat-cont' : '')
+      + (mentionsMe ? ' chat-at-me' : '')
+  });
   if (!grouped) {
     li.append(el('span', { className: 'chat-who' },
       m.name,
       el('span', { className: 'chat-when', textContent: chatTime(m.at) })));
   }
-  li.append(el('span', { className: 'chat-text', textContent: m.text }));
+  li.append(chatText(m));
   return li;
 }
+
+// The message text with each mention marked. Built from the mentions the
+// SERVER resolved against the room, so a page can't decorate a name that was
+// never addressed — and split on text rather than set as HTML, because a chat
+// message is somebody else's typing.
+function chatText(m) {
+  const span = el('span', { className: 'chat-text' });
+  const names = (m.mentions || []).map((x) => x.name).sort((a, b) => b.length - a.length);
+  if (!names.length) { span.textContent = m.text; return span; }
+  const pattern = new RegExp('@(' + names.map(escapeForRegex).join('|') + ')(?![\\w-])', 'gi');
+  let at = 0;
+  for (const hit of m.text.matchAll(pattern)) {
+    if (hit.index > at) span.append(m.text.slice(at, hit.index));
+    const mine = (m.mentions || []).some((x) => x.id === state.me?.id
+      && x.name.toLowerCase() === hit[1].toLowerCase());
+    span.append(el('span', { className: 'chat-at' + (mine ? ' chat-at-you' : ''), textContent: hit[0] }));
+    at = hit.index + hit[0].length;
+  }
+  span.append(m.text.slice(at));
+  return span;
+}
+
+const escapeForRegex = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const chatTime = (at) => {
   try {
@@ -859,6 +887,8 @@ function sendChat() {
   const text = box.value.trim();
   if (!text) return;
   box.value = '';
+  $('#chat-mentions').classList.add('hidden');
+  mentionMatches = [];
   socket.emit('chat_say', { text }, (res) => {
     // A message the server refused goes back in the box rather than vanishing.
     if (res?.error) { box.value = text; say(CHAT_ERRORS[res.error] || res.error, false); }
@@ -871,8 +901,92 @@ const CHAT_ERRORS = {
   disabled: 'This room has no chat.'
 };
 
+// Typing @ offers the people in the room. Names get typed wrong and people
+// join with names you would not guess the spelling of, so a mention that has
+// to be typed exactly is a mention that mostly misses.
+let mentionMatches = [];
+let mentionAt = -1;
+
+function chatPeople() {
+  const s = state.snapshot;
+  return (s?.members || [])
+    .filter((m) => m.id !== state.me?.id)
+    .map((m) => ({ id: m.id, name: m.displayName || m.name }))
+    .filter((m) => m.name);
+}
+
+// What is being typed after the nearest unfinished "@", if the caret is in one.
+function mentionQuery(box) {
+  const upto = box.value.slice(0, box.selectionStart ?? box.value.length);
+  const at = upto.lastIndexOf('@');
+  if (at < 0) return null;
+  // An @ only starts a mention at the start or after a space, so an email
+  // address doesn't open the picker.
+  if (at > 0 && !/\s/.test(upto[at - 1])) return null;
+  const typed = upto.slice(at + 1);
+  // A name can hold a space, but two words in is long enough to stop guessing.
+  if (/\s\s/.test(typed) || typed.length > 30) return null;
+  return { at, typed };
+}
+
+function renderMentionPicker() {
+  const box = $('#chat-box');
+  const list = $('#chat-mentions');
+  const q = mentionQuery(box);
+  if (!q) { list.classList.add('hidden'); mentionMatches = []; return; }
+  const needle = q.typed.toLowerCase();
+  mentionMatches = chatPeople()
+    .filter((p) => p.name.toLowerCase().startsWith(needle))
+    .slice(0, 6);
+  mentionAt = q.at;
+  if (!mentionMatches.length) { list.classList.add('hidden'); return; }
+  list.classList.remove('hidden');
+  list.replaceChildren(...mentionMatches.map((p, i) => {
+    const li = el('li', { className: 'chat-mention' + (i === 0 ? ' on' : ''), textContent: p.name });
+    li.onmousedown = (e) => { e.preventDefault(); insertMention(p); };
+    return li;
+  }));
+}
+
+function insertMention(person) {
+  const box = $('#chat-box');
+  const caret = box.selectionStart ?? box.value.length;
+  const before = box.value.slice(0, mentionAt);
+  const after = box.value.slice(caret);
+  box.value = `${before}@${person.name} ${after}`;
+  const pos = before.length + person.name.length + 2;
+  box.setSelectionRange(pos, pos);
+  $('#chat-mentions').classList.add('hidden');
+  mentionMatches = [];
+  box.focus();
+}
+
+$('#chat-box')?.addEventListener('input', renderMentionPicker);
+$('#chat-box')?.addEventListener('blur', () => $('#chat-mentions').classList.add('hidden'));
+
 $('#chat-send')?.addEventListener('click', sendChat);
-$('#chat-box')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+$('#chat-box')?.addEventListener('keydown', (e) => {
+  const list = $('#chat-mentions');
+  const picking = mentionMatches.length && !list.classList.contains('hidden');
+  if (picking && (e.key === 'Tab' || e.key === 'Enter')) {
+    // Enter completes the name rather than sending a half-typed mention.
+    e.preventDefault();
+    const chosen = list.querySelector('.chat-mention.on');
+    const i = [...list.children].indexOf(chosen);
+    insertMention(mentionMatches[Math.max(0, i)]);
+    return;
+  }
+  if (picking && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault();
+    const items = [...list.children];
+    const i = items.findIndex((x) => x.classList.contains('on'));
+    const next = (i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+    items.forEach((x, j) => x.classList.toggle('on', j === next));
+    return;
+  }
+  if (picking && e.key === 'Escape') { list.classList.add('hidden'); mentionMatches = []; return; }
+  if (e.key === 'Enter') sendChat();
+});
 
 // Messages arrive on their own event so a chat line doesn't wait for the next
 // state broadcast, and doesn't cause one.

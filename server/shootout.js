@@ -120,12 +120,41 @@ export function currentScores(scoresheet) {
 
 // --- chat --------------------------------------------------------------------
 
+const escapeRe = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Who a message is addressed to. Resolved HERE, against the people actually in
+ * the room, rather than taken from the client: a mention is a claim that
+ * someone was addressed, and a page that made them up could ping anybody.
+ *
+ * Longest name first, so "@ann" doesn't swallow the mention of "@annabel".
+ * The name may contain spaces (a display name often does), so the boundary is
+ * "not more name" rather than a word boundary.
+ */
+export function mentionsIn(text, people) {
+  const body = String(text ?? '');
+  const found = [];
+  const seen = new Set();
+  const byLength = [...people].sort((a, b) => String(b.name).length - String(a.name).length);
+  for (const person of byLength) {
+    const name = String(person.name ?? '').trim();
+    if (!name || seen.has(person.id)) continue;
+    const re = new RegExp('@' + escapeRe(name) + '(?![\\w-])', 'i');
+    if (re.test(body)) {
+      seen.add(person.id);
+      found.push({ id: person.id, name });
+    }
+  }
+  return found;
+}
+
+
 /**
  * Somebody says something. Deliberately separate from everything else in the
  * room: it is never an answer, never a protest, and is not gated on any of the
  * game's state. In a room where everyone is on their own it is why people came.
  */
-export function say(room, actor, text) {
+export function say(room, actor, text, people = []) {
   if (!room.chat) room.chat = [];
   const body = clean(text, MAX_CHAT_TEXT);
   if (!body) return { error: 'empty' };
@@ -136,7 +165,9 @@ export function say(room, actor, text) {
   room.chatCooldown.set(actor.id, now);
 
   const message = { id: `c${now.toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-    playerId: actor.id, name: actor.name, staff: actor.staff === true, text: body, at: now };
+    playerId: actor.id, name: actor.name, staff: actor.staff === true, text: body, at: now,
+    // Who was addressed, worked out from who is in the room (see mentionsIn).
+    mentions: mentionsIn(body, people) };
   room.chat.push(message);
   if (room.chat.length > MAX_CHAT) room.chat.splice(0, room.chat.length - MAX_CHAT);
   return { ok: true, message };
