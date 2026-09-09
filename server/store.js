@@ -48,6 +48,8 @@ const serializeRoom = (r) => ({
   scoresheet: r.scoresheet || null,
   // Every buzz attempt, for the full-buzz export (buzz-point tracking).
   buzzLog: r.buzzLog || [],
+  // What an upheld protest left to be played here (see createReplayRoom).
+  replay: r.replay || null,
   // Protests the teams lodged (see protests.js). Durable: a protest outlives
   // the game it was raised in — the director rules on it afterwards.
   protests: r.protests || [],
@@ -1060,6 +1062,8 @@ export function publicState(room) {
     // A playtest room shows answer lines once a cycle is over and asks the
     // room what it thought (see playtest.js).
     playtest: playtestOn(room),
+    // Why this room exists, when it exists to settle a protest.
+    replay: room.replay || null,
     // A shootout's leaderboard across every packet of the session, and its
     // chat (see shootout.js). Null in a room that isn't one.
     shootout: room.settings.shootout
@@ -1116,6 +1120,48 @@ export function refreshShootoutRoster(room) {
   room.rosterTeams = next ? next.teams.map((t) => t.name) : [];
   persistRooms();
   return true;
+}
+
+/**
+ * A room to play out what an upheld protest left owing (ACF H.12.1, H.12.2).
+ *
+ * A fresh room rather than the original: the match it came from is finished
+ * and exported, its moderator has gone home, and what has to happen now is a
+ * couple of questions read to the same two teams — not a resumption of the
+ * game. It carries the plan so the reader knows what they are reading and why,
+ * and the teams' names so the buzzers are labelled without anyone typing.
+ */
+export function createReplayRoom({ tournamentCode, round, teams, gameplay, protest }) {
+  const room = createRoom({
+    name: `Protest replay — round ${round}`,
+    tournamentCode,
+    settings: { modaqMode: true, queueMode: false }
+  });
+  room.replay = {
+    round: String(round ?? '').slice(0, 40),
+    protest: {
+      type: protest?.type ?? null,
+      question: Number(protest?.question) || null,
+      part: Number(protest?.part) || null,
+      team: String(protest?.team ?? '').slice(0, 60)
+    },
+    // What has to be played, in the order it has to be played (see
+    // resolution.js) — a replacement tossup before the bonus that may follow.
+    gameplay: (Array.isArray(gameplay) ? gameplay : []).map((g) => ({
+      kind: g.kind, forTeams: g.forTeams || [], rule: g.rule || null,
+      why: String(g.why ?? '').slice(0, 400), conditional: g.conditional === true
+    })),
+    createdAt: Date.now()
+  };
+  // The two sides are known, so the room already has its roster: nobody
+  // reassembling a match at the end of a long day should have to type them.
+  const clean = (Array.isArray(teams) ? teams : []).map((t) => String(t ?? '').trim()).filter(Boolean);
+  if (clean.length) {
+    room.roster = { name: 'Protest replay', teams: clean.map((t) => ({ name: t, players: [] })) };
+    room.rosterTeams = clean;
+  }
+  persistRooms();
+  return room;
 }
 
 // The moderator wipes the leaderboard and starts the evening again.

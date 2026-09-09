@@ -12,6 +12,7 @@ import { computeStats, liveGameRows, protestRows } from './stats.js';
 import * as protests from './protests.js';
 import * as answers from './answers.js';
 import * as playtest from './playtest.js';
+import * as resolution from './resolution.js';
 import { renderReport, PAGES } from './yellowfruit.js';
 import { computeBuzzpoints, renderBuzzpointsCsv, renderBuzzpointsHtml } from './buzzpoints.js';
 import { sendEmail, emailEnabled, feedbackBody, FEEDBACK_TO } from './email.js';
@@ -741,11 +742,79 @@ app.put('/api/tournaments/:code/protests/ruling', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
   const { room, round, type, question, part, team, status, note, adjustments } = req.body || {};
+
+  // A director may name an ACF resolution instead of typing numbers, in which
+  // case the score change is worked out from the match itself — undoing a
+  // cycle means finding every buzz on it, the neg the protesting team took,
+  // whatever the other team scored answering after them, and the bonus that
+  // followed. That is the arithmetic this exists to get right.
+  let applied = { status, adjustments, resolution: null, gameplay: [] };
+  if (req.body?.resolution) {
+    const match = await artifacts.getMatch({ kind: 't', code: t.code }, room, round);
+    if (match == null) return res.status(404).json({ error: 'match_not_found' });
+    const out = resolution.plan(match, { type, question, part, team }, req.body.resolution, { award: req.body?.award });
+    if (out.error) return res.status(400).json({ error: out.error });
+    applied = {
+      status: out.status,
+      adjustments: out.adjustments,
+      resolution: out.resolution.id,
+      gameplay: out.gameplay
+    };
+  }
+
   const ruling = await artifacts.setProtestRuling({ kind: 't', code: t.code },
-    { room, round, type, question, part, team, status, note, adjustments });
+    { room, round, type, question, part, team, note, ...applied });
   if (ruling == null) return res.status(404).json({ error: 'match_not_found' });
   res.json({ ruling });
 }));
+
+// What a resolution WOULD do, before the director commits to it: the point
+// changes worked out from the match record, and what would still have to be
+// played. Read-only — the arithmetic is the part a director gets wrong by hand,
+// so it is shown rather than trusted (see resolution.js).
+app.post('/api/tournaments/:code/protests/preview', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const match = await artifacts.getMatch({ kind: 't', code: t.code }, req.body?.room, req.body?.round);
+  if (match == null) return res.status(404).json({ error: 'match_not_found' });
+  const out = resolution.plan(match, {
+    type: req.body?.type, question: req.body?.question, part: req.body?.part, team: req.body?.team
+  }, req.body?.resolution, { award: req.body?.award });
+  if (out.error) return res.status(400).json({ error: out.error });
+  res.json(out);
+}));
+
+// Bring the teams back to play what an upheld protest left owing. Returns the
+// room and the links to hand out — the reader's, and one per team.
+app.post('/api/tournaments/:code/protests/replay', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const match = await artifacts.getMatch({ kind: 't', code: t.code }, req.body?.room, req.body?.round);
+  if (match == null) return res.status(404).json({ error: 'match_not_found' });
+
+  const protest = {
+    type: req.body?.type, question: req.body?.question, part: req.body?.part, team: req.body?.team
+  };
+  const out = resolution.plan(match, protest, req.body?.resolution, { award: req.body?.award });
+  if (out.error) return res.status(400).json({ error: out.error });
+  if (!out.gameplay.length) return res.status(400).json({ error: 'nothing_to_play' });
+
+  const teams = (Array.isArray(match.match_teams) ? match.match_teams : [])
+    .map((mt) => String(mt?.team?.name ?? '').trim()).filter(Boolean);
+  const room = store.createReplayRoom({
+    tournamentCode: t.code, round: req.body?.round, teams, gameplay: out.gameplay, protest
+  });
+  res.json({
+    room: room.code,
+    readerToken: room.readerToken,
+    reader: `/modaq?room=${room.code}`,
+    players: `/r/${room.code}`,
+    gameplay: out.gameplay
+  });
+}));
+
+// The resolutions a director may choose from, with the rule each comes from.
+app.get('/api/protest-resolutions', (_req, res) => res.json({ resolutions: resolution.RESOLUTIONS }));
 
 // One-click "download all stats": every match's QBJ plus errata, bundled into a
 // single JSON file the director can save.

@@ -948,6 +948,12 @@ async function refreshProtests() {
         const adj = (p.ruling.adjustments || []).map((a) => `${a.points > 0 ? '+' : ''}${a.points} ${a.team}`).join(', ');
         detail = `${statusLabel[p.status]}${adj ? ` (${adj})` : ''}${p.ruling.note ? ` · "${p.ruling.note}"` : ''} · ${score}`;
       }
+      // A protest can be settled on the score and still owe a question. That
+      // is not a finished protest, and the list has to say so.
+      const owes = (p.ruling?.gameplay || []).filter((g) => !g.conditional);
+      if (owes.length && !p.ruling?.playedAt) {
+        detail += ` · STILL TO PLAY: ${owes.map((g) => g.kind).join(', ')}`;
+      }
       col.append(el('span', { className: 'pjoined' }, detail));
       li.append(col);
       // Ruling controls: rule an open protest, or clear an existing ruling.
@@ -963,27 +969,132 @@ async function refreshProtests() {
   } catch { /* ignore */ }
 }
 
-// Inline ruling form: per-team point adjustments (applied only on Uphold, as a
-// score correction to that game in stats) plus an optional note.
-function toggleRuleForm(li, p) {
+// Resolving a protest. The director picks one of the ACF resolutions rather
+// than typing point numbers: undoing a cycle correctly means finding every buzz
+// on it — the neg the protesting team took, whatever the other team scored
+// answering after them, and the bonus that followed — from a match record,
+// after the round, under time pressure. The server works that out (see
+// server/resolution.js) and this shows it before anything is committed.
+//
+// The director still decides. H.11 gives them the authority; what changes is
+// that they are confirming arithmetic instead of doing it.
+let RESOLUTIONS = null;
+
+async function resolutionsList() {
+  if (!RESOLUTIONS) {
+    try { RESOLUTIONS = (await api('GET', '/api/protest-resolutions')).resolutions; }
+    catch { RESOLUTIONS = []; }
+  }
+  return RESOLUTIONS;
+}
+
+async function toggleRuleForm(li, p) {
   const existing = li.querySelector('.rule-form');
   if (existing) { existing.remove(); return; }
-  const form = el('div', { className: 'sound-row rule-form' });
-  const inputs = p.teams.map((t) => {
-    const inp = el('input', { type: 'number', value: '0' });
-    inp.style.width = '64px';
-    const wrap = el('label', { className: 'vol' });
-    wrap.append(document.createTextNode(t.name + ' '), inp);
-    form.append(wrap);
-    return { name: t.name, inp };
-  });
+  const form = el('div', { className: 'rule-form' });
+  const holder = li.querySelector('.pcol') || li;
+  holder.append(form);
+
+  const choices = await resolutionsList();
+  const pick = el('select');
+  for (const r of choices) pick.append(el('option', { value: r.id, textContent: `${r.label} (${r.rule})` }));
+
+  const award = el('select', { className: 'hidden' });
   const note = el('input', { placeholder: 'Ruling note (optional)' });
-  form.append(note);
-  form.append(mkBtn('Uphold', 'tiny primary', () => ruleProtest(p, 'upheld', note.value,
-    inputs.map((x) => ({ team: x.name, points: Number(x.inp.value) || 0 })))));
-  form.append(mkBtn('Deny', 'tiny ghost', () => ruleProtest(p, 'denied', note.value, [])));
-  // Stack the form under the protest text rather than beside the buttons.
-  (li.querySelector('.pcol') || li).append(form);
+  const preview = el('div', { className: 'rule-preview' });
+  const actions = el('div', { className: 'sound-row' });
+
+  // What this resolution would do, worked out from the match — shown before
+  // the director commits, and refreshed whenever they change their mind.
+  async function refresh() {
+    const chosen = choices.find((r) => r.id === pick.value);
+    preview.replaceChildren(el('div', { className: 'rule-detail', textContent: chosen?.detail || '' }));
+    let out;
+    try {
+      out = await api('POST', `/api/tournaments/${code}/protests/preview`, {
+        directorToken, room: p.room, round: p.round, type: p.type, question: p.question,
+        part: p.part, team: p.team, resolution: pick.value, award: Number(award.value) || undefined
+      });
+    } catch (e) {
+      preview.append(el('div', { className: 'rule-warn', textContent: 'Could not work that out: ' + e.message }));
+      return;
+    }
+
+    // The award only has a choice to offer on a tossup with powers in play.
+    if (pick.value !== 'denied' && (out.awardOptions || []).length > 1) {
+      if (!award.options.length) {
+        for (const v of out.awardOptions) award.append(el('option', { value: String(v), textContent: `${v} points` }));
+        award.value = String(out.awardOptions[0]);
+      }
+      award.classList.remove('hidden');
+    } else {
+      award.classList.add('hidden');
+    }
+
+    for (const line of out.explain || []) preview.append(el('div', { className: 'rule-line', textContent: line }));
+    if (!(out.explain || []).length) preview.append(el('div', { className: 'rule-line', textContent: 'No score changes.' }));
+    for (const w of out.warnings || []) preview.append(el('div', { className: 'rule-warn', textContent: w }));
+    for (const g of out.gameplay || []) {
+      preview.append(el('div', { className: 'rule-play' + (g.conditional ? ' rule-maybe' : '') },
+        el('strong', {}, g.conditional ? 'May need playing: ' : 'Needs playing: '), `${g.why} (${g.rule})`));
+    }
+
+    actions.replaceChildren();
+    actions.append(mkBtn('Apply this resolution', 'tiny primary', () => applyResolution(p, pick.value, note.value, award)));
+    // Something to play means a room to play it in, and links to get the
+    // teams back — the protest is not finished when the score is corrected.
+    if ((out.gameplay || []).some((g) => !g.conditional)) {
+      actions.append(mkBtn('Apply and open a replay room', 'tiny',
+        () => applyResolution(p, pick.value, note.value, award, true)));
+    }
+  }
+
+  pick.onchange = refresh;
+  award.onchange = refresh;
+  form.append(el('div', { className: 'sound-row' }, pick, award), preview, note, actions);
+  refresh();
+}
+
+async function applyResolution(p, resolution, note, award, withReplay) {
+  try {
+    await api('PUT', `/api/tournaments/${code}/protests/ruling`, {
+      directorToken,
+      room: p.room, round: p.round, type: p.type, question: p.question, part: p.part, team: p.team,
+      resolution, note, award: Number(award?.value) || undefined
+    });
+    if (!withReplay) {
+      msay(resolution === 'denied'
+        ? 'Protest denied — nothing changes.'
+        : 'Resolved. The score correction is live in the stats.');
+    } else {
+      const r = await api('POST', `/api/tournaments/${code}/protests/replay`, {
+        directorToken, room: p.room, round: p.round, type: p.type, question: p.question,
+        part: p.part, team: p.team, resolution, award: Number(award?.value) || undefined
+      });
+      showReplayLinks(r);
+    }
+    refreshProtests();
+  } catch (e) { msay('Could not resolve: ' + e.message, false); }
+}
+
+// The links that bring everyone back: one for whoever reads the replacement
+// questions, one to send both teams.
+function showReplayLinks(r) {
+  const box = $('#replay-links');
+  if (!box) { msay(`Replay room ${r.room} created.`); return; }
+  const url = (path) => location.origin + path;
+  box.classList.remove('hidden');
+  box.replaceChildren(
+    el('h5', {}, `Replay room ${r.room}`),
+    el('p', { className: 'hint' },
+      'Send the player link to both teams and open the reader link yourself. '
+      + 'The room already knows the teams and what has to be read.'),
+    el('div', { className: 'sound-row' },
+      el('a', { className: 'chip', href: r.reader, target: '_blank', rel: 'noopener', textContent: 'Open as reader' }),
+      el('input', { readOnly: true, value: url(r.players), onclick: (e) => e.target.select() })),
+    ...r.gameplay.map((g) => el('p', { className: 'hint', textContent: `${g.why} (${g.rule})` }))
+  );
+  msay(`Replay room ${r.room} created — send the player link to both teams.`);
 }
 
 async function ruleProtest(p, status, note, adjustments) {

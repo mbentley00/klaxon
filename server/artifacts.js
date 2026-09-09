@@ -516,7 +516,20 @@ async function wasFinalizedForSameTeams(file, incoming) {
 export const protestKey = ({ type, question, part, team }) =>
   `${type === 'bonus' ? 'bonus' : 'tossup'}|${Number(question) || 0}|${Number(part) || 0}|${String(team ?? '')}`;
 
-export async function setProtestRuling(bucket, { room, round, type, question, part, team, status, note, adjustments }) {
+// One match, parsed, by the room and round that played it — the same file
+// setProtestRuling writes into. Null when there is no such match.
+export async function getMatch(bucket, room, round) {
+  const file = path.join(bucketDir(bucket), 'exports', `${safeName(room, 'room')}-${safeName(round, 'r')}.qbj`);
+  const text = await readTextOrNull(file);
+  if (text == null) return null;
+  try {
+    const obj = JSON.parse(text);
+    // The export wraps the match; older ones are the match itself.
+    return obj?.qbj ?? obj;
+  } catch { return null; }
+}
+
+export async function setProtestRuling(bucket, { room, round, type, question, part, team, status, note, adjustments, resolution, gameplay }) {
   const file = path.join(bucketDir(bucket), 'exports', `${safeName(room, 'room')}-${safeName(round, 'r')}.qbj`);
   const text = await readTextOrNull(file);
   if (text == null) return null;
@@ -536,6 +549,12 @@ export async function setProtestRuling(bucket, { room, round, type, question, pa
           .map((a) => ({ team: String(a?.team ?? ''), points: Number(a?.points) || 0 }))
           .filter((a) => a.team && a.points !== 0)
         : [],
+      // Which ACF resolution the director chose, and what it leaves to be
+      // played (see resolution.js). A protest can be settled on the score and
+      // still owe a replacement question, and the console has to show that.
+      resolution: resolution ? String(resolution).slice(0, 40) : null,
+      gameplay: Array.isArray(gameplay) ? gameplay : [],
+      playedAt: null,
       at: Date.now(),
     };
   }

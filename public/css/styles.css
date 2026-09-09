@@ -667,3 +667,24 @@ body.compact #shootout-view, body.compact #chat-view { display: none; }
   border-left: 3px solid var(--soft); font-size: .85rem; line-height: 1.5;
   overflow-wrap: anywhere;
 }
+
+/* Resolving a protest: the arithmetic the director is confirming, and what the
+   resolution leaves to be played. */
+.rule-form { margin-top: 8px; }
+.rule-form select, .rule-form input { font-size: .85rem; }
+.rule-form > input { width: 100%; margin: 6px 0; }
+.rule-preview {
+  margin: 6px 0; padding: 6px 8px; border-left: 3px solid var(--soft);
+  font-size: .82rem; overflow-wrap: anywhere;
+}
+.rule-detail { color: var(--muted); margin-bottom: 4px; }
+.rule-line { font-family: var(--mono); font-size: .76rem; }
+.rule-warn { color: var(--warn); margin-top: 4px; }
+.rule-play { color: var(--accent-deep); margin-top: 4px; }
+.rule-play.rule-maybe { color: var(--muted); }
+.replay-links {
+  border: 1.5px solid var(--accent); border-radius: var(--radius);
+  padding: 8px 10px; margin: 8px 0; background: var(--surface);
+}
+.replay-links h5 { margin: 0 0 4px; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
+.replay-links input { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: .78rem; }
