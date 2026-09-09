@@ -144,7 +144,9 @@ app.post('/api/tournaments', (req, res) => {
     playerScoresheet: req.body?.playerScoresheet !== false,
     scoresheetCategories: req.body?.scoresheetCategories === true,
     buzzPoints: req.body?.buzzPoints === true,
-    playtest: req.body?.playtest === true
+    playtest: req.body?.playtest === true,
+    showQuestions: req.body?.showQuestions === true,
+    questionLag: req.body?.questionLag
   });
   res.json({ code: t.code, directorToken: t.directorToken, name: t.name, defaults: t.roomDefaults, format: t.format });
 });
@@ -293,7 +295,9 @@ app.get('/api/tournaments/:code', (req, res) => {
     playerScoresheet: t.playerScoresheet !== false,
     scoresheetCategories: t.scoresheetCategories === true,
     buzzPoints: t.buzzPoints === true,
-    playtest: t.playtest === true
+    playtest: t.playtest === true,
+    showQuestions: t.showQuestions === true,
+    questionLag: t.questionLag ?? 2
   });
 });
 
@@ -526,6 +530,23 @@ app.get('/api/tournaments/:code/buzz-points', ah(async (req, res) => {
     exportedAt: Date.now(),
     buzzes
   });
+}));
+
+// Show players each question's full text once the room is done with it, and
+// how many questions behind the room to run.
+app.put('/api/tournaments/:code/show-questions', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const out = store.setShowQuestions(t, req.body?.enabled === true, req.body?.lag);
+  // Text already on a scoresheet doesn't belong there any more once this is
+  // off (or the lag grew), so clear what the rooms are showing.
+  for (const code of t.roomCodes) {
+    const room = store.getRoom(code);
+    if (!room) continue;
+    if (room.scoresheet) for (const row of room.scoresheet.rows || []) row.question = null;
+    emitState(room);
+  }
+  res.json(out);
 }));
 
 // Turn a tournament into a playtest, or back.
@@ -1802,7 +1823,7 @@ io.on('connection', (socket) => {
       // it goes anywhere near a player. `qbj: null` clears it.
       case 'modaq_game': {
         store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false,
-          payload.protests, payload.categories, payload.answers);
+          payload.protests, payload.categories, payload.answers, payload.questions);
         break;
       }
       // MODAQ's serialized game from one moderator, fanned out to the others

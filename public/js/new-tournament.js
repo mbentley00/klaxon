@@ -19,6 +19,12 @@ $('#t-packet-files').addEventListener('change', (e) => {
 // they only appear once the checkbox is on. They keep their values either way —
 // the payload below reads them regardless, and the server ignores them when
 // massinger is off.
+// The lag only means anything once the questions are being shown at all.
+const showQuestionsBox = $('#fmt-show-questions');
+const showLag = () => $('#fmt-question-lag-row').classList.toggle('hidden', !showQuestionsBox.checked);
+showQuestionsBox.addEventListener('change', showLag);
+showLag();
+
 const massingerBox = $('#fmt-massinger');
 const showMassingerOptions = () => $('#massinger-options').classList.toggle('hidden', !massingerBox.checked);
 massingerBox.addEventListener('change', showMassingerOptions);
@@ -56,7 +62,9 @@ $('#create-tournament').addEventListener('click', async () => {
       playerScoresheet: $('#fmt-player-scoresheet').checked,
       scoresheetCategories: $('#fmt-scoresheet-categories').checked,
       buzzPoints: $('#fmt-buzz-points').checked,
-      playtest: $('#fmt-playtest').checked
+      playtest: $('#fmt-playtest').checked,
+      showQuestions: $('#fmt-show-questions').checked,
+      questionLag: Number($('#fmt-question-lag').value)
     });
     remember('directorToken:' + r.code, r.directorToken);
 

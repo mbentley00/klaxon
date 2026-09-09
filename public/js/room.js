@@ -595,6 +595,14 @@ function renderScoresheet(s) {
       // cycle — the server releases it on the same gate as the category, so
       // its presence IS permission to show it.
       if (row.answer) ev.append(el('div', { className: 'ss-answer' }, row.answer));
+      // The question itself, when the director shows them — always some
+      // questions behind the room (see the lag on the tournament). Folded away
+      // by default: a whole tossup in every row would bury the scoresheet.
+      if (row.question) {
+        const box = el('details', { className: 'ss-question' });
+        box.append(el('summary', {}, 'Question'), el('div', { className: 'ss-qtext' }, row.question));
+        ev.append(box);
+      }
       // Same order and wording as MODAQ's cycle items.
       if (row.thrownOut) ev.append(el('div', { className: 'ss-item' }, `Threw out tossup #${row.thrownOut}`));
       for (const z of row.buzzes) {

@@ -106,7 +106,9 @@ export function hydrate({ tournaments: tournamentRecords = [], rooms: roomRecord
       playerScoresheet: t.playerScoresheet !== false,
       scoresheetCategories: t.scoresheetCategories === true,
       buzzPoints: t.buzzPoints === true,
-      playtest: t.playtest === true
+      playtest: t.playtest === true,
+      showQuestions: t.showQuestions === true,
+      questionLag: clampNum(t.questionLag, 0, 20, DEFAULT_QUESTION_LAG)
     });
   }
   for (const r of roomRecords) {
@@ -212,7 +214,8 @@ export function bucketForRoom(room) {
   return { kind: 'r', code: room.code };
 }
 
-export function createTournament({ name, schedule = [], defaults = {}, format = {}, requireReaderAccounts = false, date = '', listed = false, playerScoresheet = true, scoresheetCategories = false, buzzPoints = false, playtest = false }) {
+export function createTournament({ name, schedule = [], defaults = {}, format = {}, requireReaderAccounts = false, date = '', listed = false, playerScoresheet = true, scoresheetCategories = false, buzzPoints = false, playtest = false,
+  showQuestions = false, questionLag = DEFAULT_QUESTION_LAG }) {
   let code;
   do { code = roomCode(5); } while (tournaments.has(code));
   const t = {
@@ -257,7 +260,16 @@ export function createTournament({ name, schedule = [], defaults = {}, format = 
     // cycle is over and can say what they thought of the question. Off by
     // default, because in a real tournament showing the answer line to the
     // room mid-match would be a disaster.
-    playtest: playtest === true
+    playtest: playtest === true,
+    // Show players the full text of a question once the room is done with it.
+    // Off by default, and held back further by questionLag below.
+    showQuestions: showQuestions === true,
+    // How many questions BEHIND the room the text runs. The reveal gate
+    // already refuses to release a cycle the room hasn't finished; the lag is
+    // a second margin on top, for the room where someone is a question behind
+    // — a phone that lagged, a player who stepped out. Two costs nothing and
+    // removes the whole class of problem, so that is the default.
+    questionLag: clampNum(questionLag, 0, 20, DEFAULT_QUESTION_LAG)
   };
   tournaments.set(code, t);
   persistTournament(t);
@@ -384,6 +396,20 @@ export function setBuzzPoints(tournament, enabled) {
 export function buzzPointsOn(room) {
   const t = room?.tournamentCode ? tournaments.get(room.tournamentCode) : null;
   return t?.buzzPoints === true;
+}
+
+export function setShowQuestions(tournament, enabled, lag) {
+  tournament.showQuestions = enabled === true;
+  if (lag != null) tournament.questionLag = clampNum(lag, 0, 20, DEFAULT_QUESTION_LAG);
+  persistTournament(tournament);
+  return { showQuestions: tournament.showQuestions, questionLag: tournament.questionLag };
+}
+
+// Does this room show the questions it has finished, and how far behind?
+export function questionRevealFor(room) {
+  const t = room?.tournamentCode ? tournaments.get(room.tournamentCode) : null;
+  if (t?.showQuestions !== true) return null;
+  return { lag: clampNum(t.questionLag, 0, 20, DEFAULT_QUESTION_LAG) };
 }
 
 export function setPlaytest(tournament, enabled) {
@@ -1138,6 +1164,10 @@ export function activeTeams(room) {
 // reveals nothing: rows past the current question are never sent, and the
 // sheet is rebuilt from scratch on every update rather than accumulated, so
 // it retracts the moment they navigate back.
+// How far behind the room a revealed question runs, unless the director says
+// otherwise. See questionLag on the tournament.
+const DEFAULT_QUESTION_LAG = 2;
+
 const SCORESHEET_MAX_ROWS = 100;
 const SCORESHEET_MAX_PLAYERS = 12;
 // A match is nearly always two sides, but MODAQ now reads games with more —
@@ -1173,6 +1203,9 @@ const CATEGORY_MAX = 240;          // packet tossups we'll keep categories for
 const category = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
 // An answer line is longer than a category and carries its own markup.
 const answerLine = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+// A whole tossup, tags and all — MODAQ's own markup goes with it so the room
+// reads the question as it was read to them.
+const questionText = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000);
 
 function revealCeiling(room, match, through, hasContent, now = Date.now()) {
   if (!room) return 0;
@@ -1202,7 +1235,7 @@ function revealCeiling(room, match, through, hasContent, now = Date.now()) {
   return hasContent ? Math.max(0, Math.min(g.played, through - 1)) : 0;
 }
 
-export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true, protests = [], categories = [], ceiling = 0, answers = []) {
+export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true, protests = [], categories = [], ceiling = 0, answers = [], questionTexts = [], questionCeiling = 0) {
   // Protests, whitelisted field by field. Everything here was said out loud in
   // the room (who protested, on what, the answer they gave) — the moderator's
   // free-text reasoning stays out.
@@ -1287,6 +1320,9 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
     // In a playtest the answer line follows the same gate: the room may read
     // what the answer was once it has finished the cycle, and not before.
     const answer = n <= ceiling ? answerLine(answers[packetIndex]) : '';
+    // The question itself runs further behind than everything else: its own
+    // ceiling is the reveal gate minus the tournament's lag.
+    const text = n <= questionCeiling ? questionText(questionTexts[packetIndex]) : '';
     rows.push({
       n,
       buzzes,
@@ -1295,6 +1331,7 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
       thrownOut,
       category: cat || null,
       answer: answer || null,
+      question: text || null,
       protests: protestsByCycle.get(n) || [],
       scores: [...totals]
     });
@@ -1305,7 +1342,7 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
 
 // The reader's page pushes its game on every change; keep the players' view.
 // Clearing (a null match) hides the sheet, e.g. when the reader leaves a game.
-export function setScoresheet(room, match, currentQuestion, hasBonuses = true, protests = [], categories = [], answers = []) {
+export function setScoresheet(room, match, currentQuestion, hasBonuses = true, protests = [], categories = [], answers = [], questions = []) {
   if (match == null) {
     room.scoresheet = null;
     room.catGate = null;
@@ -1327,8 +1364,16 @@ export function setScoresheet(room, match, currentQuestion, hasBonuses = true, p
   // new PACKET rather than the end of the session: bank what the last one
   // finished with before the scoresheet is replaced by an empty game.
   if (room.settings.shootout) bankIfNewGame(room, match);
-  const ceiling = revealCeiling(room, match, through, cats.length > 0 || answerLines.length > 0);
-  room.scoresheet = buildPlayerScoresheet(match, currentQuestion, hasBonuses, protests, cats, ceiling, answerLines);
+  const reveal = questionRevealFor(room);
+  const texts = reveal && Array.isArray(questions) ? questions.slice(0, CATEGORY_MAX).map(questionText) : [];
+  const ceiling = revealCeiling(room, match, through,
+    cats.length > 0 || answerLines.length > 0 || texts.length > 0);
+  // The question text sits further back than the rest: the gate says the room
+  // has finished the cycle, and the lag keeps it that many questions behind
+  // besides.
+  const questionCeiling = texts.length ? Math.max(0, ceiling - reveal.lag) : 0;
+  room.scoresheet = buildPlayerScoresheet(match, currentQuestion, hasBonuses, protests, cats, ceiling,
+    answerLines, texts, questionCeiling);
   persistRooms();
   return { ok: true };
 }

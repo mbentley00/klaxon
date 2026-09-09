@@ -149,6 +149,41 @@ function initPlayerScoresheet(t) {
   initScoresheetCategories(t);
   initBuzzPoints(t);
   initPlaytest(t);
+  initShowQuestions(t);
+}
+
+// Show players each question's text once the room is past it. The reveal gate
+// already refuses a cycle the room hasn't finished; the lag is a second margin
+// on top, for the room where somebody is a question behind — a phone that
+// lagged, a player who stepped out.
+function initShowQuestions(t) {
+  const cb = $('#show-questions');
+  if (!cb) return;
+  const lag = $('#question-lag');
+  const note = $('#show-questions-note');
+  const show = () => {
+    $('#question-lag-row').classList.toggle('hidden', !cb.checked);
+    note.textContent = cb.checked
+      ? `A question appears once the room is ${lag.value} question${lag.value === '1' ? '' : 's'} past it.`
+      : '';
+  };
+  const save = async () => {
+    try {
+      await api('PUT', `/api/tournaments/${code}/show-questions`,
+        { directorToken, enabled: cb.checked, lag: Number(lag.value) });
+      show();
+      msay(cb.checked
+        ? `Players will see each question once the room is ${lag.value} past it.`
+        : 'Questions hidden from players again.');
+    } catch (e) {
+      msay('Could not change that: ' + e.message, false);
+    }
+  };
+  cb.checked = t.showQuestions === true;
+  lag.value = t.questionLag ?? 2;
+  show();
+  cb.onchange = save;
+  lag.onchange = save;
 }
 
 // Name each tossup's category on the players' scoresheet (default off). The

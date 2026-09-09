@@ -654,3 +654,16 @@ body.compact #answer-view { display: none; }
 .chat-line.chat-staff .chat-who { color: var(--accent); }
 #chat-box { flex: 1 1 auto; min-width: 0; }
 body.compact #shootout-view, body.compact #chat-view { display: none; }
+
+/* A question the room has finished with, folded away — a whole tossup in every
+   row would bury the scoresheet it sits in. */
+.scoresheet .ss-question { margin: 4px 0; }
+.scoresheet .ss-question summary {
+  cursor: pointer; font-family: var(--mono); font-size: .7rem;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+}
+.scoresheet .ss-qtext {
+  margin-top: 4px; padding: 6px 8px; background: var(--bg);
+  border-left: 3px solid var(--soft); font-size: .85rem; line-height: 1.5;
+  overflow-wrap: anywhere;
+}

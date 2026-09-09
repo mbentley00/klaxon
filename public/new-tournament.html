@@ -51,6 +51,12 @@
         while the moderator reads in MODAQ mode (only questions already read — never anything ahead)</label>
       <label class="toggle"><input type="checkbox" id="fmt-scoresheet-categories" /> Name each tossup's category on that
         scoresheet, once the room has finished the cycle (a category is never shown for the question being read)</label>
+      <label class="toggle"><input type="checkbox" id="fmt-show-questions" /> Show players the full text of each
+        question once the room has finished with it</label>
+      <div class="row hidden" id="fmt-question-lag-row">
+        <label class="select-label" for="fmt-question-lag">...and keep it this many questions behind the room</label>
+        <input type="number" id="fmt-question-lag" value="2" min="0" max="20" style="width:5em" />
+      </div>
       <label class="toggle"><input type="checkbox" id="fmt-playtest" /> This is a playtest — players see each answer
         line once the room has finished the cycle, and can say what they thought of the question</label>
       <label class="toggle"><input type="checkbox" id="fmt-buzz-points" /> Record buzz points for the whole tournament —

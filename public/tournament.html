@@ -115,6 +115,16 @@
       </div>
 
       <div class="modaq-block">
+        <label class="vol"><input type="checkbox" id="show-questions" />
+          show players the full question once the room has finished with it</label>
+        <div class="sound-row" id="question-lag-row">
+          <label class="select-label" for="question-lag">questions behind the room</label>
+          <input type="number" id="question-lag" min="0" max="20" style="width:5em" />
+          <span class="hint" id="show-questions-note"></span>
+        </div>
+      </div>
+
+      <div class="modaq-block">
         <label class="vol"><input type="checkbox" id="playtest" />
           playtest — players see the answer line once the room is past a cycle, and can flag the question</label>
         <div class="sound-row">
