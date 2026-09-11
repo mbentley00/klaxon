@@ -416,23 +416,43 @@ $('#compact-toggle').onclick = () => {
 const pipSupported = 'documentPictureInPicture' in window;
 let pipWin = null;
 
+// The floating window is a separate document: it doesn't get styles.css, so it
+// carries its own copy of the few theme tokens it needs, and follows the
+// page's theme (see pipTheme below).
 const PIP_CSS = `
+  :root { color-scheme: light; --bg: #f3efe6; --surface: #fffdf7; --ink: #17130d; --line: #17130d;
+          --shadow-ink: #17130d; --muted: #6d6456; --accent: #d8401f; --accent-fill: #d8401f; --on-accent: #fff;
+          --buzzer-fade: .5; }
+  :root[data-theme="dark"] { color-scheme: dark; --bg: #1b1814; --surface: #25211b; --ink: #efe7d8;
+          --line: #cfc5b3; --shadow-ink: #6f6554; --muted: #aba08d; --accent: #ff7a55; --accent-fill: #d8401f; --on-accent: #fff;
+          --buzzer-fade: .68; }
   html, body { margin: 0; height: 100%; }
-  body { font-family: system-ui, "Segoe UI", sans-serif; background: #f3efe6; color: #17130d;
+  body { font-family: system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink);
          display: flex; align-items: center; justify-content: center; }
   .pip { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px; width: 100%; }
   .pip-phase { font-weight: 700; font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; text-align: center; }
-  .pip-phase.ready { color: #6d6456; }
-  .pip-phase.buzzed { color: #d8401f; }
+  .pip-phase.ready { color: var(--muted); }
+  .pip-phase.buzzed { color: var(--accent); }
   .pip-buzz { flex: 1; width: min(74vw, 74vh); aspect-ratio: 1; border-radius: 50%;
-              border: 3px solid #17130d; box-shadow: 6px 6px 0 #17130d; background: #fffdf7;
-              font-family: inherit; font-weight: 700; font-size: clamp(1rem, 9vw, 2rem);
+              border: 3px solid var(--line); box-shadow: 6px 6px 0 var(--shadow-ink); background: var(--surface);
+              color: var(--ink); font-family: inherit; font-weight: 700; font-size: clamp(1rem, 9vw, 2rem);
               letter-spacing: .04em; text-transform: uppercase; cursor: pointer; }
-  .pip-buzz.buzzed { background: #d8401f; color: #fff; }
-  .pip-buzz:not(:disabled):active { transform: translate(4px, 4px); box-shadow: 0 0 0 #17130d; }
-  .pip-buzz:disabled { opacity: .5; cursor: default; box-shadow: 3px 3px 0 #17130d; }
-  .pip-code { font-size: .7rem; letter-spacing: .12em; color: #6d6456; }
+  .pip-buzz.buzzed { background: var(--accent-fill); color: var(--on-accent); }
+  .pip-buzz:not(:disabled):active { transform: translate(4px, 4px); box-shadow: 0 0 0 var(--shadow-ink); }
+  .pip-buzz:disabled { opacity: var(--buzzer-fade); cursor: default; box-shadow: 3px 3px 0 var(--shadow-ink); }
+  .pip-code { font-size: .7rem; letter-spacing: .12em; color: var(--muted); }
 `;
+
+// Keep the floating window on the page's theme, including a switch made while
+// it is open (here, or in another tab).
+function pipTheme() {
+  const r = pipWin?.document?.documentElement;
+  if (!r) return;
+  const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+  r.dataset.theme = theme;
+  r.style.colorScheme = theme;
+}
+document.addEventListener('klaxon-theme', pipTheme);
 
 async function openPip() {
   if (!pipSupported) return;
@@ -443,6 +463,7 @@ async function openPip() {
   const d = pipWin.document;
   d.title = `Klaxon ${code}`;
   d.head.append(Object.assign(d.createElement('style'), { textContent: PIP_CSS }));
+  pipTheme();
 
   const wrap = d.createElement('div');
   wrap.className = 'pip';
