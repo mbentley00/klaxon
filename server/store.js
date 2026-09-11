@@ -59,6 +59,8 @@ const serializeRoom = (r) => ({
   // A shootout's running leaderboard and its chat (see shootout.js). Both last
   // the evening, so both outlive a restart.
   shootout: r.shootout || null,
+  // ...and what the host set up for it: packets, notes, withdraw rule.
+  shootoutSession: r.shootoutSession || null,
   chat: r.chat || []
 });
 
@@ -1073,7 +1075,11 @@ export function publicState(room) {
     // A shootout's leaderboard across every packet of the session, and its
     // chat (see shootout.js). Null in a room that isn't one.
     shootout: room.settings.shootout
-      ? shootout.board(room, shootout.currentScores(room.scoresheet))
+      ? {
+        ...shootout.board(room, shootout.currentScores(room.scoresheet)),
+        // What's being played and what the host wants the room to know.
+        session: shootout.publicSession(room.shootoutSession)
+      }
       : null,
     chat: room.settings.shootout ? shootout.messages(room) : [],
     // The typed-answer window, when the room uses one (answers.js). Nobody's
@@ -1168,6 +1174,29 @@ export function createReplayRoom({ tournamentCode, round, teams, gameplay, prote
   }
   persistRooms();
   return room;
+}
+
+// The host's plan for the evening (see shootout.normalizeSession). The way a
+// withdrawn buzz is handled is a room setting, so it's applied here too.
+export function setShootoutSession(room, input) {
+  if (!room.settings.shootout) return { error: 'disabled' };
+  const session = shootout.normalizeSession(input, room.shootoutSession);
+  room.shootoutSession = session;
+  Object.assign(room.settings, shootout.withdrawSettings(session.withdraw));
+  // A buzz can only be withdrawn from a queue.
+  if (room.settings.allowWithdraw) room.settings.queueMode = true;
+  persistRooms(true);
+  return { ok: true, session: shootout.publicSession(session) };
+}
+
+// Which of the session's packets is being read.
+export function setShootoutCurrent(room, packetId) {
+  const session = room.shootoutSession;
+  if (!room.settings.shootout || !session) return { error: 'no_session' };
+  if (!session.packets.some((p) => p.id === packetId)) return { error: 'no_packet' };
+  session.current = packetId;
+  persistRooms();
+  return { ok: true };
 }
 
 // The moderator wipes the leaderboard and starts the evening again.

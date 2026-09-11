@@ -13,6 +13,7 @@ import * as protests from './protests.js';
 import * as answers from './answers.js';
 import * as playtest from './playtest.js';
 import * as resolution from './resolution.js';
+import * as shootout from './shootout.js';
 import { renderReport, PAGES } from './yellowfruit.js';
 import { computeBuzzpoints, renderBuzzpointsCsv, renderBuzzpointsHtml } from './buzzpoints.js';
 import { sendEmail, emailEnabled, feedbackBody, FEEDBACK_TO } from './email.js';
@@ -1080,6 +1081,34 @@ app.get('/api/rooms/:code/exports/:filename', ah(async (req, res) => {
   res.type('application/json').send(text);
 }));
 
+// A shootout's evening in one download, laid out for buzzpoint-migrator (the
+// importer behind quizbowlbuzzpoints.com): every packet that was read, and the
+// game played on it with every buzz. See shootout.buzzpointsExport.
+app.get('/api/rooms/:code/shootout/export.zip', ah(async (req, res) => {
+  const room = roomOr(res, req.params.code); if (!room) return;
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const session = room.shootoutSession;
+  if (!room.settings.shootout || !session) return res.status(404).json({ error: 'no_session' });
+  const bucket = store.bucketForRoom(room);
+  const ids = new Set(session.packets.map((p) => p.id));
+  const games = {};
+  for (const { qbj } of await artifacts.readAllExports(bucket)) {
+    const id = String(qbj?._round ?? '');
+    if (ids.has(id) && String(qbj?._room ?? '').toUpperCase() === room.code) games[id] = qbj;
+  }
+  const packets = {};
+  for (const p of session.packets) {
+    if (!games[p.id]) continue;
+    const text = await artifacts.getPacket(bucket, p.id);
+    try { if (text) packets[p.id] = JSON.parse(text); } catch { /* a damaged file is left out */ }
+  }
+  const { files, rounds } = shootout.buzzpointsExport({ session, packets, games, code: room.code });
+  if (rounds === 0) return res.status(404).json({ error: 'nothing_read' });
+  const slug = session.name.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'shootout';
+  res.setHeader('Content-Disposition', `attachment; filename="${slug}-${room.code}-buzzpoints.zip"`);
+  res.type('application/zip').send(buildZip(files));
+}));
+
 app.get('/api/rooms/:code/errata', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
   if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
@@ -1798,6 +1827,20 @@ io.on('connection', (socket) => {
         emitState(room);
         return ack?.({ ok: true });
       }
+      // The host's setup: what's being played, notes for the room, how a
+      // withdrawn buzz is handled, and the packets in reading order.
+      case 'shootout_session': {
+        const r = store.setShootoutSession(room, payload.session);
+        if (r.error) return ack?.(r);
+        emitState(room);
+        return ack?.(r);
+      }
+      case 'shootout_current': {
+        const r = store.setShootoutCurrent(room, String(payload.packet ?? ''));
+        if (r.error) return ack?.(r);
+        emitState(room);
+        return ack?.(r);
+      }
       case 'clear_roster':
         store.clearRoster(room);
         break;
@@ -2057,6 +2100,23 @@ io.on('connection', (socket) => {
     if (res.error) return ack?.({ error: res.error });
     io.to(room.code).emit('chat_message', res.message);
     emitToStaff(room.code, 'chat_message', res.message);
+    ack?.({ ok: true });
+  });
+
+  // A player leaves the game on purpose — as opposed to a dropped connection,
+  // which the moderator's page gives a grace period before counting it. They
+  // come off the room's list at once, so from the next question MODAQ stops
+  // counting them as hearing tossups; their score stays where it is. Coming
+  // back is simply joining again.
+  socket.on('leave_game', (_payload, ack) => {
+    const ctx = sock.get(socket.id);
+    const room = ctx && store.getRoom(ctx.roomCode);
+    if (!room || !ctx.playerId) return ack?.({ error: 'no_room' });
+    const playerId = ctx.playerId;
+    if (!store.removePlayer(room, playerId)) return ack?.({ error: 'not_a_player' });
+    kickPlayer(room, playerId, 'left');
+    try { store.refreshShootoutRoster(room); } catch { /* best-effort */ }
+    emitState(room);
     ack?.({ ok: true });
   });
 

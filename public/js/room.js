@@ -50,10 +50,22 @@ const ackNow = (_p, ack) => { if (typeof ack === 'function') ack(); };
 socket.on('srv_ping', ackNow);
 socket.on('rtt_echo', ackNow);
 
-// Removed by the reader: drop our identity and return home.
-socket.on('kicked', () => {
+// Removed by the reader: drop our identity and return home. Leaving on our own
+// (the shootout's Leave game) is different: back to the join gate, name still
+// filled in, so coming back later is one click.
+socket.on('kicked', (info) => {
   forget('joined:' + code); forget('role:' + code);
   state.role = null; state.me = null;
+  if (info?.reason === 'left') {
+    $('#stage').classList.add('hidden');
+    document.body.classList.remove('has-chat', 'has-sheet');
+    showGate('player');
+    $('#gate-join').textContent = 'Join again';
+    const msg = $('#gate-msg');
+    msg.textContent = "You've left the game. Your score is kept — join again any time.";
+    msg.className = 'msg good';
+    return;
+  }
   alert('You were removed from this room by the reader.');
   location.href = '/';
 });
@@ -561,6 +573,7 @@ function applyState(s) {
   renderScoresheet(s);
   renderProtests(s);
   renderAnswers(s);
+  renderSession(s);
   renderShootout(s);
   renderChat(s);
   announceBuzz(s);
@@ -804,10 +817,17 @@ function renderShootout(s) {
 
   const ol = $('#shootout-board');
   ol.replaceChildren();
+  // Ranked, with ties sharing a place: "1, 2, 2, 4".
+  let place = 0;
+  board.rows.forEach((row, i) => {
+    if (i === 0 || row.total !== board.rows[i - 1].total) place = i + 1;
+    row.place = place;
+  });
   for (const row of board.rows) {
     const me = row.name === (state.me?.name || '');
     ol.append(el('li', { className: 'sb-row' + (me ? ' sb-me' : '') },
-      el('span', { className: 'sb-name', textContent: row.name }),
+      el('span', { className: 'sb-rank', textContent: `${row.place}.` }),
+      el('span', { className: 'sb-name', textContent: me ? `${row.name} (you)` : row.name }),
       // The banked half is shown separately so nobody has to wonder whether the
       // number moved because of this packet or an earlier one.
       el('span', { className: 'sb-split', textContent: row.banked ? `${row.banked} + ${row.current}` : '' }),
@@ -816,6 +836,49 @@ function renderShootout(s) {
   if (!board.rows.length) ol.append(el('li', { className: 'empty' }, 'Nobody has scored yet.'));
   $('#shootout-controls').classList.toggle('hidden', !isStaffRole(state.role));
 }
+
+// What the host set up (see server/shootout.js): the name of what's being
+// played, their notes, which packet and question the reader is on, and how a
+// withdrawn buzz is handled — the one rule players need before they buzz.
+const WITHDRAW_RULE = {
+  free: 'Withdrawing a buzz is free.',
+  none: 'No withdrawing: a buzz stands once it’s in.',
+  typed: 'Type your answer while you wait your turn; withdrawing is free only if you hadn’t committed to a different answer.'
+};
+
+function renderSession(s) {
+  const view = $('#session-view');
+  const session = s.shootout?.session;
+  if (!session) { view.classList.add('hidden'); return; }
+  view.classList.remove('hidden');
+  $('#session-name').textContent = session.name;
+  const notes = $('#session-notes');
+  notes.textContent = session.notes || '';
+  notes.classList.toggle('hidden', !session.notes);
+
+  const bits = [];
+  const n = session.packets.length;
+  if (session.currentIndex >= 0) {
+    bits.push(n > 1 ? `Packet ${session.currentIndex + 1} of ${n}` : 'Packet 1');
+    // The scoresheet knows where the reader is; it's built for players, so it
+    // never runs ahead of what the room has heard.
+    const sheet = s.scoresheet;
+    if (sheet?.current) bits.push(`question ${sheet.current} of ${sheet.total || session.packets[session.currentIndex]?.tossups || '?'}`);
+  } else {
+    bits.push(n === 1 ? '1 packet' : `${n} packets`);
+    bits.push('starting soon');
+  }
+  $('#session-progress').textContent = bits.join(' · ');
+  $('#session-rule').textContent = WITHDRAW_RULE[session.withdraw] || '';
+  $('#leave-game').classList.toggle('hidden', state.role !== 'player');
+}
+
+$('#leave-game')?.addEventListener('click', () => {
+  if (!confirm('Leave the game? Your score is kept, and you can join again whenever you like.')) return;
+  socket.emit('leave_game', {}, (res) => {
+    if (res?.error) say('Could not leave: ' + res.error, false);
+  });
+});
 
 $('#shootout-reset')?.addEventListener('click', () => {
   if (!confirm('Reset the leaderboard? Every packet banked so far goes back to zero.')) return;

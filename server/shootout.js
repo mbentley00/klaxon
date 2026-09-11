@@ -174,3 +174,199 @@ export function say(room, actor, text, people = []) {
 }
 
 export const messages = (room) => (room.chat || []).map((m) => ({ ...m }));
+
+// --- the session -------------------------------------------------------------
+// What the host set up before anyone joined: what's being played, notes for the
+// players (what kind of questions, what's being playtested), how a withdrawn
+// buzz is handled, and the packets, in the order they'll be read. The packets
+// themselves are stored like any room's packets (staff-only, see
+// /api/rooms/:code/packets); the session only names them.
+//
+// Kept apart from the leaderboard (room.shootout) on purpose: "reset the
+// leaderboard" starts the scoring over, not the evening's plan.
+
+export const WITHDRAW_MODES = ['free', 'none', 'typed'];
+export const SCHEMES = ['15/10/-5', '20/15/10/-5', '20/10/0'];
+const MAX_PACKETS = 40;
+const MAX_NOTES = 2000;
+const PACKET_ID = /^p[0-9a-z]{1,16}$/;
+
+const count = (v) => Math.max(0, Math.min(1000, Math.floor(Number(v) || 0)));
+
+/**
+ * A session as the host sent it, cleaned. `prev` is the session being
+ * replaced: which packet is being read survives an edit (by id, so reordering
+ * the rest doesn't move the room to a different packet).
+ */
+export function normalizeSession(input, prev = null) {
+  const seen = new Set();
+  const packets = [];
+  for (const p of Array.isArray(input?.packets) ? input.packets : []) {
+    const id = String(p?.id ?? '');
+    if (!PACKET_ID.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    packets.push({ id, name: clean(p?.name, 80) || `Packet ${packets.length + 1}`, tossups: count(p?.tossups), bonuses: count(p?.bonuses) });
+    if (packets.length >= MAX_PACKETS) break;
+  }
+  const current = typeof input?.current === 'string' ? input.current : prev?.current ?? null;
+  return {
+    name: clean(input?.name, 80) || 'Shootout',
+    // Line breaks are the host's formatting; only trailing space and length are policed.
+    notes: String(input?.notes ?? '').replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim().slice(0, MAX_NOTES),
+    withdraw: WITHDRAW_MODES.includes(input?.withdraw) ? input.withdraw : 'free',
+    scoring: {
+      scheme: SCHEMES.includes(input?.scoring?.scheme) ? input.scoring.scheme : '15/10/-5',
+      bonuses: input?.scoring?.bonuses === true
+    },
+    packets,
+    current: packets.some((p) => p.id === current) ? current : null,
+    createdAt: prev?.createdAt || Date.now()
+  };
+}
+
+// The room settings each way of handling a withdrawn buzz comes down to (see
+// answers.js for what the typed-answer window does).
+export function withdrawSettings(mode) {
+  if (mode === 'none') return { allowWithdraw: false, lockedAnswers: false };
+  if (mode === 'typed') return { allowWithdraw: true, lockedAnswers: true };
+  return { allowWithdraw: true, lockedAnswers: false };
+}
+
+/**
+ * The session as the room sees it — players and moderators alike: nothing in
+ * it is secret. It names the packets but never carries one; their contents
+ * stay behind the staff token.
+ */
+export function publicSession(session) {
+  if (!session) return null;
+  return {
+    name: session.name,
+    notes: session.notes,
+    withdraw: session.withdraw,
+    scoring: { ...session.scoring },
+    packets: session.packets.map((p) => ({ ...p })),
+    current: session.current,
+    // Which of them is being read, for "Packet 2 of 4" (-1 before the first).
+    currentIndex: session.packets.findIndex((p) => p.id === session.current)
+  };
+}
+
+// --- export for buzzpoints ---------------------------------------------------
+// One download at the end of the evening, laid out the way JemCasey's
+// buzzpoint-migrator (the importer behind quizbowlbuzzpoints.com) reads a data
+// folder: a question set with one edition holding the packets, and a
+// tournament holding one QBJ per game.
+//
+// The migrator ties a game to its packet by NAME — the QBJ's `packets` field
+// has to equal a packet file's name — and to its round by the number after
+// `Round_` in the game's file name. Both are set here rather than trusted from
+// what the reader's screen sent, so a packet renamed mid-evening still lines up.
+
+const METADATA_STYLE = { default: 1, noAuthor: 2, none: 7 };
+
+// "Author, Category - Subcategory" (the usual ACF-style line) or just a
+// category. The migrator needs telling which, per set.
+function metadataStyle(packets) {
+  const lines = packets.flatMap((p) => (p.tossups || []).map((t) => String(t?.metadata ?? '').trim())).filter(Boolean);
+  if (lines.length === 0) return METADATA_STYLE.none;
+  const withAuthor = lines.filter((m) => /^[^,]+,\s*\S/.test(m)).length;
+  return withAuthor * 2 >= lines.length ? METADATA_STYLE.default : METADATA_STYLE.noAuthor;
+}
+
+function setFormat(scheme, packets) {
+  if (scheme === '20/10/0') return 'pace';
+  if (scheme === '20/15/10/-5') return 'superpowers';
+  const powered = packets.some((p) => (p.tossups || []).some((t) => String(t?.question ?? '').includes('(*)')));
+  return powered ? 'powers' : 'acf';
+}
+
+// Safe as a file or folder name on every OS. (The migrator cleans a packet's
+// file name and a game's `packets` field the same way before comparing them,
+// so nothing else needs changing for the two to match.)
+function fileSafe(text) {
+  return String(text ?? '')
+    .replace(/[\\/:*?"<>|\p{Cc}]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/, '')
+    .slice(0, 60);
+}
+
+/**
+ * The files of the export, as [{ name, data }] for zip.buildZip. `games` holds
+ * the game played on each packet ({ packetId -> QBJ object }); `packets` the
+ * packets themselves ({ packetId -> packet object }). Only packets that were
+ * actually read go in: a packet nobody heard isn't part of the evening.
+ */
+export function buzzpointsExport({ session, packets, games, code, date }) {
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : new Date(session.createdAt || Date.now()).toISOString().slice(0, 10);
+  const setName = session.name;
+  const tournamentName = `${session.name} (Klaxon ${code}, ${day})`;
+  const setDir = `data/question_sets/${fileSafe(setName) || 'Shootout'}`;
+  const tournamentDir = `data/tournaments/${fileSafe(tournamentName) || code}`;
+
+  const read = session.packets
+    .map((p, i) => ({ ...p, round: i + 1, packet: packets[p.id], game: games[p.id] }))
+    .filter((p) => p.packet && p.game);
+
+  const files = [];
+  const pad = String(read.length >= 100 ? 3 : 2);
+  for (const p of read) {
+    const number = String(p.round).padStart(Number(pad), '0');
+    const packetName = `Packet-${number} - ${fileSafe(p.name) || 'Packet'}`;
+    files.push({ name: `${setDir}/editions/${day}/packet_files/${packetName}.json`, data: JSON.stringify(p.packet, null, 2) });
+
+    const qbj = {};
+    for (const [key, value] of Object.entries(p.game)) {
+      if (!key.startsWith('_')) qbj[key] = value;   // Klaxon's own bookkeeping stays home
+    }
+    qbj.packets = packetName;
+    files.push({ name: `${tournamentDir}/game_files/Round_${p.round}_Klaxon_${code}.qbj`, data: JSON.stringify(qbj, null, 2) });
+  }
+
+  const readPackets = read.map((p) => p.packet);
+  files.push({
+    name: `${setDir}/index.json`,
+    data: JSON.stringify({
+      name: setName,
+      difficulty: '',
+      metadataStyle: metadataStyle(readPackets),
+      format: setFormat(session.scoring?.scheme, readPackets),
+      bonuses: session.scoring?.bonuses === true && readPackets.some((p) => (p.bonuses || []).length > 0)
+    }, null, 2)
+  });
+  files.push({ name: `${setDir}/editions/${day}/index.json`, data: JSON.stringify({ name: day, date: day }, null, 2) });
+  files.push({
+    name: `${tournamentDir}/index.json`,
+    data: JSON.stringify({
+      name: tournamentName, set: setName, edition: day, location: 'Online (Klaxon)', level: '',
+      start_date: day, end_date: day
+    }, null, 2)
+  });
+
+  const oneSided = read.filter((p) => (p.game.match_teams || []).length < 2).map((p) => p.round);
+  files.push({
+    name: 'README.txt',
+    data: [
+      `${session.name} — ${read.length} packet${read.length === 1 ? '' : 's'} read in Klaxon room ${code} on ${day}.`,
+      '',
+      'This folder is laid out for buzzpoint-migrator (github.com/JemCasey/buzzpoint-migrator),',
+      'which builds the database behind quizbowlbuzzpoints.com:',
+      '',
+      '  data/question_sets/...   the packets that were read, one JSON each',
+      '  data/tournaments/...     one QBJ game file per packet, with every buzz',
+      '',
+      'To import it yourself: copy the data folder into a buzzpoint-migrator checkout, then run',
+      '`npm run createDB` (the first time only) and `npm run updateDB`. Or send this zip to',
+      'whoever runs the buzzpoints site.',
+      '',
+      'Each competitor is a team of one. A game lists everyone who played any of it; the',
+      "tossups each player heard count only the questions they were in the room for.",
+      ...(oneSided.length
+        ? ['', `Round ${oneSided.join(', ')} had a single competitor; the migrator skips games with fewer than two sides.`]
+        : []),
+      ''
+    ].join('\n')
+  });
+  return { files, rounds: read.length, tournamentName };
+}

@@ -731,8 +731,18 @@ body.compact #answer-view { display: none; }
 .sb-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .sb-split { flex: none; font-family: var(--mono); font-size: .72rem; color: var(--muted); }
 .sb-total { flex: none; font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sb-rank { flex: none; min-width: 1.8em; font-family: var(--mono); font-size: .8rem; color: var(--muted); text-align: right; }
+.sb-row.sb-me { background: var(--accent-bg); }
 #chat-box { flex: 1 1 auto; min-width: 0; }
-body.compact #shootout-view, body.compact #chat-view { display: none; }
+body.compact #shootout-view, body.compact #chat-view, body.compact #session-view { display: none; }
+
+/* What the shootout's host set up: the name, their notes, where the reader is. */
+.session-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.session-head h3 { margin: 0; color: var(--ink); font-size: .95rem; letter-spacing: .02em; text-transform: none; }
+.session-progress { font-family: var(--mono); font-size: .8rem; color: var(--accent); font-weight: 600; }
+.session-notes { margin: 8px 0 0; white-space: pre-line; overflow-wrap: anywhere; font-size: .9rem; }
+.session-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin-top: 10px; }
+.session-rule { font-size: .8rem; color: var(--muted); flex: 1 1 16em; }
 
 /* The chat lives beside the buzzer, in the same right-hand rail the scoresheet
    uses — a player watching it shouldn't have to scroll away from the thing they

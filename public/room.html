@@ -111,6 +111,20 @@
       </div>
     </aside>
 
+    <!-- Discord shootout: what's being played and the host's notes, where the
+         reader has got to, and a way to leave the game on purpose. -->
+    <section id="session-view" class="panel session hidden">
+      <div class="session-head">
+        <h3 id="session-name"></h3>
+        <span id="session-progress" class="session-progress"></span>
+      </div>
+      <p id="session-notes" class="session-notes hidden"></p>
+      <div class="session-foot">
+        <span id="session-rule" class="session-rule"></span>
+        <button id="leave-game" class="ghost tiny hidden">Leave game</button>
+      </div>
+    </section>
+
     <!-- Discord shootout: the leaderboard across every packet of the session,
          and a chat that has nothing to do with answering. -->
     <section id="shootout-view" class="panel shootout hidden">
