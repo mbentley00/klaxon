@@ -409,6 +409,7 @@ function enterStage(snapshot) {
 // ---- compact view (staff) ----
 function applyCompact(on) {
   document.body.classList.toggle('compact', on);
+  syncRail();             // compact hides the rail's contents, so hide the rail
   const btn = $('#compact-toggle');
   btn.textContent = on ? 'Full view' : 'Compact';
   btn.classList.toggle('active', on);
@@ -434,10 +435,10 @@ let pipWin = null;
 const PIP_CSS = `
   :root { color-scheme: light; --bg: #f3efe6; --surface: #fffdf7; --ink: #17130d; --line: #17130d;
           --shadow-ink: #17130d; --muted: #6d6456; --accent: #d8401f; --accent-fill: #d8401f; --on-accent: #fff;
-          --buzzer-fade: .5; }
+          --buzzer-fade: .5; --ok: #2f7d4f; --mine-fill: #2f7d4f; --warn: #9a6400; --warn-bg: #fbedd6; }
   :root[data-theme="dark"] { color-scheme: dark; --bg: #1b1814; --surface: #25211b; --ink: #efe7d8;
           --line: #cfc5b3; --shadow-ink: #6f6554; --muted: #aba08d; --accent: #ff7a55; --accent-fill: #d8401f; --on-accent: #fff;
-          --buzzer-fade: .68; }
+          --buzzer-fade: .68; --ok: #6cc893; --mine-fill: #2e7d4f; --warn: #e8b04c; --warn-bg: #3a2c12; }
   html, body { margin: 0; height: 100%; }
   body { font-family: system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink);
          display: flex; align-items: center; justify-content: center; }
@@ -445,11 +446,17 @@ const PIP_CSS = `
   .pip-phase { font-weight: 700; font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; text-align: center; }
   .pip-phase.ready { color: var(--muted); }
   .pip-phase.buzzed { color: var(--accent); }
+  .pip-phase.mine { color: var(--ok); }
   .pip-buzz { flex: 1; width: min(74vw, 74vh); aspect-ratio: 1; border-radius: 50%;
               border: 3px solid var(--line); box-shadow: 6px 6px 0 var(--shadow-ink); background: var(--surface);
               color: var(--ink); font-family: inherit; font-weight: 700; font-size: clamp(1rem, 9vw, 2rem);
               letter-spacing: .04em; text-transform: uppercase; cursor: pointer; }
   .pip-buzz.buzzed { background: var(--accent-fill); color: var(--on-accent); }
+  .pip-buzz.mine { background: var(--mine-fill); color: #fff; }
+  .pip-buzz.queued { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
+  .pip-buzz.locked { background: var(--surface); color: var(--accent); border-color: var(--accent); border-width: 5px; }
+  .pip-buzz.mine:disabled, .pip-buzz.queued:disabled, .pip-buzz.locked:disabled { opacity: 1; }
+  .pip-buzz.pip-long { font-size: clamp(.7rem, 5vw, 1.1rem); }
   .pip-buzz:not(:disabled):active { transform: translate(4px, 4px); box-shadow: 0 0 0 var(--shadow-ink); }
   .pip-buzz:disabled { opacity: var(--buzzer-fade); cursor: default; box-shadow: 3px 3px 0 var(--shadow-ink); }
   .pip-code { font-size: .7rem; letter-spacing: .12em; color: var(--muted); }
@@ -502,10 +509,13 @@ function renderPip() {
   const phase = d?.getElementById('pip-phase');
   const btn = d?.getElementById('pip-buzz');
   if (!phase || !btn) return;
+  // Same four states as the page's buzzer, by the same names — a popped-out
+  // buzzer that can't tell you whose buzz it is would be worse than none.
+  const tone = BUZZ_TONES.find((t) => buzzer.classList.contains(t)) || 'ready';
   phase.textContent = $('#phase-label').textContent;
-  phase.className = 'pip-phase ' + (buzzer.classList.contains('buzzed') ? 'buzzed' : 'ready');
+  phase.className = 'pip-phase ' + (tone === 'mine' ? 'mine' : tone === 'ready' ? 'ready' : 'buzzed');
   btn.textContent = $('#buzzer-label').textContent;
-  btn.className = 'pip-buzz ' + (buzzer.classList.contains('buzzed') ? 'buzzed' : 'ready');
+  btn.className = 'pip-buzz ' + tone + ($('#buzzer-label').classList.contains('bz-long') ? ' pip-long' : '');
   btn.disabled = buzzer.disabled;
 }
 
@@ -584,6 +594,16 @@ function applyState(s) {
   if (s.tournamentCode) loadTournament(s.tournamentCode);
 }
 
+// The scoresheet and the chat share one sticky rail. An empty rail would still
+// take the column (and a grid gap) out of the page, so it follows its contents.
+function syncRail() {
+  const rail = $('#side-rail');
+  if (!rail) return;
+  const filled = !$('#scoresheet-view').classList.contains('hidden')
+    || !$('#chat-view').classList.contains('hidden');
+  rail.classList.toggle('hidden', !filled || document.body.classList.contains('compact'));
+}
+
 // ---- Live scoresheet (read-only) ----
 // The server sends only what it deems safe for players (store.buildPlayerScoresheet):
 // team/player names and the scoring events up to the question being read. This
@@ -599,6 +619,7 @@ function renderScoresheet(s) {
   view.classList.toggle('hidden', !on);
   view.classList.toggle('ss-collapsed', on && !wanted);
   document.body.classList.toggle('has-sheet', on && wanted);
+  syncRail();
   const tog = $('#ss-toggle');
   if (tog) tog.textContent = wanted ? 'Hide' : 'Show scoresheet';
   if (!on) { ssLastKey = ''; return; }
@@ -714,6 +735,20 @@ function msCountdownText(m) {
 let answerTick = null;
 let answerSent = '';
 let answerCommitted = '';   // the last text the server accepted
+let answerWindowKey = '';   // the window the box on screen is set up for
+
+// Focus the box the moment a window opens. It is open for a few seconds, so a
+// player who has to find it and click it has already lost some of them. The one
+// thing worth protecting is a caret that is somewhere on purpose — a half-typed
+// chat line — so a focused text field is left alone; a button is not.
+function focusAnswer(box) {
+  const at = document.activeElement;
+  const busy = at && at !== box && (at.isContentEditable
+    || at.tagName === 'TEXTAREA'
+    || (at.tagName === 'INPUT' && !at.readOnly && !at.disabled && at.value !== ''));
+  if (busy) return;
+  try { box.focus({ preventScroll: true }); } catch { box.focus(); }
+}
 
 function renderAnswers(s) {
   const view = $('#answer-view');
@@ -728,6 +763,23 @@ function renderAnswers(s) {
   view.classList.remove('hidden');
   const box = $('#answer-box');
   const active = a.activePlayerId === state.me?.id;
+  view.classList.toggle('answer-mine', active);
+
+  // A new window is a clean box: emptied, typable again, focused. Without this
+  // the box from the last question was still sitting there, disabled, with the
+  // last answer in it.
+  const key = `${s.cycleNo}:${a.closesAt}`;
+  if (key !== answerWindowKey) {
+    answerWindowKey = key;
+    answerSent = '';
+    answerCommitted = '';
+    box.value = '';
+    box.disabled = false;
+    box.classList.remove('append-only');
+    $('#answer-note').textContent = '';
+    focusAnswer(box);
+  }
+
   $('#answer-hint').textContent = active
     ? "You have the buzzer. Type your answer — it's shown to the moderator when the clock runs out."
     : 'Commit an answer before the player with the buzzer gives theirs. Only the moderator sees it.';
@@ -845,6 +897,14 @@ const WITHDRAW_RULE = {
   none: 'No withdrawing: a buzz stands once it’s in.',
   typed: 'Type your answer while you wait your turn; withdrawing is free only if you hadn’t committed to a different answer.'
 };
+// The strip above the buzzer gets the rule in a few words; the full sentence is
+// its tooltip. It is a standing rule, not news — it doesn't get three lines at
+// the top of the screen every cycle.
+const WITHDRAW_SHORT = {
+  free: 'Withdrawing is free',
+  none: 'No withdrawing',
+  typed: 'Type your answer while you wait'
+};
 
 function renderSession(s) {
   const view = $('#session-view');
@@ -869,7 +929,9 @@ function renderSession(s) {
     bits.push('starting soon');
   }
   $('#session-progress').textContent = bits.join(' · ');
-  $('#session-rule').textContent = WITHDRAW_RULE[session.withdraw] || '';
+  const rule = $('#session-rule');
+  rule.textContent = WITHDRAW_SHORT[session.withdraw] || '';
+  rule.title = WITHDRAW_RULE[session.withdraw] || '';
   $('#leave-game').classList.toggle('hidden', state.role !== 'player');
 }
 
@@ -901,6 +963,7 @@ function renderChat(s) {
   // Beside the buzzer, not under it: a player watching the chat should not
   // have to scroll away from the thing they are about to press.
   document.body.classList.toggle('has-chat', on && !document.body.classList.contains('compact'));
+  syncRail();
   if (!on) return;
   const log = $('#chat-log');
   const messages = s.chat || [];
@@ -1728,8 +1791,12 @@ function renderPhase(s) {
   const label = $('#phase-label');
   if (!q.length) { label.textContent = 'Ready to Buzz'; label.className = 'phase ready'; }
   else {
-    label.textContent = q[0].name + (q.length > 1 ? ` · ${q.length - 1} more queued` : '');
-    label.className = 'phase buzzed';
+    // Your own buzz says so in words. Reading your own name off the screen and
+    // working out whether that means you is the thing to avoid here.
+    const mine = q[0].playerId === state.me?.id;
+    label.textContent = (mine ? 'You have the buzzer' : q[0].name)
+      + (q.length > 1 ? ` · ${q.length - 1} more queued` : '');
+    label.className = 'phase ' + (mine ? 'mine' : 'buzzed');
   }
 }
 
@@ -1737,29 +1804,43 @@ function renderPhase(s) {
 // line of prose under it — same information, no extra vertical space. CSS hides
 // it on touch devices, where there's no Space bar to press.
 function setBuzzer(label, sub = '') {
-  $('#buzzer-label').textContent = label;
+  const el = $('#buzzer-label');
+  el.textContent = label;
+  el.classList.toggle('bz-long', label.length > 7);   // "#2 IN LINE" in a circle
   $('#buzzer-sub').textContent = sub;
 }
+
+const BUZZ_TONES = ['ready', 'buzzed', 'mine', 'queued', 'locked'];
 
 function renderBuzzer(s) {
   const q = s.queue || [];
   const has = q.length > 0;
-  buzzer.classList.toggle('buzzed', has);
-  buzzer.classList.toggle('ready', !has);
+  // The state a player is in, in one word and one colour. "Someone has buzzed"
+  // and "YOU have buzzed" were the same red circle saying BUZZED, which is the
+  // one mistake this button must never let you make.
+  let tone = 'ready';
 
   if (isStaffRole(state.role)) {
     buzzer.disabled = !has;
+    tone = has ? 'buzzed' : 'ready';        // red = there's a buzz to judge and reset
     setBuzzer(has ? 'RESET' : 'READY', has ? 'or press Space' : '');
   } else if (state.role === 'player') {
     const pos = q.findIndex((x) => x.playerId === state.me?.id);
     const canBuzz = s.phase === 'open' && pos < 0;
     buzzer.disabled = !canBuzz;
-    setBuzzer(pos === 0 ? 'BUZZED' : pos > 0 ? `#${pos + 1}` : (canBuzz ? 'BUZZ' : 'LOCKED'),
-      canBuzz ? 'or press Space' : '');
+    tone = pos === 0 ? 'mine' : pos > 0 ? 'queued' : has ? 'locked' : canBuzz ? 'ready' : 'locked';
+    setBuzzer(
+      pos === 0 ? "YOU'RE IN" : pos > 0 ? `#${pos + 1} IN LINE` : canBuzz ? 'BUZZ' : 'LOCKED',
+      pos === 0 ? 'you have the floor'
+        : pos > 0 ? 'wait your turn'
+          : canBuzz ? 'or press Space'
+            : has ? `${q[0].name} buzzed` : 'not open');
   } else {
     buzzer.disabled = true;
-    setBuzzer(has ? 'BUZZED' : '—');
+    tone = has ? 'locked' : 'ready';
+    setBuzzer(has ? 'BUZZED' : '—', has ? `${q[0].name} buzzed` : '');
   }
+  BUZZ_TONES.forEach((t) => buzzer.classList.toggle(t, t === tone));
   renderPip();
   renderPipButton();
 }
@@ -1922,9 +2003,13 @@ function renderQueue(s) {
   const list = $('#queue-list');
   list.innerHTML = '';
   if (!q.length) list.append(el('li', { className: 'empty' }, 'No one has buzzed'));
-  q.forEach((o, i) => list.append(
-    el('li', { className: i === 0 ? 'head' : '' }, `${o.name}${i ? ` (+${o.marginMs}ms)` : ''}`)
-  ));
+  q.forEach((o, i) => {
+    const mine = o.playerId === state.me?.id;
+    const row = el('li', { className: `${i === 0 ? 'head' : ''}${mine ? ' me' : ''}`.trim() },
+      `${o.name}${i ? ` (+${o.marginMs}ms)` : ''}`);
+    if (mine) row.append(el('span', { className: 'you' }, ' (you)'));
+    list.append(row);
+  });
 
   $('#queue-controls').classList.toggle('hidden', !staff);
   $('#ctl-next').classList.toggle('hidden', !queueMode); // "next" only meaningful in queue mode

@@ -1624,6 +1624,7 @@ io.on('connection', (socket) => {
       try { packetOk = await readerAccessOk(room, payload?.sessionToken); } catch { packetOk = false; }
     }
     socket.join(room.code);
+    store.attachSocket(room, member.id, socket.id);
     sock.set(socket.id, {
       ...sock.get(socket.id),
       roomCode: room.code,
@@ -2220,8 +2221,12 @@ io.on('connection', (socket) => {
     if (ctx?.roomCode) {
       const room = store.getRoom(ctx.roomCode);
       if (room && ctx.playerId) {
-        store.setConnected(room, ctx.playerId, false);
-        emitState(room);
+        // Only their LAST socket closing means they've gone. A reload's new
+        // connection usually lands before this one's close, and a second tab
+        // closing is nothing at all — either used to leave someone who was
+        // still in the room (still buzzing) marked offline (see
+        // store.detachSocket).
+        if (store.detachSocket(room, ctx.playerId, socket.id)) emitState(room);
       }
     }
     sock.delete(socket.id);

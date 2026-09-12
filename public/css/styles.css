@@ -24,6 +24,8 @@
   --ok: #2f7d4f;
   --ok-deep: #1e7d32;
   --ok-bg: #eaf4ea;
+  --mine-fill: #2f7d4f;   /* the buzzer when the buzz is YOURS */
+  --on-mine: #fff;
   --warn: #9a6400;
   --warn-bg: #fbedd6;
   --warn-bg-soft: #fffaf0;
@@ -73,6 +75,8 @@
   --ok: #6cc893;
   --ok-deep: #6cc893;
   --ok-bg: #1c3024;
+  --mine-fill: #2e7d4f;   /* deep enough for white text on the dark ground too */
+  --on-mine: #fff;
   --warn: #e8b04c;
   --warn-bg: #3a2c12;
   --warn-bg-soft: #2e2618;
@@ -226,6 +230,7 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 }
 .phase.ready { color: var(--muted); }
 .phase.buzzed { color: var(--accent); }
+.phase.mine { color: var(--ok); }
 
 /* The buzzer: gray/paper when "Ready to Buzz", red when someone has buzzed. */
 .buzzer {
@@ -240,14 +245,36 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 /* Second line inside the buzzer: the keyboard shortcut, where it costs no
    vertical space. Pointless on touch, so it's hidden there (see below). */
 .bz-label { display: block; }
+/* "#2 IN LINE" has to fit the same circle as "BUZZ". */
+.bz-label.bz-long { font-size: .55em; letter-spacing: .02em; }
 .bz-sub {
   display: block; font-family: var(--sans); font-weight: 500; text-transform: none;
   font-size: .32em; letter-spacing: 0; opacity: .7; margin-top: .5em;
 }
+/* Four states, and the whole point is that no two of them look alike:
+     ready   paper, pressable — nobody is in
+     mine    a green fill — the buzz is YOURS
+     queued  amber — you're in the queue, but behind someone
+     locked  no fill at all, a vermilion ring — someone ELSE is in
+   A player who has not buzzed must never see a filled-in buzzer: a solid red
+   circle reading "BUZZED" is exactly how you come to think you have the floor
+   when you don't. */
 .buzzer.ready { background: var(--surface); color: var(--ink); }
-.buzzer.buzzed { background: var(--accent-fill); color: var(--on-accent); }
+.buzzer.buzzed { background: var(--accent-fill); color: var(--on-accent); }   /* staff: press to reset */
+.buzzer.mine { background: var(--mine-fill); color: var(--on-mine); border-color: var(--line); }
+.buzzer.queued { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
+.buzzer.locked { background: var(--surface); color: var(--accent); border-color: var(--accent); border-width: 5px; }
 .buzzer:not(:disabled) { cursor: pointer; }
 .buzzer:disabled { opacity: var(--buzzer-fade); box-shadow: 8px 8px 0 var(--soft); border-color: var(--line-muted); }
+/* Your own buzz and your place in the queue are states, not dead controls —
+   fading them out is what made them unreadable. They keep their colour and get
+   a shorter shadow instead, which is the "you can't press this" signal. */
+.buzzer.mine:disabled, .buzzer.queued:disabled, .buzzer.locked:disabled {
+  opacity: 1; box-shadow: 4px 4px 0 var(--soft);
+}
+.buzzer.mine:disabled { border-color: var(--line); }
+.buzzer.queued:disabled { border-color: var(--warn); }
+.buzzer.locked:disabled { border-color: var(--accent); }
 .buzzer:not(:disabled):active,
 .buzzer.pressed:not(:disabled) { transform: translate(8px, 8px); box-shadow: 0 0 0 var(--shadow-ink); }
 .feedback { font-family: var(--display); text-align: center; font-weight: 500; min-height: 1.4em; color: var(--accent-deep); }
@@ -278,11 +305,28 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
   display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap;
 }
 
+/* Buzzer left, buzz queue right. The queue column is a fixed width and the row
+   is top-aligned, so a name arriving grows the queue downward and moves nothing
+   — not the buzzer, not the queue's own heading, not the page under it. */
+.buzz-row { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 16px; align-items: start; }
+.buzz-row > #buzz-area, .buzz-row > #queue-view { min-width: 0; }
+/* Narrow, or with the right-hand rail already taking 320px: stack them again. */
+@media (max-width: 760px) {
+  .buzz-row { grid-template-columns: 1fr; }
+}
+@media (min-width: 901px) and (max-width: 1060px) {
+  body.has-sheet .buzz-row, body.has-chat .buzz-row { grid-template-columns: 1fr; }
+}
+
 .order ol { padding-left: 1.4em; margin: .4em 0; }
 .order li { padding: 2px 0; }
 /* Placeholder row when nobody has buzzed — no list number, no emphasis. */
 .order li.empty { list-style: none; margin-left: -1.4em; color: var(--muted); }
 #queue-list .head { font-weight: 700; color: var(--accent); }
+/* Your own row in the queue, so "who is #2" never needs counting. */
+#queue-list .me { font-weight: 700; }
+#queue-list .me.head { color: var(--ok); }
+#queue-list .me .you { font-family: var(--mono); font-size: .72rem; color: var(--muted); white-space: nowrap; }
 
 .muted-count { color: var(--muted); font-weight: 400; font-family: var(--mono); font-size: .8rem; }
 .players { list-style: none; margin: 0; padding: 0; }
@@ -373,6 +417,7 @@ body.compact .buzzer.pressed:not(:disabled) { transform: translate(5px, 5px); bo
 body.compact .bz-sub { display: none; }  /* no room for it at this size */
 body.compact .phase { font-size: .95rem; min-height: auto; }
 body.compact .feedback { min-height: auto; }
+body.compact .buzz-row { grid-template-columns: 1fr; gap: 8px; }
 body.compact .order { padding: 10px 12px; box-shadow: 3px 3px 0 var(--shadow-ink); }
 body.compact .order h3 { margin-bottom: .3em; }
 
@@ -483,10 +528,7 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
 .roster-alerts h5 { margin: 0 0 .4em; font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--bad); }
 .roster-alerts ul { margin: 0 0 .5em; padding-left: 1.1em; font-size: .85rem; }
 
-/* Live scoresheet: MODAQ's Events panel, as the reader sees it, on the right. */
-body.has-sheet .stage { max-width: 1100px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
-body.has-sheet .stage > * { grid-column: 1; }
-body.has-sheet .stage > #scoresheet-view { grid-column: 2; grid-row: 1 / span 40; position: sticky; top: 64px; }
+/* Live scoresheet: MODAQ's Events panel, as the reader sees it, in the rail. */
 .scoresheet {
   font-family: "Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
   color: var(--ss-ink); font-size: 14px;
@@ -510,7 +552,7 @@ body.has-sheet .stage > #scoresheet-view { grid-column: 2; grid-row: 1 / span 40
   padding: 11px 12px; vertical-align: top; border-bottom: 1px solid var(--ss-line); line-height: 20px;
   overflow-wrap: anywhere; hyphens: auto;
 }
-.scoresheet .ss-events .ss-num { width: 2.6em; font-weight: 600; color: var(--ss-ink); }
+.scoresheet .ss-events .ss-num { width: 2.6em; font-weight: 600; color: var(--ss-ink); white-space: nowrap; }
 .scoresheet .ss-events tr.ss-current td { background: var(--ss-current); }
 .scoresheet .ss-item { margin-bottom: 4px; }
 .scoresheet .ss-score-line { color: var(--ss-ink); }
@@ -523,8 +565,6 @@ body.has-sheet .stage > #scoresheet-view { grid-column: 2; grid-row: 1 / span 40
 }
 body.compact .scoresheet { display: none; }
 @media (max-width: 900px) {
-  body.has-sheet .stage { grid-template-columns: 1fr; }
-  body.has-sheet .stage > #scoresheet-view { grid-column: 1; grid-row: auto; position: static; }
   .scoresheet .ss-scroll { max-height: 50vh; }
 }
 /* Phones: the sheet sits under the buzzer, so it gets the full width but has to
@@ -658,7 +698,20 @@ body.compact #protest-view { display: none; }
 /* Typed answers. The box turns amber for the last seconds, when it stops
    accepting deletions — the state is visible rather than only enforced, so a
    rejected keystroke never reads as the page eating your typing. */
-#answer-view #answer-box { width: 100%; min-width: 0; font-size: 1rem; padding: .5em .6em; }
+/* It sits directly under the buzzer and it is loud, because it is open for a
+   few seconds and being late to notice it is the same as not answering. */
+#answer-view {
+  border-color: var(--accent); border-width: 3px; background: var(--accent-bg);
+  margin: 4px 0 10px; text-align: left;
+}
+#answer-view h3 { color: var(--accent-deep); }
+#answer-view.answer-mine { border-color: var(--mine-fill); background: var(--ok-bg); }
+#answer-view.answer-mine h3 { color: var(--mine-fill); }
+#answer-view #answer-box {
+  width: 100%; min-width: 0; font-size: 1.05rem; padding: .5em .6em; border-width: 2px;
+}
+#answer-view #answer-box:focus { outline: 3px solid var(--accent); outline-offset: 1px; }
+#answer-view.answer-mine #answer-box:focus { outline-color: var(--mine-fill); }
 #answer-box.append-only { border-color: var(--warn); background: var(--warn-bg-soft); }
 #answer-clock { font-variant-numeric: tabular-nums; }
 .answer-spoken {
@@ -736,23 +789,54 @@ body.compact #answer-view { display: none; }
 #chat-box { flex: 1 1 auto; min-width: 0; }
 body.compact #shootout-view, body.compact #chat-view, body.compact #session-view { display: none; }
 
-/* What the shootout's host set up: the name, their notes, where the reader is. */
-.session-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
-.session-head h3 { margin: 0; color: var(--ink); font-size: .95rem; letter-spacing: .02em; text-transform: none; }
-.session-progress { font-family: var(--mono); font-size: .8rem; color: var(--accent); font-weight: 600; }
-.session-notes { margin: 8px 0 0; white-space: pre-line; overflow-wrap: anywhere; font-size: .9rem; }
-.session-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin-top: 10px; }
-.session-rule { font-size: .8rem; color: var(--muted); flex: 1 1 16em; }
+/* What the shootout's host set up — one line above the buzzer. It is reference
+   material (what we're playing, where we are, the withdraw rule), so it gets a
+   rule under it and no card: a panel here would push the buzzer down the page
+   for something nobody reads twice. */
+.session {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px;
+  padding: 0 2px 6px; border-bottom: 1.5px solid var(--soft); margin-bottom: -6px;
+}
+.session-name { font-family: var(--display); font-weight: 700; font-size: .95rem; }
+.session-progress { font-family: var(--mono); font-size: .78rem; color: var(--accent); font-weight: 600; }
+.session-rule { font-size: .78rem; color: var(--muted); flex: 1 1 12em; min-width: 0; }
+.session #leave-game { flex: 0 0 auto; margin-left: auto; }
+.session-notes {
+  flex: 1 1 100%; margin: 2px 0 0; white-space: pre-line; overflow-wrap: anywhere;
+  font-size: .82rem; color: var(--muted);
+}
 
-/* The chat lives beside the buzzer, in the same right-hand rail the scoresheet
-   uses — a player watching it shouldn't have to scroll away from the thing they
-   are about to press. With both on screen they stack in that rail, chat under
-   the scoresheet, because the chat is the one you keep glancing at. */
-body.has-chat .stage { max-width: 1100px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
-body.has-chat .stage > * { grid-column: 1; }
-body.has-chat .stage > #chat-view { grid-column: 2; grid-row: 2 / span 40; position: sticky; top: 64px; }
-/* On its own the chat takes the whole rail; beside the scoresheet it sits under it. */
-body.has-chat:not(.has-sheet) .stage > #chat-view { grid-row: 1 / span 40; }
+/* The chat and the scoresheet live beside the buzzer, in one rail — a player
+   watching either shouldn't have to scroll away from the thing they are about
+   to press. They share a flex column so that with both on screen they STACK,
+   chat under the scoresheet. (Placed in the page grid separately, each one
+   spanned every row of column 2 and the chat was drawn over the scoresheet.) */
+.side-rail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+@media (min-width: 901px) {
+  body.has-sheet .stage, body.has-chat .stage {
+    max-width: 1100px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start;
+  }
+  body.has-sheet .stage > *, body.has-chat .stage > * { grid-column: 1; }
+  body.has-sheet .stage > .side-rail, body.has-chat .stage > .side-rail {
+    grid-column: 2; grid-row: 1 / span 60; position: sticky; top: 64px;
+    max-height: calc(100dvh - 76px);
+  }
+  /* Sharing the rail's height: each panel scrolls inside its own share of it
+     rather than running off the bottom of the screen. */
+  body.has-sheet .side-rail > #scoresheet-view, body.has-chat .side-rail > #scoresheet-view {
+    display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; max-height: 60%;
+  }
+  body.has-sheet .side-rail > #scoresheet-view .ss-scroll,
+  body.has-chat .side-rail > #scoresheet-view .ss-scroll {
+    flex: 1 1 auto; max-height: none; min-height: 110px;
+  }
+  body.has-sheet .side-rail > #chat-view, body.has-chat .side-rail > #chat-view {
+    min-height: 0; flex: 1 1 auto;
+  }
+  body.has-sheet .side-rail > #chat-view .chat-log, body.has-chat .side-rail > #chat-view .chat-log {
+    flex: 1 1 auto; height: auto; min-height: 110px;
+  }
+}
 
 #chat-view { display: flex; flex-direction: column; min-width: 0; }
 #chat-view h3 { flex: none; }
@@ -789,9 +873,7 @@ body.has-chat:not(.has-sheet) .stage > #chat-view { grid-row: 1 / span 40; }
 .chat-line.chat-cont .chat-text { padding-left: 0; }
 
 @media (max-width: 900px) {
-  /* Narrow: the rail collapses and the chat goes back under everything. */
-  body.has-chat .stage { grid-template-columns: 1fr; }
-  body.has-chat .stage > #chat-view { grid-column: 1; grid-row: auto; position: static; }
+  /* Narrow: the rail collapses into the page and everything stacks. */
   .chat-log { height: 30vh; min-height: 140px; }
 }
 

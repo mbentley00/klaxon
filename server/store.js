@@ -517,9 +517,40 @@ export function joinRoom(room, { playerId, name, role, team, rosterTeam, rosterP
   return member;
 }
 
+/**
+ * Who is actually here, counted by live sockets rather than by the last event
+ * that happened to arrive.
+ *
+ * A member is one person across every tab and every reconnect (the id is
+ * theirs, not the socket's), so "disconnected" has to mean "no socket left" —
+ * not "a socket closed". A reload opens the new connection BEFORE the old one's
+ * close reaches us, and a second tab closing is not a departure at all; either
+ * one, handled as a bare flag, marked a player who was sitting right there,
+ * buzzing, as OFFLINE, with nothing to set it back.
+ */
+export function attachSocket(room, playerId, socketId) {
+  const m = room.members.get(playerId);
+  if (!m) return;
+  if (!m.sockets) m.sockets = new Set();   // runtime only; members aren't persisted
+  m.sockets.add(socketId);
+  m.connected = true;
+}
+
+// Returns whether this actually took them offline (their last socket went).
+export function detachSocket(room, playerId, socketId) {
+  const m = room.members.get(playerId);
+  if (!m) return false;
+  m.sockets?.delete(socketId);
+  const wasConnected = m.connected;
+  m.connected = (m.sockets?.size ?? 0) > 0;
+  return wasConnected && !m.connected;
+}
+
 export function setConnected(room, playerId, connected) {
   const m = room.members.get(playerId);
-  if (m) m.connected = connected;
+  if (!m) return;
+  m.connected = connected;
+  if (!connected) m.sockets?.clear();
 }
 
 // Reader removes a single player (staff can't be removed this way).

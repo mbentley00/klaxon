@@ -62,31 +62,105 @@
   </div>
 
   <main id="stage" class="stage hidden">
+    <!-- Discord shootout: what's being played, where the reader has got to, and
+         the one rule players need. One line above the buzzer — it's reference,
+         not something anybody reads twice. -->
+    <section id="session-view" class="session hidden" aria-label="What we're playing">
+      <span id="session-name" class="session-name"></span>
+      <span id="session-progress" class="session-progress"></span>
+      <span id="session-rule" class="session-rule"></span>
+      <button id="leave-game" class="ghost tiny hidden" title="Leave this game">Leave</button>
+      <p id="session-notes" class="session-notes hidden"></p>
+    </section>
+
     <!-- Sound warning (shown when the browser can't play the buzz sound) -->
     <div id="sound-warn" class="sound-warn hidden" role="alert">
       Sound is off or blocked — you won't hear buzzes.
       <button id="enable-sound" class="tiny">Enable sound</button>
     </div>
 
-    <!-- The buzzer: gray when "Ready to Buzz", red when someone has buzzed.
-         Players press to buzz; staff press (or Space) to reset. -->
-    <section id="buzz-area">
-      <div id="phase-label" class="phase ready">Ready to Buzz</div>
-      <button id="buzzer" class="buzzer ready" disabled>
-        <span id="buzzer-label" class="bz-label">BUZZ</span>
-        <span id="buzzer-sub" class="bz-sub"></span>
-      </button>
-      <div id="buzz-feedback" class="feedback"></div>
-      <!-- Staff: a player says the buzzer was never cleared. -->
-      <div id="stuck-banner" class="offline-alert hidden" role="alert" aria-live="assertive"></div>
-      <!-- Players: ping the moderator about a buzzer left un-reset. -->
-      <button id="stuck-alert" class="ghost tiny hidden">Buzzer isn't clear — alert the moderator</button>
-      <!-- A buzzer that floats above Zoom (Document Picture-in-Picture). -->
-      <button id="pip-open" class="ghost tiny hidden">Pop out buzzer ↗</button>
-      <p id="pip-hint" class="hint hidden">Keeps the buzzer on top of Zoom. Click it (or press Space
-        while it's focused) to buzz.</p>
-      <a id="report-link" class="hint report-link" href="/feedback">Something wrong? Tell Michael</a>
-    </section>
+    <!-- The buzzer, and the buzz queue beside it. Paper when nobody is in, green
+         when the buzz is yours, amber when you're behind someone, a red ring
+         when it's someone else's — a player must never mistake the room's buzz
+         for their own. Players press it to buzz; staff press (or Space) to
+         reset. The queue's column is a fixed width and pinned to the top of the
+         row, so a buzz landing moves neither of them.  -->
+    <div class="buzz-row">
+      <section id="buzz-area">
+        <div id="phase-label" class="phase ready">Ready to Buzz</div>
+        <button id="buzzer" class="buzzer ready" disabled>
+          <span id="buzzer-label" class="bz-label">BUZZ</span>
+          <span id="buzzer-sub" class="bz-sub"></span>
+        </button>
+        <div id="buzz-feedback" class="feedback"></div>
+        <!-- Typed answers, directly under the buzzer: a box you have seconds to
+             type in can't be somewhere you have to go looking for. Everyone
+             behind the buzzer commits an answer before the player with the floor
+             gives theirs, so nobody can wait to hear it. The box stops accepting
+             deletions for the last couple of seconds (see server/answers.js) —
+             you can finish a word, not take one back. -->
+        <section id="answer-view" class="panel answer hidden">
+          <h3>Your answer <span id="answer-clock" class="muted-count"></span></h3>
+          <p class="hint" id="answer-hint"></p>
+          <input id="answer-box" type="text" maxlength="120" autocomplete="off"
+                 placeholder="Type your answer" />
+          <p class="hint" id="answer-note"></p>
+          <div id="answer-spoken" class="answer-spoken hidden"></div>
+        </section>
+        <!-- Staff: a player says the buzzer was never cleared. -->
+        <div id="stuck-banner" class="offline-alert hidden" role="alert" aria-live="assertive"></div>
+        <!-- Players: ping the moderator about a buzzer left un-reset. -->
+        <button id="stuck-alert" class="ghost tiny hidden">Buzzer isn't clear — alert the moderator</button>
+        <!-- A buzzer that floats above Zoom (Document Picture-in-Picture). -->
+        <button id="pip-open" class="ghost tiny hidden">Pop out buzzer ↗</button>
+        <p id="pip-hint" class="hint hidden">Keeps the buzzer on top of Zoom. Click it (or press Space
+          while it's focused) to buzz.</p>
+        <a id="report-link" class="hint report-link" href="/feedback">Something wrong? Tell Michael</a>
+      </section>
+
+      <!-- Buzz queue / order — always on screen so nothing below it jumps -->
+      <section id="queue-view" class="order">
+        <h3 id="queue-title">Buzz queue</h3>
+        <ol id="queue-list"></ol>
+        <div id="queue-controls" class="row hidden">
+          <button id="ctl-next" class="ghost hidden">Next buzzer →</button>
+          <button id="ctl-clear" class="ghost">Clear queue</button>
+        </div>
+        <button id="ctl-withdraw" class="ghost hidden">Withdraw my buzz</button>
+      </section>
+    </div>
+
+    <!-- The right-hand rail: the scoresheet and the chat stacked in one sticky
+         column beside the buzzer. They share a rail rather than being placed in
+         the page grid separately, which is how they used to end up drawn on top
+         of each other. -->
+    <aside id="side-rail" class="side-rail hidden">
+      <!-- Live scoresheet of the MODAQ game being read. Built by the server from
+           the reader's game and limited to questions already read (see
+           store.buildPlayerScoresheet), so nothing here is ahead of the room. -->
+      <section id="scoresheet-view" class="scoresheet hidden" aria-label="Scoresheet">
+        <div class="ss-head">
+          <div id="ss-status" class="ss-score"></div>
+          <button id="ss-toggle" class="tiny ghost">Hide</button>
+        </div>
+        <div class="ss-scroll">
+          <table id="ss-table" class="ss-events"></table>
+        </div>
+      </section>
+
+      <section id="chat-view" class="panel chat hidden">
+        <h3>Chat</h3>
+        <ul id="chat-log" class="chat-log"></ul>
+        <div class="chat-entry">
+          <ul id="chat-mentions" class="chat-mentions hidden"></ul>
+          <div class="row">
+            <input id="chat-box" type="text" maxlength="400" autocomplete="off" placeholder="Say something" />
+            <button id="chat-send" class="ghost tiny">Send</button>
+          </div>
+        </div>
+      </section>
+    </aside>
+
 
     <!-- Reader in a plain room: one click to read a packet with MODAQ instead. -->
     <section id="modaq-offer" class="panel modaq-offer hidden">
@@ -98,33 +172,6 @@
       </div>
     </section>
 
-    <!-- Live scoresheet of the MODAQ game being read. Built by the server from
-         the reader's game and limited to questions already read (see
-         store.buildPlayerScoresheet), so nothing here is ahead of the room. -->
-    <aside id="scoresheet-view" class="scoresheet hidden" aria-label="Scoresheet">
-      <div class="ss-head">
-        <div id="ss-status" class="ss-score"></div>
-        <button id="ss-toggle" class="tiny ghost">Hide</button>
-      </div>
-      <div class="ss-scroll">
-        <table id="ss-table" class="ss-events"></table>
-      </div>
-    </aside>
-
-    <!-- Discord shootout: what's being played and the host's notes, where the
-         reader has got to, and a way to leave the game on purpose. -->
-    <section id="session-view" class="panel session hidden">
-      <div class="session-head">
-        <h3 id="session-name"></h3>
-        <span id="session-progress" class="session-progress"></span>
-      </div>
-      <p id="session-notes" class="session-notes hidden"></p>
-      <div class="session-foot">
-        <span id="session-rule" class="session-rule"></span>
-        <button id="leave-game" class="ghost tiny hidden">Leave game</button>
-      </div>
-    </section>
-
     <!-- Discord shootout: the leaderboard across every packet of the session,
          and a chat that has nothing to do with answering. -->
     <section id="shootout-view" class="panel shootout hidden">
@@ -133,31 +180,6 @@
       <div class="row hidden" id="shootout-controls">
         <button id="shootout-reset" class="ghost tiny">Reset scores</button>
       </div>
-    </section>
-
-    <section id="chat-view" class="panel chat hidden">
-      <h3>Chat</h3>
-      <ul id="chat-log" class="chat-log"></ul>
-      <div class="chat-entry">
-        <ul id="chat-mentions" class="chat-mentions hidden"></ul>
-        <div class="row">
-          <input id="chat-box" type="text" maxlength="400" autocomplete="off" placeholder="Say something" />
-          <button id="chat-send" class="ghost tiny">Send</button>
-        </div>
-      </div>
-    </section>
-
-    <!-- Typed answers. Everyone behind the buzzer commits an answer before the
-         player with the floor gives theirs, so nobody can wait to hear it. The
-         box stops accepting deletions for the last couple of seconds (see
-         server/answers.js) — you can finish a word, not take one back. -->
-    <section id="answer-view" class="panel answer hidden">
-      <h3>Your answer <span id="answer-clock" class="muted-count"></span></h3>
-      <p class="hint" id="answer-hint"></p>
-      <input id="answer-box" type="text" maxlength="120" autocomplete="off"
-             placeholder="Type your answer" />
-      <p class="hint" id="answer-note"></p>
-      <div id="answer-spoken" class="answer-spoken hidden"></div>
     </section>
 
     <!-- Protests. A player raises one in a press (ACF H.2 — "quickly and
@@ -184,17 +206,6 @@
       <div id="ms-status" class="ms-status"></div>
       <p id="ms-hint" class="ms-hint"></p>
       <ul id="ms-board" class="ms-board"></ul>
-    </section>
-
-    <!-- Buzz queue / order — always on screen so nothing below it jumps -->
-    <section id="queue-view" class="order">
-      <h3 id="queue-title">Buzz queue</h3>
-      <ol id="queue-list"></ol>
-      <div id="queue-controls" class="row hidden">
-        <button id="ctl-next" class="ghost hidden">Next buzzer →</button>
-        <button id="ctl-clear" class="ghost">Clear queue</button>
-      </div>
-      <button id="ctl-withdraw" class="ghost hidden">Withdraw my buzz</button>
     </section>
 
     <!-- Roster (staff only): load a QBJ registration file, pick the teams
