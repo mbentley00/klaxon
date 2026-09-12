@@ -779,6 +779,12 @@ body.has-chat:not(.has-sheet) .stage > #chat-view { grid-row: 1 / span 40; }
 .chat-who { display: block; font-weight: 700; font-size: .82rem; }
 .chat-when { font-weight: 400; font-size: .68rem; color: var(--muted); margin-left: 6px; }
 .chat-line.chat-staff .chat-who { color: var(--accent); }
+/* The day a run of messages belongs to, when the log crosses midnight. */
+.chat-day {
+  display: flex; align-items: center; gap: 8px; margin: 10px 0 4px;
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+}
+.chat-day::before, .chat-day::after { content: ""; flex: 1 1 auto; border-top: 1px solid var(--soft); }
 .chat-text { display: block; }
 .chat-line.chat-cont .chat-text { padding-left: 0; }
 

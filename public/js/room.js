@@ -912,11 +912,19 @@ function renderChat(s) {
   const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
   log.replaceChildren();
   let lastName = null;
+  let lastDay = null;
   for (const m of messages) {
+    // A reading can run past midnight, so the log says when the day changed.
+    const day = new Date(m.at).toDateString();
+    if (day !== lastDay) {
+      log.append(el('li', { className: 'chat-day' }, el('span', { textContent: chatDayLabel(m.at) })));
+    }
     // Discord's grouping: consecutive lines from the same person don't repeat
-    // the name, which is most of what makes a chat log readable.
-    log.append(chatLine(m, m.name === lastName));
+    // the name, which is most of what makes a chat log readable. A new day
+    // starts a fresh run, so its first line is named.
+    log.append(chatLine(m, m.name === lastName && day === lastDay));
     lastName = m.name;
+    lastDay = day;
   }
   if (atBottom) log.scrollTop = log.scrollHeight;
 }
@@ -926,7 +934,9 @@ function chatLine(m, grouped) {
   const mentionsMe = (m.mentions || []).some((x) => x.id === state.me?.id);
   const li = el('li', {
     className: 'chat-line' + (m.staff ? ' chat-staff' : '') + (grouped ? ' chat-cont' : '')
-      + (mentionsMe ? ' chat-at-me' : '')
+      + (mentionsMe ? ' chat-at-me' : ''),
+    // Every line carries its own time, for the ones inside a group.
+    title: chatFullTime(m.at)
   });
   if (!grouped) {
     li.append(el('span', { className: 'chat-who' },
@@ -964,6 +974,25 @@ const chatTime = (at) => {
   try {
     return ' ' + new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   } catch { return ''; }
+};
+
+// The whole date and time, for the tooltip on a line inside a group.
+const chatFullTime = (at) => {
+  try {
+    return new Date(at).toLocaleString([], {
+      weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+    });
+  } catch { return ''; }
+};
+
+const chatDayLabel = (at) => {
+  const day = new Date(at).toDateString();
+  const now = new Date();
+  if (day === now.toDateString()) return 'Today';
+  if (day === new Date(now.getTime() - 86400000).toDateString()) return 'Yesterday';
+  try {
+    return new Date(at).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+  } catch { return day; }
 };
 
 function sendChat() {

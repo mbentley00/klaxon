@@ -44,8 +44,10 @@ const serializeRoom = (r) => ({
   // don't, because members are runtime state (see hydrate).
   roster: r.roster,
   rosterTeams: r.rosterTeams,
-  // The player-facing scoresheet of the game being read (already sanitized).
+  // The player-facing scoresheet of the game being read (already sanitized),
+  // and — in a shootout — which packet that game is.
   scoresheet: r.scoresheet || null,
+  scoresheetPacket: r.scoresheetPacket || null,
   // Every buzz attempt, for the full-buzz export (buzz-point tracking).
   buzzLog: r.buzzLog || [],
   // What an upheld protest left to be played here (see createReplayRoom).
@@ -1048,6 +1050,16 @@ export function joinRoster(room) {
   };
 }
 
+// What the packet being read has scored so far. A sheet belonging to another
+// packet contributes nothing: its score is filed under that packet instead.
+function shootoutCurrentScores(room) {
+  const session = room.shootoutSession;
+  if (session && room.scoresheetPacket && room.scoresheetPacket !== session.current) {
+    return {};
+  }
+  return shootout.currentScores(room.scoresheet);
+}
+
 export function publicState(room) {
   return {
     code: room.code,
@@ -1076,7 +1088,10 @@ export function publicState(room) {
     // chat (see shootout.js). Null in a room that isn't one.
     shootout: room.settings.shootout
       ? {
-        ...shootout.board(room, shootout.currentScores(room.scoresheet)),
+        // The game on screen counts as the current packet's only while it IS
+        // that packet's: between moving to a packet and its first game update,
+        // the sheet is still the packet just left — already filed under it.
+        ...shootout.board(room, shootoutCurrentScores(room), room.shootoutSession?.current ?? null),
         // What's being played and what the host wants the room to know.
         session: shootout.publicSession(room.shootoutSession)
       }
@@ -1189,11 +1204,22 @@ export function setShootoutSession(room, input) {
   return { ok: true, session: shootout.publicSession(session) };
 }
 
-// Which of the session's packets is being read.
+// Which of the session's packets is being read. Moving off a packet files what
+// it finished with under its own id, so the leaderboard keeps it while the
+// room reads something else — and so going back to it later replaces that
+// entry instead of counting the packet twice.
 export function setShootoutCurrent(room, packetId) {
   const session = room.shootoutSession;
   if (!room.settings.shootout || !session) return { error: 'no_session' };
   if (!session.packets.some((p) => p.id === packetId)) return { error: 'no_packet' };
+  // File the score on screen under the packet it was scored on. Reading that
+  // off the sheet itself, rather than assuming it is the packet the session
+  // last named, is what makes going BACK safe: a packet the room has only
+  // opened, and never played, has no score to file.
+  const scored = room.scoresheetPacket;
+  if (scored && scored !== packetId) {
+    shootout.bankPacket(room, scored, shootout.currentScores(room.scoresheet));
+  }
   session.current = packetId;
   persistRooms();
   return { ok: true };
@@ -1426,7 +1452,11 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
 
 // The reader's page pushes its game on every change; keep the players' view.
 // Clearing (a null match) hides the sheet, e.g. when the reader leaves a game.
-export function setScoresheet(room, match, currentQuestion, hasBonuses = true, protests = [], categories = [], answers = [], questions = []) {
+export function setScoresheet(room, match, currentQuestion, hasBonuses = true, protests = [], categories = [], answers = [], questions = [], packetId = null) {
+  // Which packet the sheet belongs to. A shootout reads several, and the score
+  // on screen has to be filed under the one it was scored on — not under
+  // whichever the room has moved to since.
+  room.scoresheetPacket = packetId;
   if (match == null) {
     room.scoresheet = null;
     room.catGate = null;
@@ -1446,8 +1476,11 @@ export function setScoresheet(room, match, currentQuestion, hasBonuses = true, p
   const through = Number.isFinite(cur) && cur >= 1 ? Math.floor(cur) : 0;
   // A shootout runs over several packets in one sitting, so a new game is a
   // new PACKET rather than the end of the session: bank what the last one
-  // finished with before the scoresheet is replaced by an empty game.
-  if (room.settings.shootout) bankIfNewGame(room, match);
+  // finished with before the scoresheet is replaced by an empty game. A room
+  // with a session banks per packet instead, when the reader moves between
+  // them (see setShootoutCurrent) — which survives going back to an earlier
+  // packet, as guessing from an empty game cannot.
+  if (room.settings.shootout && !room.shootoutSession) bankIfNewGame(room, match);
   const reveal = questionRevealFor(room);
   const texts = reveal && Array.isArray(questions) ? questions.slice(0, CATEGORY_MAX).map(questionText) : [];
   const ceiling = revealCeiling(room, match, through,

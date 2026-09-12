@@ -1937,7 +1937,11 @@ io.on('connection', (socket) => {
       // it goes anywhere near a player. `qbj: null` clears it.
       case 'modaq_game': {
         store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false,
-          payload.protests, payload.categories, payload.answers, payload.questions);
+          payload.protests, payload.categories, payload.answers, payload.questions,
+          // Which of a shootout's packets this game is, so the score can be
+          // filed under the right one when the room moves on (see
+          // setShootoutCurrent). Absent in every other mode.
+          typeof payload.packet === 'string' ? payload.packet : null);
         break;
       }
       // MODAQ's serialized game from one moderator, fanned out to the others

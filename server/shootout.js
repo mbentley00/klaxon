@@ -83,26 +83,62 @@ export function bank(room, scores) {
 }
 
 export function reset(room) {
-  room.shootout = { banked: {}, since: Date.now() };
+  room.shootout = { banked: {}, byPacket: {}, since: Date.now() };
   return room.shootout;
 }
 
 /**
- * The leaderboard: what is banked from finished packets, plus the game in
- * progress, highest first. `current` comes from the live scoresheet, so it
- * moves as the game does.
+ * What a packet finished with, kept under that packet's own id.
+ *
+ * Filed per packet rather than added to a running total because the reader can
+ * go back: reopening packet 2 to fix a score has to REPLACE what packet 2
+ * contributed, and a flat total can't be taken apart again.
  */
-export function board(room, current = {}) {
+export function bankPacket(room, packetId, scores) {
   const s = state(room);
-  const names = new Set([...Object.keys(s.banked), ...Object.keys(current)]);
+  if (!s.byPacket) s.byPacket = {};
+  const kept = {};
+  for (const [name, points] of Object.entries(scores || {})) {
+    const key = clean(name, 40);
+    if (key) kept[key] = Number(points) || 0;
+  }
+  s.byPacket[packetId] = kept;
+  s.bankedAt = Date.now();
+  return s.byPacket;
+}
+
+/**
+ * The leaderboard: every packet that has been read, plus the game in progress,
+ * highest first. `current` comes from the live scoresheet, so it moves as the
+ * game does; `currentPacket` is the packet that game is, and is left out of the
+ * banked half so it isn't counted twice.
+ */
+export function board(room, current = {}, currentPacket = null) {
+  const s = state(room);
+  const past = {};
+  let packets = 0;
+  for (const [id, scores] of Object.entries(s.byPacket || {})) {
+    if (id === currentPacket) continue;
+    packets++;
+    for (const [name, points] of Object.entries(scores)) {
+      past[name] = (past[name] || 0) + (Number(points) || 0);
+    }
+  }
+  // A room that was reading before the score was kept per packet keeps its
+  // running total (and its count) as it was.
+  for (const [name, points] of Object.entries(s.banked || {})) {
+    past[name] = (past[name] || 0) + (Number(points) || 0);
+  }
+  packets += s.packets || 0;
+  const names = new Set([...Object.keys(past), ...Object.keys(current)]);
   const rows = [...names].map((name) => ({
     name,
-    banked: s.banked[name] || 0,
+    banked: past[name] || 0,
     current: Number(current[name]) || 0,
-    total: (s.banked[name] || 0) + (Number(current[name]) || 0)
+    total: (past[name] || 0) + (Number(current[name]) || 0)
   }));
   rows.sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
-  return { rows, since: s.since, packets: s.packets || 0 };
+  return { rows, since: s.since, packets };
 }
 
 // Per-competitor scores of one MODAQ game, read off the player scoresheet the
