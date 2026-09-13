@@ -913,7 +913,40 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 }
 
 #chat-view { display: flex; flex-direction: column; min-width: 0; }
-#chat-view h3 { flex: none; }
+#chat-view h3 { flex: none; margin: 0; }
+.chat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+/* The expand button is for a phone, where the screen is the scarce thing. */
+#chat-expand { display: none; }
+
+/* ---------- phones, in a room that HAS a chat ----------
+   Nothing here touches a room without one: the buzzer keeps its size, and a
+   plain buzzer page is untouched. Where there IS a chat, the page has to fit
+   the thing you press AND the thing you are reading, so the buzzer gives up
+   some of its room and the chat is always showing its last few lines rather
+   than starting below the fold. */
+@media (max-width: 700px) {
+  body.has-chat .buzzer {
+    width: min(44vw, 180px); margin: 4px auto;
+    font-size: clamp(1rem, 5.5vw, 1.5rem); box-shadow: 5px 5px 0 var(--shadow-ink);
+  }
+  body.has-chat .buzzer:not(:disabled):active,
+  body.has-chat .buzzer.pressed:not(:disabled) { transform: translate(5px, 5px); box-shadow: 0 0 0 var(--shadow-ink); }
+  body.has-chat .phase { font-size: .95rem; min-height: auto; }
+  body.has-chat .feedback { min-height: auto; }
+  body.has-chat .stage { gap: 10px; }
+  body.has-chat .buzz-row { gap: 8px; }
+  /* Said once on a big screen; on a phone it is two lines of the chat. */
+  body.has-chat .queue-how { display: none; }
+  body.has-chat .order { padding: 10px 12px; }
+  body.has-chat #chat-expand { display: inline-block; }
+  /* Short enough that the panel under the buzzer still shows its last lines;
+     the entry box sits right under them. */
+  body.has-chat .chat-log { height: 26vh; min-height: 96px; }
+  body.has-chat.chat-big .chat-log { height: 56vh; }
+  /* Reading the chat is the job; the rest can wait below it. */
+  body.has-chat.chat-big .buzzer { width: min(30vw, 120px); }
+  body.has-chat.chat-big .pip-hint, body.has-chat.chat-big #report-link { display: none; }
+}
 .chat-log {
   /* A fixed window with its own scrollbar. Not min/max height: a log that
      grows as people talk moves the buzzer and everything under it down the

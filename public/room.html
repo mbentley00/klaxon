@@ -151,7 +151,12 @@
       </section>
 
       <section id="chat-view" class="panel chat hidden">
-        <h3>Chat</h3>
+        <div class="chat-head">
+          <h3>Chat</h3>
+          <!-- Phones only: trade the buzzer's room for the chat's when the
+               talking is the part you are following. -->
+          <button id="chat-expand" class="tiny ghost">Expand</button>
+        </div>
         <ul id="chat-log" class="chat-log"></ul>
         <div class="chat-entry">
           <!-- Who is about to say something. Its space is always reserved, so a

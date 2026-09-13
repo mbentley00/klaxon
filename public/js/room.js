@@ -1393,6 +1393,22 @@ function autosizeChat() {
   box.style.height = `${Math.min(box.scrollHeight, CHAT_BOX_MAX_PX)}px`;
   box.style.overflowY = box.scrollHeight > CHAT_BOX_MAX_PX ? 'auto' : 'hidden';
 }
+// Phones: the chat can take the screen for a while, and give it back. Kept for
+// next time, because someone who wants the chat big wants it big all evening.
+function setChatBig(on) {
+  document.body.classList.toggle('chat-big', on);
+  const btn = $('#chat-expand');
+  if (btn) btn.textContent = on ? 'Shrink' : 'Expand';
+  if (on) remember('chatBig', '1'); else forget('chatBig');
+}
+setChatBig(recall('chatBig') === '1');
+$('#chat-expand')?.addEventListener('click', () => {
+  setChatBig(!document.body.classList.contains('chat-big'));
+  // Keep the newest line in view across the resize.
+  const log = $('#chat-log');
+  if (log) log.scrollTop = log.scrollHeight;
+});
+
 $('#chat-box')?.addEventListener('input', autosizeChat);
 $('#chat-box')?.addEventListener('input', renderMentionPicker);
 $('#chat-box')?.addEventListener('blur', () => $('#chat-mentions').classList.add('hidden'));
