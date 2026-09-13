@@ -1712,7 +1712,13 @@ io.on('connection', (socket) => {
     if (result.firstOfWindow) {
       // First buzz pauses reading immediately for everyone (the human reader
       // stops), but we wait the reconcile window before declaring the order.
-      io.to(room.code).emit('buzz_pending', { cycleNo: room.cycleNo });
+      //
+      // `wave` is when this window opened. In queue mode a question has
+      // several: the first press opens one, and a player buzzing in behind
+      // them later opens the next. The room should HEAR each of those, so the
+      // pages have to be able to tell them apart — keyed on the cycle alone,
+      // every buzz after the first on a question was silent.
+      io.to(room.code).emit('buzz_pending', { cycleNo: room.cycleNo, wave: room.cycle.windowOpenedAt });
       setTimeout(() => {
         if (room.phase !== 'open') return; // already reset/changed
         const queue = store.resolveWindow(room);
@@ -2245,10 +2251,12 @@ io.on('connection', (socket) => {
     if (!staff && room.queue[0]?.playerId !== ctx.playerId) return ack?.({ error: 'not_your_turn' });
     const res = answers.speak(room, playerId, payload?.text);
     if (res.error) return ack?.({ error: res.error });
-    announceAnswer(room, playerId, payload?.text);
+    if (!res.already) announceAnswer(room, playerId, payload?.text);
     emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));
     emitState(room);
-    ack?.({ ok: true });
+    // `already` so the page can say "that one is in" rather than leaving the
+    // player waiting for a change that isn't coming.
+    ack?.({ ok: true, already: res.already === true });
   });
 
   // --- player withdraw (queue mode, only if the room allows it) ----------

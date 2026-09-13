@@ -186,6 +186,13 @@ export function speak(room, playerId, textIn) {
   if (!a) return { error: 'not_open' };
   const text = String(textIn ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
   if (!text) return { error: 'empty' };
+  // Enter twice is one answer, not two. A player pressing it again — because
+  // nothing visible happened, or because they hit it while thinking — was
+  // putting the same line on the record and into the chat a second time. Only
+  // a CHANGED answer is a new one; giving the same answer again says nothing
+  // that isn't already there.
+  const mine = [...a.spoken].reverse().find((sp) => sp.playerId === (playerId || null));
+  if (mine && sameAnswer(mine.text, text)) return { ok: true, spoken: a.spoken.length, already: true };
   a.spoken.push({ playerId: playerId || null, text, at: Date.now() });
   return { ok: true, spoken: a.spoken.length };
 }

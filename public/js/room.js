@@ -19,7 +19,7 @@ if (isStaffRole(urlRole)) {
   }
 }
 
-const state = { me: null, role: null, snapshot: null, tournament: null, offlineIds: null, soundedCycle: null };
+const state = { me: null, role: null, snapshot: null, tournament: null, offlineIds: null, soundedWave: null };
 
 // ---- connect ----
 const socket = io({ transports: ['websocket', 'polling'], reconnection: true });
@@ -566,7 +566,7 @@ socket.on('buzzer_reset', () => {
 });
 // The instant a buzz lands, everyone hears it (the state update renders order;
 // no name is shown until the server resolves the reconcile window).
-socket.on('buzz_pending', (p) => soundCycle(p?.cycleNo));
+socket.on('buzz_pending', (p) => soundWave(p));
 
 // Someone joined a roster room who isn't on the roster: tell the staff in the
 // room (the director sees the same thing in their console).
@@ -752,6 +752,7 @@ let answerSent = '';
 let answerCommitted = '';   // the last text the server accepted
 let answerWindowKey = '';   // the window the box on screen is set up for
 let answerSpokenAt = 0;     // when this player last sent their answer (the floor's Enter)
+let answerSentText = '';    // and what it said, so Enter twice doesn't send it twice
 
 // Focus the box the moment a window opens. It is open for a few seconds, so a
 // player who has to find it and click it has already lost some of them. The one
@@ -770,7 +771,16 @@ function renderAnswers(s) {
   const view = $('#answer-view');
   const a = s.answers;
   const inQueue = (s.queue || []).some((q) => q.playerId === state.me?.id);
-  if (!a || !a.open || !inQueue || state.role !== 'player') {
+  // Whose box this is. "Players type their answer" is about the player with the
+  // FLOOR; the queue behind them only commits an answer when the room also asks
+  // for that (lockedAnswers). Showing them a box — and a clock — in a room that
+  // never asked was how a free-withdraw room ended up telling people their free
+  // window had run out, when withdrawing there is free and always was.
+  const iAmActive = a?.activePlayerId === state.me?.id;
+  const forMe = iAmActive
+    ? !!(s.settings?.typedAnswers || s.settings?.lockedAnswers)
+    : !!s.settings?.lockedAnswers;
+  if (!a || !a.open || !inQueue || !forMe || state.role !== 'player') {
     view.classList.add('hidden');
     if (answerTick) { clearInterval(answerTick); answerTick = null; }
     renderSpoken(a);
@@ -794,6 +804,7 @@ function renderAnswers(s) {
     box.classList.remove('append-only');
     $('#answer-note').textContent = '';
     answerSpokenAt = 0;
+    answerSentText = '';
     focusAnswer(box);
   }
 
@@ -821,18 +832,28 @@ function renderAnswers(s) {
   // withdrawing costs nothing; after it you can still type and still withdraw,
   // just not for free — the moderator will often give the floor longer, and
   // your answer is still worth having.
+  // What the clock is promising depends on the room. Where a buzz can be taken
+  // back, it is the window in which that costs nothing. Where it can't, there
+  // is no withdrawal to talk about: it is simply how long there is to commit.
+  const freeWithdrawals = !!s.settings?.allowWithdraw;
   if (!answerTick) {
     answerTick = setInterval(() => {
       const now = Date.now();
       const left = Math.max(0, a.closesAt - now);
       const appendOnly = now > a.deadline;
-      $('#answer-clock').textContent = left > 0 ? `${(left / 1000).toFixed(1)}s free` : 'no longer free';
+      $('#answer-clock').textContent = left > 0
+        ? `${(left / 1000).toFixed(1)}s${freeWithdrawals ? ' free' : ''}`
+        : (freeWithdrawals ? 'no longer free' : 'time is up');
       box.classList.toggle('append-only', appendOnly);
       $('#answer-note').textContent = left > 0
         ? (appendOnly
           ? 'Finish your word — you can add to your answer, but not take any of it back.'
-          : 'While this runs you can withdraw for nothing. After it you can still answer, but a withdrawal may cost you.')
-        : 'The free window has passed. You can still add to your answer — the moderator may give them longer — but withdrawing may cost you now.';
+          : freeWithdrawals
+            ? 'While this runs you can withdraw for nothing. After it you can still answer, but a withdrawal may cost you.'
+            : 'Commit an answer before this runs out. You can still add to it afterwards while the moderator gives them longer.')
+        : (freeWithdrawals
+          ? 'The free window has passed. You can still add to your answer — the moderator may give them longer — but withdrawing may cost you now.'
+          : 'You can still add to your answer while the moderator gives them longer.');
       if (left <= 0) {
         clearInterval(answerTick);
         answerTick = null;
@@ -874,10 +895,20 @@ $('#answer-box').addEventListener('keydown', (e) => {
   if (!a || a.activePlayerId !== state.me?.id) return;
   const text = $('#answer-box').value.trim();
   if (!text) return;
+  // Enter twice on the same answer is one answer. The server says the same
+  // thing (answers.speak), but a page that sends it anyway leaves the player
+  // watching for a change that can't come, so it is answered here too.
+  if (text === answerSentText && Date.now() - answerSpokenAt < 1500) {
+    $('#answer-note').textContent = 'Already sent — change it and press Enter to give a different answer.';
+    return;
+  }
   socket.emit('answer_spoken', { text }, (res) => {
     if (res?.error) { $('#answer-note').textContent = 'Could not send that: ' + res.error; return; }
     answerSpokenAt = Date.now();
-    $('#answer-note').textContent = 'Sent. You can change it and press Enter again until the moderator rules.';
+    answerSentText = text;
+    $('#answer-note').textContent = res.already
+      ? 'Already sent — change it and press Enter to give a different answer.'
+      : 'Sent. You can change it and press Enter again until the moderator rules.';
   });
 });
 
@@ -916,9 +947,22 @@ function renderShootout(s) {
   const board = s.shootout;
   if (!board) { view.classList.add('hidden'); return; }
   view.classList.remove('hidden');
-  $('#shootout-meta').textContent = board.packets
-    ? `${board.packets} packet${board.packets === 1 ? '' : 's'} banked`
-    : 'this packet';
+  // Which packet the room is on, not an accounting note. "1 packet banked" was
+  // telling players about the bookkeeping behind the total when what they want
+  // to know is where the evening has got to — and the split on each row
+  // already says which part of a score came from earlier packets.
+  const session = board.session;
+  const at = session?.currentIndex ?? -1;
+  const packet = at >= 0 ? session?.packets?.[at] : undefined;
+  $('#shootout-meta').textContent = packet
+    ? (session.packets.length > 1
+      ? `packet ${at + 1} of ${session.packets.length} · ${packet.name}`
+      : packet.name)
+    : '';
+
+  // Nothing banked yet means every point on the board came from this packet,
+  // and a column of "0 + n" would say so fifteen times over.
+  const showSplit = (board.packets ?? 0) > 0;
 
   const ol = $('#shootout-board');
   ol.replaceChildren();
@@ -934,8 +978,14 @@ function renderShootout(s) {
       el('span', { className: 'sb-rank', textContent: `${row.place}.` }),
       el('span', { className: 'sb-name', textContent: me ? `${row.name} (you)` : row.name }),
       // The banked half is shown separately so nobody has to wonder whether the
-      // number moved because of this packet or an earlier one.
-      el('span', { className: 'sb-split', textContent: row.banked ? `${row.banked} + ${row.current}` : '' }),
+      // number moved because of this packet or an earlier one. Shown on EVERY
+      // scoring row once the evening has banked a packet, including the ones
+      // whose points are all from this one: with it there only for players who
+      // had scored earlier, two people on 10 looked like different kinds of 10.
+      el('span', {
+        className: 'sb-split',
+        textContent: showSplit && (row.banked || row.current) ? `${row.banked} + ${row.current}` : ''
+      }),
       el('span', { className: 'sb-total', textContent: String(row.total) })));
   }
   if (!board.rows.length) ol.append(el('li', { className: 'empty' }, 'Nobody has scored yet.'));
@@ -2031,20 +2081,35 @@ function fireBuzz() {
   navigator.vibrate?.(40);
   // Play the sound NOW, before the round trip: the press itself is certain.
   // Who WON the buzz stays unknown until the server resolves the window —
-  // nothing here shows a name. The cycle guard keeps the buzz_pending
-  // broadcast (or a race with another player's press) from double-playing.
-  soundCycle(state.snapshot?.cycleNo);
+  // nothing here shows a name. The broadcast this press causes comes back in a
+  // moment; `justPressed` is what stops it playing a second time.
+  justPressed = true;
+  clearTimeout(justPressedTimer);
+  // A press that is refused (the buzzer was locked) causes no broadcast at
+  // all, so the flag can't be left standing to eat somebody else's.
+  justPressedTimer = setTimeout(() => { justPressed = false; }, 1500);
+  playBuzz();
   socket.emit('buzz', { pressServerTime: clock.now() }); // best estimate of server-time press
   buzzer.disabled = true; // optimistic; the next state update confirms
   renderPip();
 }
 
-// One buzz sound per cycle, whether it comes from our own press or the room's
-// buzz_pending broadcast — whichever happens first.
-function soundCycle(cycleNo) {
-  const key = cycleNo ?? state.snapshot?.cycleNo ?? -1;
-  if (state.soundedCycle === key) return;
-  state.soundedCycle = key;
+// One buzz sound per WAVE, not per question. In queue mode a question has
+// several: the first press opens one, and each player buzzing in behind them
+// opens the next. Every one of those is a buzz the room should hear — the
+// reader above all, who has to stop reading again.
+let justPressed = false;        // our own press already made the noise
+let justPressedTimer = null;
+function soundWave(pending) {
+  const key = `${pending?.cycleNo ?? state.snapshot?.cycleNo ?? -1}:${pending?.wave ?? 0}`;
+  if (state.soundedWave === key) return;
+  state.soundedWave = key;
+  if (justPressed) {
+    // This is the broadcast our own press caused; it has been heard already.
+    justPressed = false;
+    clearTimeout(justPressedTimer);
+    return;
+  }
   playBuzz();
 }
 
