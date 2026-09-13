@@ -195,7 +195,7 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
     cycleNo: 1,
     cycle: freshCycle(1),
     lastBuzzAt: null,        // server time the current queue's first buzz resolved
-    queue: [],               // [{ playerId, name, marginMs }] in buzz order
+    queue: [],               // [{ playerId, name, t, marginMs }] in buzz order
     members: new Map(),      // playerId -> member
     log: []                 // recent events for late joiners / audit
   };
@@ -865,8 +865,21 @@ export function nextBuzz(room) {
 // answer has already been given by somebody else. The server does not apply a
 // penalty — what a neg is worth is MODAQ's business — it reports which kind of
 // withdrawal the moderator just saw.
-export function withdraw(room, playerId) {
+/**
+ * `byPlayer` is the player taking their own buzz back. The head of the queue
+ * cannot: they have the floor. The room has stopped for them, the moderator is
+ * listening to them, and at that point letting go of the buzz is a ruling — an
+ * accidental buzz, or the reader moving on — not something the player decides
+ * on their own while everyone waits. Free withdrawals are for the people
+ * BEHIND the buzzer, who buzzed on reflex and have not been asked anything.
+ *
+ * The moderator can still take it off them (Accidental buzz / Next buzzer /
+ * the buzz menu's Withdrew), which is the same action with the authority it
+ * needs.
+ */
+export function withdraw(room, playerId, { byPlayer = false } = {}) {
   if (!room.settings.allowWithdraw) return { ok: false };
+  if (byPlayer && room.queue[0]?.playerId === playerId) return { ok: false, reason: 'has_floor' };
   const before = room.queue.length;
   const verdict = room.settings.lockedAnswers ? answers.withdrawal(room, playerId) : { free: true, reason: 'no_answers' };
   room.queue = room.queue.filter((q) => q.playerId !== playerId);
@@ -983,12 +996,24 @@ export function fullBuzzExport(room) {
 // In default mode that also locks the room. Returns the full current queue.
 export function resolveWindow(room) {
   const buzzes = [...room.cycle.collected].sort((a, b) => a.clampedTime - b.clampedTime);
-  const base = buzzes.length ? buzzes[0].clampedTime : 0;
+  // How far behind the buzz that WON it — the one at the head of the queue —
+  // not behind whoever happened to be first in this wave.
+  //
+  // A wave is the handful of presses inside one reconcile window. Someone who
+  // buzzes four seconds later, after that wave is already resolved, opens a
+  // wave of their own, and measuring them against it made them "+0ms": a
+  // player who buzzed last read as having tied for first. The margin means one
+  // thing on every row, so it is measured from one place: the head of the
+  // queue, whose own margin is zero by definition.
+  const head = room.queue.length ? room.queue[0].t : undefined;
+  const base = head ?? (buzzes.length ? buzzes[0].clampedTime : 0);
   for (const b of buzzes) {
     if (room.queue.some((q) => q.playerId === b.playerId)) continue; // already queued
     room.queue.push({
       playerId: b.playerId,
       name: displayName(room.members.get(b.playerId)),
+      // Kept so a later wave has something to measure itself against.
+      t: b.clampedTime,
       marginMs: Math.round(b.clampedTime - base)
     });
   }
@@ -1268,6 +1293,44 @@ export function chatSay(room, actor, text) {
   // and staff, so the room can get the reader's attention.
   const people = [...room.members.values()].map((m) => ({ id: m.id, name: displayName(m) }));
   const res = shootout.say(room, actor, text, people);
+  if (res.ok) persistRooms();
+  return res;
+}
+
+/**
+ * Has the room moved on to a question it has never been on before?
+ *
+ * The chat gets a line between questions so a conversation can be read back
+ * against the game, but only for real progress. A moderator correcting a score
+ * three questions back, or stepping to a question and returning, is not the
+ * room moving on — and a divider for every one of those is worse than none,
+ * because then the dividers mean nothing.
+ *
+ * So: a high-water mark, per packet. Going back is silent, coming forward
+ * again is silent until the room passes where it had already got to.
+ */
+export function cycleDivider(room) {
+  if (!room.settings.shootout) return null;
+  const n = Number(room.scoresheet?.current);
+  if (!Number.isFinite(n) || n < 1) return null;
+  const packet = room.scoresheetPacket ?? null;
+  const mark = room.chatCycleMark;
+  // A different packet starts its own count; the first question of a game
+  // needs no divider, there is nothing above it to divide from.
+  if (!mark || mark.packet !== packet) {
+    room.chatCycleMark = { packet, n };
+    return null;
+  }
+  if (n <= mark.n) return null;
+  room.chatCycleMark = { packet, n };
+  return `Question ${n}`;
+}
+
+// An answer the room heard, written into the chat so everyone sees it — not
+// only the players who happened to be in the buzz queue.
+export function chatAnnounce(room, kind, payload) {
+  if (!room.settings.shootout) return { error: 'disabled' };
+  const res = shootout.announce(room, kind, payload);
   if (res.ok) persistRooms();
   return res;
 }

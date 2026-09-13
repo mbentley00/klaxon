@@ -28,6 +28,9 @@ const clock = new ClockSync(socket);
 const connPill = $('#conn');
 const latPill = $('#latency');
 $('#room-code').textContent = code;
+// The room code in the tab, for a player who has Klaxon open beside a call, a
+// question doc and a chat client and has to find it again.
+document.title = `${code} · Klaxon`;
 
 socket.on('connect', () => {
   setConn('sync', 'syncing…');
@@ -1035,14 +1038,44 @@ function renderChat(s) {
     // Discord's grouping: consecutive lines from the same person don't repeat
     // the name, which is most of what makes a chat log readable. A new day
     // starts a fresh run, so its first line is named.
-    log.append(chatLine(m, m.name === lastName && day === lastDay));
-    lastName = m.name;
+    const grouped = !m.system && m.name === lastName && day === lastDay;
+    log.append(chatLine(m, grouped));
+    // A room event breaks the run: the next line from the same person is
+    // named again rather than looking like part of the announcement.
+    lastName = m.system ? null : m.name;
     lastDay = day;
   }
   if (atBottom) log.scrollTop = log.scrollHeight;
 }
 
 function chatLine(m, grouped) {
+  // What the room heard, rather than what somebody typed. Drawn as an event —
+  // labelled, set apart, never folded into a run of chat — because it is the
+  // one line in the log that is part of the game.
+  // The room read on. A rule with the question number on it, like the day
+  // dividers around it — it marks where the log is, it isn't a message.
+  if (m.system === 'cycle') {
+    return el('li', { className: 'chat-day chat-cycle', title: chatFullTime(m.at) },
+      el('span', { textContent: m.text }));
+  }
+
+  if (m.system === 'answer') {
+    // Flash the one that has just arrived, once. Anything older is drawn plain,
+    // so a redraw (someone typing, a buzz landing) doesn't set the whole log
+    // flashing again.
+    const fresh = Date.now() - m.at < 2000;
+    const li = el('li', {
+      className: 'chat-line chat-event chat-answer' + (fresh ? ' chat-event-new' : ''),
+      title: chatFullTime(m.at)
+    });
+    li.append(
+      el('span', { className: 'chat-event-label', textContent: 'Answer' }),
+      el('span', { className: 'chat-event-who', textContent: m.name }),
+      el('span', { className: 'chat-event-text', textContent: m.text })
+    );
+    return li;
+  }
+
   // A line that names YOU is the one you must not miss in a moving log.
   const mentionsMe = (m.mentions || []).some((x) => x.id === state.me?.id);
   const li = el('li', {
@@ -1109,6 +1142,8 @@ const chatDayLabel = (at) => {
 };
 
 function sendChat() {
+  clearTimeout(typingStopTimer);
+  sendTyping(false);
   const box = $('#chat-box');
   const text = box.value.trim();
   if (!text) return;
@@ -1189,6 +1224,56 @@ function insertMention(person) {
 
 $('#chat-box')?.addEventListener('input', renderMentionPicker);
 $('#chat-box')?.addEventListener('blur', () => $('#chat-mentions').classList.add('hidden'));
+
+// ---- who is typing ----
+// Presence, not content: the room is told that you are typing, never what. A
+// heartbeat while you keep going, one "stopped" when you stop or send, and a
+// timeout so a page that closes mid-sentence doesn't leave its name up.
+const TYPING_BEAT_MS = 2500;     // how often a typist re-announces
+const TYPING_GONE_MS = 6000;     // how long a name stands without one
+const typists = new Map();       // playerId -> { name, at }
+let typingSentAt = 0;
+let typingStopTimer = null;
+
+function sendTyping(on) {
+  if (!state.snapshot?.shootout) return;
+  const now = Date.now();
+  if (on && now - typingSentAt < TYPING_BEAT_MS) return;
+  typingSentAt = on ? now : 0;
+  socket.emit('chat_typing', { typing: on });
+}
+
+function renderTypists() {
+  const line = $('#chat-typing');
+  if (!line) return;
+  const now = Date.now();
+  for (const [id, who] of typists) {
+    if (now - who.at > TYPING_GONE_MS) typists.delete(id);
+  }
+  const names = [...typists.values()].map((w) => w.name);
+  // Discord's wording, and its restraint: past two names it stops listing.
+  line.textContent = names.length === 0 ? ''
+    : names.length === 1 ? `${names[0]} is typing…`
+      : names.length === 2 ? `${names[0]} and ${names[1]} are typing…`
+        : 'Several people are typing…';
+}
+
+socket.on('chat_typing', ({ playerId, name, typing }) => {
+  if (!playerId || playerId === state.me?.id) return;
+  if (typing) typists.set(playerId, { name, at: Date.now() });
+  else typists.delete(playerId);
+  renderTypists();
+});
+// Names time out on their own, so a dropped connection doesn't leave one up.
+setInterval(renderTypists, 1500);
+
+$('#chat-box')?.addEventListener('input', () => {
+  const box = $('#chat-box');
+  if (box.value.trim() === '') { sendTyping(false); clearTimeout(typingStopTimer); return; }
+  sendTyping(true);
+  clearTimeout(typingStopTimer);
+  typingStopTimer = setTimeout(() => sendTyping(false), TYPING_GONE_MS - 1500);
+});
 
 $('#chat-send')?.addEventListener('click', sendChat);
 $('#chat-box')?.addEventListener('keydown', (e) => {
@@ -2101,6 +2186,14 @@ function notifyStuck(who) {
 }
 
 // ---- queue / buzz order ----
+// How far behind the buzz that won it. Milliseconds while they are the unit
+// that means something — a photo finish between two people on the same
+// question — and seconds once the gap is one a person could have counted.
+function marginText(ms) {
+  const n = Math.max(0, Math.round(Number(ms) || 0));
+  return n < 1000 ? `${n}ms` : `${(n / 1000).toFixed(n < 10000 ? 1 : 0)}s`;
+}
+
 function renderQueue(s) {
   const q = s.queue || [];
   const staff = isStaffRole(state.role);
@@ -2109,13 +2202,25 @@ function renderQueue(s) {
   // everything below it up and down. Empty state instead, and outside queue mode
   // there's only ever one name to show.
   $('#queue-title').textContent = queueMode ? 'Buzz queue' : 'Buzzed in player';
+  // Which way the buzzer works in this room. Said outright, not left to be
+  // inferred from whether a second name ever turns up: it changes what buzzing
+  // early costs you.
+  const how = $('#queue-how');
+  if (how) {
+    how.textContent = queueMode
+      ? 'Everyone who buzzes joins the queue, in the order the server timed them.'
+      : 'The first buzz locks the buzzer — nobody else can buzz until it is cleared.';
+  }
   const list = $('#queue-list');
   list.innerHTML = '';
   if (!q.length) list.append(el('li', { className: 'empty' }, 'No one has buzzed'));
   q.forEach((o, i) => {
     const mine = o.playerId === state.me?.id;
-    const row = el('li', { className: `${i === 0 ? 'head' : ''}${mine ? ' me' : ''}`.trim() },
-      `${o.name}${i ? ` (+${o.marginMs}ms)` : ''}`);
+    const row = el('li', {
+      className: `${i === 0 ? 'head' : ''}${mine ? ' me' : ''}`.trim(),
+      // Said in full on hover, because "+216ms" is only obvious once.
+      title: i ? `Buzzed ${marginText(o.marginMs)} after ${q[0].name}` : 'Buzzed first'
+    }, `${o.name}${i ? ` (+${marginText(o.marginMs)})` : ''}`);
     if (mine) row.append(el('span', { className: 'you' }, ' (you)'));
     list.append(row);
   });
@@ -2127,8 +2232,16 @@ function renderQueue(s) {
   $('#ctl-clear').textContent = queueMode ? 'Clear queue' : 'Clear buzz';
 
   const pos = q.findIndex((x) => x.playerId === state.me?.id);
-  const canWithdraw = state.role === 'player' && s.settings?.allowWithdraw && pos >= 0;
+  // Not from the front of the queue: once you have the floor, letting the buzz
+  // go is the moderator's call (see store.withdraw).
+  const canWithdraw = state.role === 'player' && s.settings?.allowWithdraw && pos > 0;
   $('#ctl-withdraw').classList.toggle('hidden', !canWithdraw);
+  const note = $('#queue-note');
+  if (note) {
+    note.textContent = state.role === 'player' && s.settings?.allowWithdraw && pos === 0
+      ? 'You have the buzzer — only the moderator can take this buzz back now.'
+      : '';
+  }
 }
 $('#ctl-next').onclick = () => socket.emit('reader_action', { action: 'next_buzz' });
 $('#ctl-clear').onclick = () => socket.emit('reader_action', { action: 'clear_queue' });

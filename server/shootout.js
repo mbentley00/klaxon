@@ -209,6 +209,38 @@ export function say(room, actor, text, people = []) {
   return { ok: true, message };
 }
 
+/**
+ * Something the ROOM did, written into the chat: an answer that was given.
+ *
+ * The answer panel only ever showed these to the players queued behind the
+ * buzzer, so anyone who hadn't buzzed — most of the room, most of the time —
+ * never learned what was actually said. The chat is where the room is already
+ * looking, it is already in front of everyone, and it already keeps a history
+ * for whoever joins late.
+ *
+ * Not a player's message: no cooldown (the room is not typing it), no
+ * mentions, and marked so the page can draw it as an event rather than as
+ * somebody talking.
+ */
+export function announce(room, kind, { name, text }) {
+  if (!room.chat) room.chat = [];
+  const body = clean(text, MAX_CHAT_TEXT);
+  if (!body) return { error: 'empty' };
+  const now = Date.now();
+  const message = {
+    id: `s${now.toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    playerId: null,
+    name: clean(name, 40),
+    system: String(kind || 'event').slice(0, 20),
+    text: body,
+    at: now,
+    mentions: []
+  };
+  room.chat.push(message);
+  if (room.chat.length > MAX_CHAT) room.chat.splice(0, room.chat.length - MAX_CHAT);
+  return { ok: true, message };
+}
+
 export const messages = (room) => (room.chat || []).map((m) => ({ ...m }));
 
 // --- the session -------------------------------------------------------------

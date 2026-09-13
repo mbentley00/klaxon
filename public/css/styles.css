@@ -332,6 +332,10 @@ body.win-blur .bz-sub { color: var(--warn); opacity: 1; font-weight: 600; }
   body.has-sheet .buzz-row, body.has-chat .buzz-row { grid-template-columns: 1fr; }
 }
 
+/* How this room's buzzer behaves, under the heading that names it. */
+.queue-how { margin: -2px 0 4px; font-size: .78rem; }
+body.compact .queue-how { display: none; }
+
 .order ol { padding-left: 1.4em; margin: .4em 0; }
 .order li { padding: 2px 0; }
 /* Placeholder row when nobody has buzzed — no list number, no emphasis. */
@@ -894,6 +898,41 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 }
 .chat-day::before, .chat-day::after { content: ""; flex: 1 1 auto; border-top: 1px solid var(--soft); }
 .chat-text { display: block; }
+
+/* Where the room got to, between the lines people typed. Quieter than the day
+   dividers it borrows from: this happens twenty times a packet. */
+.chat-cycle { color: var(--accent); margin: 6px 0 2px; }
+.chat-cycle::before, .chat-cycle::after { border-top-color: var(--soft); }
+
+/* An answer the room heard, in the chat where everyone is already looking.
+   Bordered and labelled so it never reads as a player's message. */
+.chat-event {
+  margin: 8px 0;
+  padding: 5px 8px;
+  border: 1.5px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-bg);
+  overflow-wrap: anywhere;
+}
+.chat-event-label {
+  display: inline-block;
+  font-family: var(--mono); font-size: .62rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--on-accent); background: var(--accent-fill);
+  border-radius: 2px; padding: .1em .4em; margin-right: 6px;
+  vertical-align: 1px;
+}
+/* The newest one catches the eye once, for a player who was reading the
+   question rather than the chat. */
+.chat-event.chat-event-new { animation: chat-event-in 1.6s ease-out; }
+@keyframes chat-event-in {
+  0%, 40% { background: var(--accent-fill); border-color: var(--accent-fill); }
+  100% { background: var(--accent-bg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-event.chat-event-new { animation: none; }
+}
+.chat-event-who { font-weight: 700; margin-right: 6px; }
+.chat-event-text { font-weight: 500; }
 .chat-line.chat-cont .chat-text { padding-left: 0; }
 
 @media (max-width: 900px) {
@@ -948,6 +987,12 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 }
 /* The picker sits above the box, so it never covers what you are typing. */
 .chat-entry { position: relative; }
+/* Its height is reserved whether or not anyone is typing: a line that appears
+   and disappears under a chat box moves the box. */
+.chat-typing {
+  margin: 0 0 2px; min-height: 1.1em; font-size: .75rem; color: var(--muted);
+  font-style: italic; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
 .chat-mentions {
   position: absolute; bottom: 100%; left: 0; right: 0; z-index: 5;
   list-style: none; margin: 0 0 4px; padding: 4px;

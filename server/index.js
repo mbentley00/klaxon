@@ -1849,6 +1849,9 @@ io.on('connection', (socket) => {
       case 'reveal_answer': {
         const res = answers.reveal(room, payload?.playerId);
         if (res.error) return ack?.(res);
+        if (!res.already) {
+          announceAnswer(room, payload?.playerId ?? answers.state(room)?.activePlayerId, res.text);
+        }
         emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));
         emitState(room);
         return ack?.({ ok: true, text: res.text });
@@ -1954,6 +1957,16 @@ io.on('connection', (socket) => {
           // filed under the right one when the room moves on (see
           // setShootoutCurrent). Absent in every other mode.
           typeof payload.packet === 'string' ? payload.packet : null);
+        // Reading on puts a line in the chat, so the talking can be read back
+        // against the game. Only for real progress — see store.cycleDivider.
+        const divider = store.cycleDivider(room);
+        if (divider) {
+          const said = store.chatAnnounce(room, 'cycle', { name: '', text: divider });
+          if (said.ok) {
+            io.to(room.code).emit('chat_message', said.message);
+            emitToStaff(room.code, 'chat_message', said.message);
+          }
+        }
         break;
       }
       // MODAQ's serialized game from one moderator, fanned out to the others
@@ -2104,6 +2117,22 @@ io.on('connection', (socket) => {
   // Nothing to do with answering, and gated on nothing in the game. In a room
   // where everyone is on their own, the talking is why people are there — and
   // without somewhere to put it, it ends up in the answer box.
+  // Someone is typing in the chat. Sent every few seconds while they type and
+  // once when they stop; the room is told WHO, and the pages work out the
+  // wording. Deliberately thin: no text ever leaves the box this way, nothing
+  // is stored, and a client that goes quiet simply times out of the list.
+  socket.on('chat_typing', (payload) => {
+    const ctx = sock.get(socket.id);
+    const room = ctx && store.getRoom(ctx.roomCode);
+    if (!room || !ctx.playerId || !room.settings.shootout) return;
+    const name = store.memberName(room, ctx.playerId) || 'someone';
+    const typing = payload?.typing !== false;
+    // Everyone but the person typing — your own page knows what you are doing.
+    // Staff are in the room channel too, so this reaches the moderator's panel
+    // without a second send.
+    socket.to(room.code).emit('chat_typing', { playerId: ctx.playerId, name, typing });
+  });
+
   socket.on('chat_say', (payload, ack) => {
     const ctx = sock.get(socket.id);
     const room = ctx && store.getRoom(ctx.roomCode);
@@ -2190,6 +2219,19 @@ io.on('connection', (socket) => {
     ack?.({ ok: true, text: res.text, appendOnly: res.appendOnly });
   });
 
+  // An answer the room heard goes into the chat as well as onto the record:
+  // the answer panel is only ever shown to the players in the buzz queue, so
+  // without this most of the room never learns what was said.
+  function announceAnswer(room, playerId, text) {
+    if (!room.settings.shootout) return;
+    const who = playerId ? store.memberName(room, playerId) : '';
+    const res = store.chatAnnounce(room, 'answer', { name: who || 'Someone', text });
+    if (res.ok) {
+      io.to(room.code).emit('chat_message', res.message);
+      emitToStaff(room.code, 'chat_message', res.message);
+    }
+  }
+
   // The player with the floor says their answer out loud (or the moderator
   // records what they said). It goes on the record so a later withdrawal can
   // be judged against what the room has already heard.
@@ -2203,6 +2245,7 @@ io.on('connection', (socket) => {
     if (!staff && room.queue[0]?.playerId !== ctx.playerId) return ack?.({ error: 'not_your_turn' });
     const res = answers.speak(room, playerId, payload?.text);
     if (res.error) return ack?.({ error: res.error });
+    announceAnswer(room, playerId, payload?.text);
     emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));
     emitState(room);
     ack?.({ ok: true });
@@ -2213,7 +2256,7 @@ io.on('connection', (socket) => {
     const ctx = sock.get(socket.id);
     const room = ctx && store.getRoom(ctx.roomCode);
     if (!room || !ctx.playerId) return ack?.({ error: 'no_room' });
-    const res = store.withdraw(room, ctx.playerId);
+    const res = store.withdraw(room, ctx.playerId, { byPlayer: true });
     if (res.ok) {
       // The moderator needs to know which kind of withdrawal that was: a
       // reaction buzz taken back before anything was said costs nothing, and

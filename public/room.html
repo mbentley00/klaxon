@@ -120,12 +120,14 @@
       <!-- Buzz queue / order — always on screen so nothing below it jumps -->
       <section id="queue-view" class="order">
         <h3 id="queue-title">Buzz queue</h3>
+        <p id="queue-how" class="hint queue-how"></p>
         <ol id="queue-list"></ol>
         <div id="queue-controls" class="row hidden">
           <button id="ctl-next" class="ghost hidden">Next buzzer →</button>
           <button id="ctl-clear" class="ghost">Clear queue</button>
         </div>
         <button id="ctl-withdraw" class="ghost hidden">Withdraw my buzz</button>
+        <p id="queue-note" class="hint"></p>
       </section>
     </div>
 
@@ -151,6 +153,9 @@
         <h3>Chat</h3>
         <ul id="chat-log" class="chat-log"></ul>
         <div class="chat-entry">
+          <!-- Who is about to say something. Its space is always reserved, so a
+               line appearing doesn't shove the box you're typing in. -->
+          <p id="chat-typing" class="chat-typing"></p>
           <ul id="chat-mentions" class="chat-mentions hidden"></ul>
           <div class="row">
             <input id="chat-box" type="text" maxlength="400" autocomplete="off" placeholder="Say something" />
