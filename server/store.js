@@ -1481,6 +1481,30 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
   return { teams, rows, through, current: through, total, scores: [...totals], at: Date.now() };
 }
 
+/**
+ * Which question a player may protest.
+ *
+ * The client says which ROW of the scoresheet it means — a protest should name
+ * the question out loud rather than meaning "whatever we're on", which is a
+ * different question by the time the moderator reads it — and the server
+ * checks the room actually got there. A number nobody has played is refused.
+ *
+ * The question being read counts only once something has happened on it. There
+ * is nothing to protest about a tossup that hasn't been answered yet, and
+ * before the first buzz of the game that is every question there is.
+ */
+export function protestableCycle(room, wanted) {
+  const sheet = room.scoresheet;
+  const current = Number(sheet?.current);
+  if (!sheet || !Number.isFinite(current) || current < 1) return { error: 'no_question' };
+  const n = wanted == null ? current : Math.floor(Number(wanted));
+  if (!Number.isFinite(n) || n < 1 || n > current) return { error: 'no_question' };
+  const row = (sheet.rows || []).find((r) => r.n === n);
+  const played = (row?.buzzes?.length ?? 0) > 0 || !!row?.bonus || !!row?.thrownOut;
+  if (!played) return { error: 'not_started' };
+  return { cycle: n };
+}
+
 // The reader's page pushes its game on every change; keep the players' view.
 // Clearing (a null match) hides the sheet, e.g. when the reader leaves a game.
 export function setScoresheet(room, match, currentQuestion, hasBonuses = true, protests = [], categories = [], answers = [], questions = [], packetId = null) {

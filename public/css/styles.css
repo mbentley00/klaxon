@@ -265,6 +265,11 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 .buzzer.queued { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
 .buzzer.locked { background: var(--surface); color: var(--accent); border-color: var(--accent); border-width: 5px; }
 .buzzer:not(:disabled) { cursor: pointer; }
+/* The window doesn't have the keyboard: Space is going wherever you last
+   clicked, so the buzzer stops claiming otherwise. A dashed ring rather than a
+   dimmer one — the button still works, it's the shortcut that doesn't. */
+body.win-blur .buzzer:not(:disabled) { border-style: dashed; }
+body.win-blur .bz-sub { color: var(--warn); opacity: 1; font-weight: 600; }
 .buzzer:disabled { opacity: var(--buzzer-fade); box-shadow: 8px 8px 0 var(--soft); border-color: var(--line-muted); }
 /* Your own buzz and your place in the queue are states, not dead controls —
    fading them out is what made them unreadable. They keep their colour and get
@@ -755,6 +760,10 @@ body.compact #answer-view { display: none; }
 .ss-fb-chip:hover { border-color: var(--line); color: var(--ink); }
 .ss-fb-chip.on { background: var(--ink); border-color: var(--ink); color: var(--surface); }
 .ss-fb-chip:active { transform: none; box-shadow: none; }
+/* Starting a protest from the question it is about. */
+.ss-protest-start { margin: 6px 0 2px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ss-protest-pick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ss-protest-reason { font-size: 12px; max-width: 100%; padding: 2px; }
 .ss-fb-more {
   font-family: var(--sans); font-size: .72rem; padding: 0; margin-top: 4px;
   border: none; background: none; box-shadow: none; color: var(--muted);

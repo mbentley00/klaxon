@@ -187,14 +187,10 @@
          the room. See server/protests.js. -->
     <section id="protest-view" class="panel protest hidden">
       <h3>Protests <span id="protest-count" class="muted-count"></span></h3>
-      <div id="protest-lodge" class="hidden">
-        <label class="select-label" for="protest-reason">Protest this question</label>
-        <select id="protest-reason"></select>
-        <div class="row">
-          <button id="protest-send" class="ghost tiny">Tell the moderator</button>
-          <span class="hint" id="protest-lodge-note"></span>
-        </div>
-      </div>
+      <!-- A protest starts from the question it is about, on the scoresheet —
+           see protestRow() in room.js. This panel is where the ones already
+           lodged are argued. -->
+      <p class="hint" id="protest-where"></p>
       <ul id="protest-list" class="protest-list"></ul>
     </section>
 

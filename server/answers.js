@@ -99,23 +99,45 @@ export function state(room) {
 }
 
 /**
- * The window is over. The player with the floor now has their answer on the
- * record — which is the point of waiting: everyone else's was committed before
- * this became knowable, so from here a withdrawal is no longer free unless it
- * would only repeat what was just given (see `withdrawal`).
+ * The GUARANTEED window is over.
  *
- * Done on a timer rather than by the moderator so the rule doesn't depend on
- * how fast somebody clicks.
+ * It is a promise to the players waiting behind the buzzer, not a shutter: for
+ * as long as it runs, a withdrawal costs nothing, so anyone who buzzed on
+ * reflex has a stated number of seconds to get an answer down or take the buzz
+ * back. After it they may still type and still withdraw — the moderator often
+ * gives the player with the floor longer — but the free pass has expired.
+ *
+ * Nothing is revealed here. The floor's answer goes on the record when THEY
+ * send it (Enter) or when the moderator asks for it, never because a timer
+ * went off: a player still typing when the clock runs out has not answered.
+ *
+ * On a timer rather than a click so the promise doesn't depend on how fast
+ * somebody reacts.
  */
 export function close(room) {
   const a = state(room);
   if (!a || a.endedAt) return a;
   a.endedAt = Date.now();
-  const active = a.activePlayerId && a.locked.get(a.activePlayerId);
-  if (active?.text && !a.spoken.some((sp) => sp.playerId === a.activePlayerId)) {
-    a.spoken.push({ playerId: a.activePlayerId, text: active.text, at: a.endedAt });
-  }
   return a;
+}
+
+/**
+ * The floor's answer, put on the record by the moderator rather than by the
+ * player — the force-show. The moderator can already read every committed
+ * answer; this is how they make the room's one public.
+ */
+export function reveal(room, playerId) {
+  const a = state(room);
+  if (!a) return { error: 'not_open' };
+  const who = playerId || a.activePlayerId;
+  if (!who) return { error: 'no_player' };
+  const committed = a.locked.get(who)?.text;
+  if (!committed) return { error: 'nothing_typed' };
+  if (a.spoken.some((sp) => sp.playerId === who && sameAnswer(sp.text, committed))) {
+    return { ok: true, text: committed, already: true };
+  }
+  a.spoken.push({ playerId: who, text: committed, at: Date.now() });
+  return { ok: true, text: committed };
 }
 
 /**
@@ -125,17 +147,25 @@ export function close(room) {
  * append-only tail. That is checked here rather than in the browser because it
  * is the entire security of the mechanic: a page that lies about its own input
  * box must not be able to walk an answer back.
+ *
+ * Two things the clock does NOT do. It doesn't shut the box: the moderator
+ * routinely gives the player with the floor more time, and everyone else is
+ * entitled to keep working on an answer for as long as that takes — they just
+ * do it without the free withdrawal. And it doesn't bind the player with the
+ * FLOOR at all: they are the one being asked the question, their answer is
+ * theirs to revise until they send it, and there is nobody behind them for the
+ * append-only rule to protect.
  */
 export function type(room, playerId, textIn) {
   const a = state(room);
   if (!a) return { error: 'not_open' };
   const now = Date.now();
-  if (now > a.closesAt) return { error: 'closed' };
 
   const text = String(textIn ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
   const prev = a.locked.get(playerId);
+  const isFloor = a.activePlayerId != null && playerId === a.activePlayerId;
 
-  if (now > a.deadline) {
+  if (now > a.deadline && !isFloor) {
     const before = prev?.text ?? '';
     // Same text is fine (a keystroke that changed nothing); shorter or
     // divergent is the deletion this window exists to prevent.
@@ -143,7 +173,7 @@ export function type(room, playerId, textIn) {
   }
 
   a.locked.set(playerId, { text, at: now });
-  return { ok: true, text, appendOnly: now > a.deadline };
+  return { ok: true, text, appendOnly: now > a.deadline && !isFloor };
 }
 
 /**
@@ -174,6 +204,9 @@ export function speak(room, playerId, textIn) {
 export function withdrawal(room, playerId) {
   const a = state(room);
   if (!a) return { free: true, reason: 'no_window' };
+  // Inside the guaranteed window it is free, full stop — that is the promise
+  // the countdown on everyone's screen makes.
+  if (Date.now() <= a.closesAt) return { free: true, reason: 'guaranteed' };
   if (a.spoken.length === 0) return { free: true, reason: 'nothing_said' };
   const mine = a.locked.get(playerId)?.text;
   if (mine && a.spoken.some((s) => sameAnswer(s.text, mine))) {
@@ -197,9 +230,14 @@ export function publicWindow(room) {
   if (!a) return null;
   const now = Date.now();
   return {
-    open: now <= a.closesAt,
+    // The window is open for as long as the cycle is: only the moderator ends
+    // it, by judging the buzz or clearing the buzzer.
+    open: true,
     deadline: a.deadline,
     closesAt: a.closesAt,
+    // The promise, and whether it has run out: until closesAt a withdrawal is
+    // free for everyone waiting behind the buzzer.
+    guaranteed: now <= a.closesAt,
     // Past the deadline a box may only grow; the page greys out its own
     // deletion rather than silently having keystrokes rejected.
     appendOnly: now > a.deadline,

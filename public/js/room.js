@@ -637,9 +637,13 @@ function renderScoresheet(s) {
     .join(', ');
   if (!wanted) { ssLastKey = ''; return; }   // collapsed: the table isn't drawn
   // State broadcasts arrive on every buzz; only redraw when the sheet changed.
-  const key = JSON.stringify([sheet.teams, sheet.rows, sheet.scores, sheet.current, sheet.total]);
+  const key = JSON.stringify([sheet.teams, sheet.rows, sheet.scores, sheet.current, sheet.total,
+    [...protestOpen], [...protestNotes]]);
   if (key === ssLastKey) return;
   ssLastKey = key;
+
+  // Who may protest, worked out once for the whole sheet rather than per row.
+  const canProtest = state.role === 'player' && !!myTeam(s);
 
   const table = $('#ss-table');
   table.replaceChildren();
@@ -694,6 +698,8 @@ function renderScoresheet(s) {
       // finished it. Sits after the events, so a row reads: the question, what
       // happened on it, then what you made of it.
       if (s.playtest && row.answer && state.role === 'player') ev.append(feedbackRow(row.n));
+      // ...and the way to protest it, on the question itself.
+      if (canProtest && rowPlayed(row)) ev.append(protestRow(row.n));
       // Protests, worded as MODAQ's own Events panel words them.
       for (const pr of row.protests || []) {
         const text = pr.type === 'bonus'
@@ -742,6 +748,7 @@ let answerTick = null;
 let answerSent = '';
 let answerCommitted = '';   // the last text the server accepted
 let answerWindowKey = '';   // the window the box on screen is set up for
+let answerSpokenAt = 0;     // when this player last sent their answer (the floor's Enter)
 
 // Focus the box the moment a window opens. It is open for a few seconds, so a
 // player who has to find it and click it has already lost some of them. The one
@@ -783,26 +790,47 @@ function renderAnswers(s) {
     box.disabled = false;
     box.classList.remove('append-only');
     $('#answer-note').textContent = '';
+    answerSpokenAt = 0;
     focusAnswer(box);
   }
 
   $('#answer-hint').textContent = active
-    ? "You have the buzzer. Type your answer — it's shown to the moderator when the clock runs out."
+    ? 'You have the buzzer. Type your answer and press Enter to give it. Nothing is shown until you do — or until the moderator asks for it.'
     : 'Commit an answer before the player with the buzzer gives theirs. Only the moderator sees it.';
 
-  // The countdown, and the moment the box stops taking deletions.
+  // The player with the FLOOR has no clock. They are the one being asked the
+  // question, and the moderator gives them as long as they give them: a box
+  // that shuts itself mid-answer, or sends one they hadn't finished, is the
+  // app overruling the person running the room.
+  if (active) {
+    if (answerTick) { clearInterval(answerTick); answerTick = null; }
+    $('#answer-clock').textContent = '';
+    box.disabled = false;
+    box.classList.remove('append-only');
+    if (!answerSpokenAt) {
+      $('#answer-note').textContent = 'Press Enter when that\u2019s your answer.';
+    }
+    renderSpoken(a);
+    return;
+  }
+
+  // Everyone else: the countdown is a PROMISE, not a shutter. While it runs,
+  // withdrawing costs nothing; after it you can still type and still withdraw,
+  // just not for free — the moderator will often give the floor longer, and
+  // your answer is still worth having.
   if (!answerTick) {
     answerTick = setInterval(() => {
       const now = Date.now();
       const left = Math.max(0, a.closesAt - now);
       const appendOnly = now > a.deadline;
-      $('#answer-clock').textContent = left > 0 ? `${(left / 1000).toFixed(1)}s` : 'closed';
+      $('#answer-clock').textContent = left > 0 ? `${(left / 1000).toFixed(1)}s free` : 'no longer free';
       box.classList.toggle('append-only', appendOnly);
-      $('#answer-note').textContent = appendOnly
-        ? 'Finish your word — you can add to your answer, but not take any of it back.'
-        : '';
+      $('#answer-note').textContent = left > 0
+        ? (appendOnly
+          ? 'Finish your word — you can add to your answer, but not take any of it back.'
+          : 'While this runs you can withdraw for nothing. After it you can still answer, but a withdrawal may cost you.')
+        : 'The free window has passed. You can still add to your answer — the moderator may give them longer — but withdrawing may cost you now.';
       if (left <= 0) {
-        box.disabled = true;
         clearInterval(answerTick);
         answerTick = null;
       }
@@ -834,6 +862,22 @@ socket.on('answers_committed', ({ cycleNo, committed }) => {
 // Send on every keystroke: an answer is committed as it is typed, not when a
 // button is pressed, so nothing depends on remembering to submit before the
 // clock runs out.
+// Enter gives the answer. Only the player with the floor has one to give —
+// everyone else's is committed as they type it, and stays private.
+$('#answer-box').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const a = state.snapshot?.answers;
+  if (!a || a.activePlayerId !== state.me?.id) return;
+  const text = $('#answer-box').value.trim();
+  if (!text) return;
+  socket.emit('answer_spoken', { text }, (res) => {
+    if (res?.error) { $('#answer-note').textContent = 'Could not send that: ' + res.error; return; }
+    answerSpokenAt = Date.now();
+    $('#answer-note').textContent = 'Sent. You can change it and press Enter again until the moderator rules.';
+  });
+});
+
 $('#answer-box').addEventListener('input', () => {
   const box = $('#answer-box');
   // Mirror the server's append-only rule locally so a rejected keystroke never
@@ -1308,32 +1352,67 @@ const PROTEST_REASONS = [
   { id: 'opponent', label: 'The other team was given points for an incorrect answer' }
 ];
 
-const protestNote = (t, ok = true) => {
-  const n = $('#protest-lodge-note');
-  n.textContent = t;
-  n.className = 'hint ' + (ok ? '' : 'bad');
-};
+// "Protest this question", on the question. A protest that means "whatever we
+// were on" is a different question by the time the moderator reads it, and a
+// player looking at a row of the scoresheet is looking at the thing they
+// actually want to argue about.
+// Open pickers and their last message live OUTSIDE the row, because the
+// scoresheet redraws whenever anything in the room changes — including the
+// protest you just lodged — and a picker built into the row would vanish
+// mid-sentence.
+const protestOpen = new Set();     // row numbers whose picker is open
+const protestNotes = new Map();    // row number -> what happened last time
 
-function fillProtestReasons() {
-  const sel = $('#protest-reason');
-  if (sel.options.length) return;
+function protestRow(n) {
+  const wrap = el('div', { className: 'ss-protest-start' });
+  const note = el('span', { className: 'ss-fb-note', textContent: protestNotes.get(n) || '' });
+
+  if (!protestOpen.has(n)) {
+    const start = el('button', { className: 'ss-fb-chip', textContent: 'Protest this question' });
+    start.onclick = () => {
+      protestOpen.add(n);
+      if (state.snapshot) renderScoresheet(state.snapshot);
+    };
+    wrap.append(start, note);
+    return wrap;
+  }
+
+  const sel = el('select', { className: 'ss-protest-reason' });
   for (const r of PROTEST_REASONS) sel.append(el('option', { value: r.id, textContent: r.label }));
+  const send = el('button', { className: 'ss-fb-chip', textContent: 'Tell the moderator' });
+  send.onclick = () => {
+    note.textContent = 'Telling the moderator…';
+    socket.emit('protest_lodge', { cycle: n, reason: sel.value }, (res) => {
+      const said = res?.error
+        ? (PROTEST_ERRORS[res.error] || res.error)
+        : res.existed
+          ? 'Your team already has that protest on this question.'
+          : 'Told. They will come to it at the next break.';
+      protestNotes.set(n, said);
+      if (!res?.error) protestOpen.delete(n);
+      note.textContent = said;
+      if (state.snapshot) renderScoresheet(state.snapshot);
+    });
+  };
+  const cancel = el('button', { className: 'ss-fb-chip', textContent: 'Never mind' });
+  cancel.onclick = () => {
+    protestOpen.delete(n);
+    if (state.snapshot) renderScoresheet(state.snapshot);
+  };
+  wrap.append(el('div', { className: 'ss-protest-pick' }, sel, send, cancel), note);
+  return wrap;
 }
 
-$('#protest-send').addEventListener('click', () => {
-  const reason = $('#protest-reason').value;
-  protestNote('Telling the moderator…');
-  socket.emit('protest_lodge', { reason }, (res) => {
-    if (res?.error) return protestNote(PROTEST_ERRORS[res.error] || res.error, false);
-    protestNote(res.existed
-      ? 'Your team already has that protest on this question.'
-      : 'The moderator has been told. They will come to it at the next break.');
-  });
-});
+// Whether this row can be protested at all — the same test the server applies
+// (store.protestableCycle): something has to have happened on the question.
+function rowPlayed(row) {
+  return (row?.buzzes?.length ?? 0) > 0 || !!row?.bonus || !!row?.thrownOut;
+}
 
 const PROTEST_ERRORS = {
   no_team: "The room doesn't know which team you're on yet — ask the moderator to put you on one.",
   no_question: 'There is no question to protest yet.',
+  not_started: 'Nothing has happened on that question yet.',
   cooldown: 'Just a moment — you protested a second ago.',
   too_many: 'There are already a lot of protests in this room.',
   not_player: 'Only players can protest.',
@@ -1353,8 +1432,9 @@ function renderProtests(s) {
   const canLodge = playing && Number.isFinite(Number(s.scoresheet?.current));
   if (!list.length && !canLodge) { view.classList.add('hidden'); return; }
   view.classList.remove('hidden');
-  fillProtestReasons();
-  $('#protest-lodge').classList.toggle('hidden', !canLodge);
+  $('#protest-where').textContent = canLodge
+    ? 'To protest, find the question on the scoresheet and press “Protest this question”.'
+    : '';
   $('#protest-count').textContent = list.length ? `(${list.length})` : '';
 
   const ul = $('#protest-list');
@@ -1813,7 +1893,12 @@ function setBuzzer(label, sub = '') {
   const el = $('#buzzer-label');
   el.textContent = label;
   el.classList.toggle('bz-long', label.length > 7);   // "#2 IN LINE" in a circle
-  $('#buzzer-sub').textContent = sub;
+  const subEl = $('#buzzer-sub');
+  // The Space hint is the one line that depends on where the keyboard is
+  // pointing; anything else is just a caption.
+  const armed = sub === 'or press Space';
+  subEl.dataset.armed = armed ? '1' : '0';
+  subEl.textContent = armed && !document.hasFocus() ? 'click here to use Space' : sub;
 }
 
 const BUZZ_TONES = ['ready', 'buzzed', 'mine', 'queued', 'locked'];
@@ -1880,6 +1965,24 @@ function soundCycle(cycleNo) {
 
 buzzer.addEventListener('click', buzzerAction);
 buzzer.addEventListener('touchstart', (e) => { e.preventDefault(); buzzerAction(); }, { passive: false });
+
+// Whether Space will actually do anything: it only reaches this page while the
+// window has focus, and with a call, a question doc and a chat client on screen
+// it often doesn't. The buzzer says so rather than leaving you to find out by
+// pressing it — see .buzzer.blurred and the sub-line below.
+function setWindowFocus(focused) {
+  document.body.classList.toggle('win-blur', !focused);
+  // The keyboard hint is the thing that stops being true, so it's the thing
+  // that changes.
+  const sub = $('#buzzer-sub');
+  if (sub && sub.dataset.armed === '1') {
+    sub.textContent = focused ? 'or press Space' : 'click here to use Space';
+  }
+}
+window.addEventListener('focus', () => setWindowFocus(true));
+window.addEventListener('blur', () => setWindowFocus(false));
+// A page that loads in a background tab starts unfocused.
+setWindowFocus(document.hasFocus());
 
 // Space: players buzz, staff reset. Never while genuinely typing in a field.
 // Note: a readonly/disabled input (e.g. the invite-link boxes) can't be typed

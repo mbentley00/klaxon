@@ -1842,6 +1842,17 @@ io.on('connection', (socket) => {
         emitState(room);
         return ack?.(r);
       }
+      // Force-show the floor's typed answer. The moderator can already read
+      // every committed answer; this is how they put the room's one on the
+      // record — for the room to see, and for a late withdrawal to be judged
+      // against. Nothing reveals it automatically any more (see answers.close).
+      case 'reveal_answer': {
+        const res = answers.reveal(room, payload?.playerId);
+        if (res.error) return ack?.(res);
+        emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));
+        emitState(room);
+        return ack?.({ ok: true, text: res.text });
+      }
       case 'clear_roster':
         store.clearRoster(room);
         break;
@@ -2055,10 +2066,13 @@ io.on('connection', (socket) => {
     if (!room || !ctx.playerId) return ack?.({ error: 'no_room' });
     const actor = store.protestActor(room, ctx.playerId);
     if (!actor) return ack?.({ error: 'not_player' });
+    // The player protests a ROW of the scoresheet, so what they are protesting
+    // is never in doubt — but the row has to be one the room played, which the
+    // server decides from the scoresheet it built itself.
+    const which = store.protestableCycle(room, payload?.cycle);
+    if (which.error) return ack?.({ error: which.error });
     const res = protests.lodge(room, actor, {
-      // The question is the one the room has actually reached, from the
-      // scoresheet the server itself built — never a number a client sent.
-      cycle: room.scoresheet?.current ?? null,
+      cycle: which.cycle,
       round: room.modaqState?.round ?? null,
       reason: payload?.reason,
       teams: store.activeTeams(room)
