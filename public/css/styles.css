@@ -582,6 +582,46 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
   margin-bottom: 4px; overflow-wrap: anywhere;
 }
 body.compact .scoresheet { display: none; }
+
+/* The whole game, question by question, over the page. Wide on purpose: a
+   shootout has a column per competitor, so the grid scrolls sideways inside
+   the dialog rather than squeezing the numbers. */
+.sheet-dialog {
+  width: min(96vw, 1100px); max-height: 90dvh; padding: 0;
+  border: 2px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); color: var(--ink); box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.sheet-dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.sheet-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px; border-bottom: 2px solid var(--soft);
+}
+.sheet-head h3 { margin: 0; }
+.sheet-dialog .hint { margin: 0; padding: 8px 16px 14px; }
+.sheet-scores {
+  display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 16px;
+  border-bottom: 1px solid var(--soft);
+}
+.sheet-total { display: flex; align-items: baseline; gap: 6px; }
+.sheet-total-name { font-size: .85rem; }
+.sheet-total-points { font-family: var(--mono); font-weight: 700; }
+.sheet-scroll { overflow: auto; max-height: 62dvh; padding: 0 16px; }
+.sheet-grid { border-collapse: collapse; font-size: .85rem; }
+.sheet-grid th, .sheet-grid td {
+  border: 1px solid var(--soft); padding: 3px 8px; text-align: center; white-space: nowrap;
+}
+.sheet-grid thead th {
+  position: sticky; top: 0; background: var(--surface); font-weight: 600;
+  max-width: 9em; overflow: hidden; text-overflow: ellipsis;
+}
+.sheet-grid .sheet-num {
+  position: sticky; left: 0; background: var(--surface);
+  font-family: var(--mono); font-size: .75rem; color: var(--muted);
+}
+.sheet-grid .sheet-current td, .sheet-grid tr.sheet-current { background: var(--accent-bg); }
+.sheet-got { font-weight: 700; color: var(--ok); }
+.sheet-lost { font-weight: 700; color: var(--bad); }
 @media (max-width: 900px) {
   .scoresheet .ss-scroll { max-height: 50vh; }
 }
@@ -813,7 +853,13 @@ body.compact #answer-view { display: none; }
 .sb-total { flex: none; font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
 .sb-rank { flex: none; min-width: 1.8em; font-family: var(--mono); font-size: .8rem; color: var(--muted); text-align: right; }
 .sb-row.sb-me { background: var(--accent-bg); }
-#chat-box { flex: 1 1 auto; min-width: 0; }
+#chat-box {
+  flex: 1 1 auto; min-width: 0;
+  /* Sized by the script, so no scrollbar reserved and nothing to drag. */
+  resize: none; overflow-y: hidden; min-height: 2.4em; line-height: 1.35;
+  font-family: inherit; font-size: 1rem; padding: .45em .6em;
+}
+.chat-entry .row { align-items: flex-end; }
 body.compact #shootout-view, body.compact #chat-view, body.compact #session-view { display: none; }
 
 /* What the shootout's host set up — one line above the buzzer. It is reference
@@ -897,7 +943,9 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
   font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
 }
 .chat-day::before, .chat-day::after { content: ""; flex: 1 1 auto; border-top: 1px solid var(--soft); }
-.chat-text { display: block; }
+/* Line breaks someone typed are kept (see shootout.say), so they have to be
+   drawn; long words still wrap rather than pushing the rail wider. */
+.chat-text { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Where the room got to, between the lines people typed. Quieter than the day
    dividers it borrows from: this happens twenty times a packet. */

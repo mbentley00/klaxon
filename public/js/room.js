@@ -621,7 +621,11 @@ let ssLastKey = '';
 function renderScoresheet(s) {
   const sheet = s.scoresheet;
   const view = $('#scoresheet-view');
-  const on = !!sheet && Array.isArray(sheet.teams) && sheet.teams.length === 2;
+  // Two sides or twenty: the server builds the sheet for however many the game
+  // has (SCORESHEET_MAX_TEAMS), and a shootout normally has more than two. This
+  // asked for exactly two, so every shootout past a head-to-head showed its
+  // players no scoresheet at all.
+  const on = !!sheet && Array.isArray(sheet.teams) && sheet.teams.length >= 2;
   // Each player chooses whether they want the sheet on screen (on by default);
   // hiding it collapses the panel to the score line and a Show button.
   const wanted = recall('hideScoresheet') !== '1';
@@ -629,6 +633,9 @@ function renderScoresheet(s) {
   view.classList.toggle('ss-collapsed', on && !wanted);
   document.body.classList.toggle('has-sheet', on && wanted);
   syncRail();
+  // The dialog is another view of this same sheet; it follows the room too.
+  renderFullSheet(s);
+  $('#ss-full')?.classList.toggle('hidden', !on);
   const tog = $('#ss-toggle');
   if (tog) tog.textContent = wanted ? 'Hide' : 'Show scoresheet';
   if (!on) { ssLastKey = ''; return; }
@@ -722,6 +729,77 @@ function renderScoresheet(s) {
   // Keep the question being read in view, as MODAQ does for the reader.
   if (currentRow) currentRow.scrollIntoView({ block: 'nearest' });
 }
+
+// ---- the full scoresheet, in a dialog ----
+// The rail's sheet is the room's events as they happen — what MODAQ's Events
+// panel shows. This is the other view of the same game: every competitor down
+// the top, every question down the side, and what each of them scored on it.
+// Built from the same player-safe sheet, so there is nothing here the room has
+// not already heard, and no answer lines at all.
+function renderFullSheet(s) {
+  const dialog = $('#sheet-dialog');
+  if (!dialog?.open) return;
+  const sheet = s.scoresheet;
+  const grid = $('#sheet-grid');
+  grid.replaceChildren();
+  if (!sheet || !Array.isArray(sheet.teams) || !sheet.teams.length) {
+    $('#sheet-title').textContent = 'Scoresheet';
+    $('#sheet-scores').textContent = 'Nothing has been read yet.';
+    return;
+  }
+
+  $('#sheet-title').textContent = sheet.current ? `Scoresheet — through question ${sheet.current}` : 'Scoresheet';
+  // The totals, in the same order as the columns under them.
+  $('#sheet-scores').replaceChildren(...sheet.teams.map((team, i) => el('span', { className: 'sheet-total' },
+    el('span', { className: 'sheet-total-name', textContent: team.name }),
+    el('span', { className: 'sheet-total-points', textContent: String(sheet.scores?.[i] ?? 0) }))));
+
+  const head = el('tr');
+  head.append(el('th', { className: 'sheet-num', textContent: '#' }));
+  for (const team of sheet.teams) head.append(el('th', { textContent: team.name }));
+  grid.append(el('thead', {}, head));
+
+  const byN = new Map((sheet.rows || []).map((r) => [r.n, r]));
+  const body = el('tbody');
+  const total = Math.max(sheet.total || 0, sheet.current || 0, ...(sheet.rows || []).map((r) => r.n), 0);
+  for (let n = 1; n <= total; n++) {
+    const row = byN.get(n);
+    const tr = el('tr', { className: n === sheet.current ? 'sheet-current' : '' });
+    tr.append(el('td', { className: 'sheet-num', textContent: String(n) }));
+    for (let i = 0; i < sheet.teams.length; i++) {
+      // What this competitor scored on this question: their buzz, plus the
+      // bonus if they took one.
+      let points = 0;
+      let had = false;
+      for (const z of row?.buzzes || []) {
+        if (z.team === i) { points += z.points; had = true; }
+      }
+      if (row?.bonus && row.bonus.team === i) { points += row.bonus.total; had = true; }
+      if (row?.bonus && row.bonus.bounceback && row.bonus.team !== i && sheet.teams.length === 2) {
+        points += row.bonus.bounceback;
+        had = true;
+      }
+      tr.append(el('td', {
+        className: 'sheet-cell' + (had ? (points > 0 ? ' sheet-got' : ' sheet-lost') : ''),
+        textContent: had ? String(points) : ''
+      }));
+    }
+    body.append(tr);
+  }
+  grid.append(body);
+}
+
+$('#ss-full')?.addEventListener('click', () => {
+  const dialog = $('#sheet-dialog');
+  if (!dialog) return;
+  if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
+  if (state.snapshot) renderFullSheet(state.snapshot);
+});
+$('#sheet-close')?.addEventListener('click', () => $('#sheet-dialog')?.close());
+// Clicking the backdrop closes it, the way a dialog should.
+$('#sheet-dialog')?.addEventListener('click', (e) => {
+  if (e.target === $('#sheet-dialog')) $('#sheet-dialog').close();
+});
 
 $('#ss-toggle')?.addEventListener('click', () => {
   if (recall('hideScoresheet') === '1') forget('hideScoresheet'); else remember('hideScoresheet', '1');
@@ -1198,11 +1276,12 @@ function sendChat() {
   const text = box.value.trim();
   if (!text) return;
   box.value = '';
+  autosizeChat();
   $('#chat-mentions').classList.add('hidden');
   mentionMatches = [];
   socket.emit('chat_say', { text }, (res) => {
     // A message the server refused goes back in the box rather than vanishing.
-    if (res?.error) { box.value = text; say(CHAT_ERRORS[res.error] || res.error, false); }
+    if (res?.error) { box.value = text; autosizeChat(); say(CHAT_ERRORS[res.error] || res.error, false); }
   });
 }
 
@@ -1272,6 +1351,18 @@ function insertMention(person) {
   box.focus();
 }
 
+// The box is as tall as what is in it, up to a point — past that it scrolls,
+// because a chat box that eats the log it sits under is worse than one you
+// scroll. Back to one line the moment it is empty again.
+const CHAT_BOX_MAX_PX = 140;
+function autosizeChat() {
+  const box = $('#chat-box');
+  if (!box) return;
+  box.style.height = 'auto';
+  box.style.height = `${Math.min(box.scrollHeight, CHAT_BOX_MAX_PX)}px`;
+  box.style.overflowY = box.scrollHeight > CHAT_BOX_MAX_PX ? 'auto' : 'hidden';
+}
+$('#chat-box')?.addEventListener('input', autosizeChat);
 $('#chat-box')?.addEventListener('input', renderMentionPicker);
 $('#chat-box')?.addEventListener('blur', () => $('#chat-mentions').classList.add('hidden'));
 
@@ -1346,7 +1437,12 @@ $('#chat-box')?.addEventListener('keydown', (e) => {
     return;
   }
   if (picking && e.key === 'Escape') { list.classList.add('hidden'); mentionMatches = []; return; }
-  if (e.key === 'Enter') sendChat();
+  // Enter sends; shift-Enter is a new line, the way every chat client works.
+  // Without the guard the newline would land AND the message would go.
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChat();
+  }
 });
 
 // Messages arrive on their own event so a chat line doesn't wait for the next
@@ -2053,6 +2149,26 @@ function renderBuzzer(s) {
   } else if (state.role === 'player') {
     const pos = q.findIndex((x) => x.playerId === state.me?.id);
     const canBuzz = s.phase === 'open' && pos < 0;
+    // "Buzzed!" is written the moment the button is pressed and cleared when
+    // the moderator resets the buzzer — but withdrawing takes you out of the
+    // queue without any reset, so it sat there under a buzzer that was ready
+    // again. Out of the queue means it no longer describes anything.
+    //
+    // The grace is for the moment between a press and the state that confirms
+    // it. Nothing else is guaranteed to arrive once it passes, so the check
+    // comes back on its own rather than waiting for a render that may never
+    // happen.
+    if (pos < 0) {
+      const since = Date.now() - lastPressAt;
+      if (since > PRESS_GRACE_MS) {
+        $('#buzz-feedback').textContent = '';
+      } else {
+        clearTimeout(feedbackTimer);
+        feedbackTimer = setTimeout(() => {
+          if (state.snapshot) renderBuzzer(state.snapshot);
+        }, PRESS_GRACE_MS - since + 50);
+      }
+    }
     buzzer.disabled = !canBuzz;
     tone = pos === 0 ? 'mine' : pos > 0 ? 'queued' : has ? 'locked' : canBuzz ? 'ready' : 'locked';
     setBuzzer(
@@ -2078,6 +2194,7 @@ function buzzerAction() {
 }
 function fireBuzz() {
   $('#buzz-feedback').textContent = 'Buzzed!';
+  lastPressAt = Date.now();
   navigator.vibrate?.(40);
   // Play the sound NOW, before the round trip: the press itself is certain.
   // Who WON the buzz stays unknown until the server resolves the window —
@@ -2098,6 +2215,9 @@ function fireBuzz() {
 // several: the first press opens one, and each player buzzing in behind them
 // opens the next. Every one of those is a buzz the room should hear — the
 // reader above all, who has to stop reading again.
+let lastPressAt = 0;            // when this page last pressed the buzzer
+const PRESS_GRACE_MS = 1200;    // how long "Buzzed!" stands before the queue confirms it
+let feedbackTimer = null;
 let justPressed = false;        // our own press already made the noise
 let justPressedTimer = null;
 function soundWave(pending) {
@@ -2310,7 +2430,14 @@ function renderQueue(s) {
 }
 $('#ctl-next').onclick = () => socket.emit('reader_action', { action: 'next_buzz' });
 $('#ctl-clear').onclick = () => socket.emit('reader_action', { action: 'clear_queue' });
-$('#ctl-withdraw').onclick = () => socket.emit('withdraw');
+$('#ctl-withdraw').onclick = () => socket.emit('withdraw', {}, (res) => {
+  // Taking the buzz back is this player's own action, so the label goes now
+  // rather than waiting out the grace that protects a fresh press.
+  if (res?.ok) {
+    lastPressAt = 0;
+    $('#buzz-feedback').textContent = '';
+  }
+});
 
 // ---- game options (staff) ----
 function renderOptions(s) {

@@ -142,6 +142,7 @@
       <section id="scoresheet-view" class="scoresheet hidden" aria-label="Scoresheet">
         <div class="ss-head">
           <div id="ss-status" class="ss-score"></div>
+          <button id="ss-full" class="tiny ghost">Full scoresheet</button>
           <button id="ss-toggle" class="tiny ghost">Hide</button>
         </div>
         <div class="ss-scroll">
@@ -158,7 +159,11 @@
           <p id="chat-typing" class="chat-typing"></p>
           <ul id="chat-mentions" class="chat-mentions hidden"></ul>
           <div class="row">
-            <input id="chat-box" type="text" maxlength="400" autocomplete="off" placeholder="Say something" />
+            <!-- Grows with what you are writing (see autosizeChat): a long
+                 message in a one-line box is written blind. Enter sends,
+                 shift-Enter starts a new line. -->
+            <textarea id="chat-box" rows="1" maxlength="400" autocomplete="off"
+                      placeholder="Say something"></textarea>
             <button id="chat-send" class="ghost tiny">Send</button>
           </div>
         </div>
@@ -313,6 +318,23 @@
          you want it, not beside the buzzer when you don't. -->
     <a id="report-link" class="hint report-link" href="/feedback">Report bugs or feature requests</a>
   </main>
+
+  <!-- The whole scoresheet, question by question, in a dialog over the page —
+       the same grid the moderator reads, built from the player-safe sheet the
+       server sends (see store.buildPlayerScoresheet). No answer lines: the
+       room is still playing. -->
+  <dialog id="sheet-dialog" class="sheet-dialog" aria-label="Scoresheet">
+    <div class="sheet-head">
+      <h3 id="sheet-title">Scoresheet</h3>
+      <button id="sheet-close" class="tiny ghost">Close</button>
+    </div>
+    <div id="sheet-scores" class="sheet-scores"></div>
+    <div class="sheet-scroll">
+      <table id="sheet-grid" class="sheet-grid"></table>
+    </div>
+    <p class="hint">Points each competitor scored, question by question. What was
+      asked and what the answer was stay with the moderator until the room is done.</p>
+  </dialog>
 
   <script src="/socket.io/socket.io.js"></script>
   <script type="module" src="/js/room.js"></script>

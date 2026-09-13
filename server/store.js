@@ -1147,7 +1147,9 @@ export function publicState(room) {
         // The game on screen counts as the current packet's only while it IS
         // that packet's: between moving to a packet and its first game update,
         // the sheet is still the packet just left — already filed under it.
-        ...shootout.board(room, shootoutCurrentScores(room), room.shootoutSession?.current ?? null),
+        ...shootout.board(room, shootoutCurrentScores(room), room.shootoutSession?.current ?? null,
+          // Everyone in the room, so a late joiner is on the board at once.
+          [...room.members.values()].filter((m) => m.role === 'player').map((m) => displayName(m))),
         // What's being played and what the host wants the room to know.
         session: shootout.publicSession(room.shootoutSession)
       }
@@ -1285,7 +1287,8 @@ export function setShootoutCurrent(room, packetId) {
 export function resetShootout(room) {
   shootout.reset(room);
   persistRooms();
-  return shootout.board(room, shootout.currentScores(room.scoresheet));
+  return shootout.board(room, shootout.currentScores(room.scoresheet), room.shootoutSession?.current ?? null,
+    [...room.members.values()].filter((m) => m.role === 'player').map((m) => displayName(m)));
 }
 
 export function chatSay(room, actor, text) {
@@ -1376,7 +1379,11 @@ const SCORESHEET_MAX_ROWS = 100;
 const SCORESHEET_MAX_PLAYERS = 12;
 // A match is nearly always two sides, but MODAQ now reads games with more —
 // and a shootout is one per competitor, which is the whole point of it.
-const SCORESHEET_MAX_TEAMS = 16;
+// A two-team match has two; a shootout has as many as turn up, and a Discord
+// room of twenty-odd is the normal case rather than the extreme one. Sixteen
+// silently dropped everyone after the sixteenth from the scoresheet AND from
+// the leaderboard built out of it.
+const SCORESHEET_MAX_TEAMS = 40;
 const label = (v) => String(v ?? '').slice(0, 80);
 const pts = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 

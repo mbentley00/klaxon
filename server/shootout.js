@@ -113,7 +113,15 @@ export function bankPacket(room, packetId, scores) {
  * game does; `currentPacket` is the packet that game is, and is left out of the
  * banked half so it isn't counted twice.
  */
-export function board(room, current = {}, currentPacket = null) {
+/**
+ * `people` is everyone in the room: a competitor is on the board from the
+ * moment they join, on nothing, rather than when the reader's MODAQ next
+ * pushes a game that happens to know about them. That push is debounced and
+ * only fires when the game changes, so a player who arrived between questions
+ * could sit unlisted for a whole tossup — on a board whose entire job is to
+ * say who is playing.
+ */
+export function board(room, current = {}, currentPacket = null, people = []) {
   const s = state(room);
   const past = {};
   let packets = 0;
@@ -131,6 +139,10 @@ export function board(room, current = {}, currentPacket = null) {
   }
   packets += s.packets || 0;
   const names = new Set([...Object.keys(past), ...Object.keys(current)]);
+  for (const name of people) {
+    const clean_ = clean(name, 40);
+    if (clean_) names.add(clean_);
+  }
   const rows = [...names].map((name) => ({
     name,
     banked: past[name] || 0,
@@ -190,9 +202,22 @@ export function mentionsIn(text, people) {
  * room: it is never an answer, never a protest, and is not gated on any of the
  * game's state. In a room where everyone is on their own it is why people came.
  */
+// A chat line keeps the line breaks someone typed (shift-Enter in the box) —
+// runs of spaces still collapse, and a wall of blank lines is capped at one, so
+// nobody can push the log off the screen with the return key.
+const cleanLines = (v, cap) => String(v ?? '')
+  .replace(/\r\n?/g, '\n')
+  .replace(/[^\S\n]+/g, ' ')
+  .replace(/\n{3,}/g, '\n\n')
+  .split('\n')
+  .map((line) => line.trim())
+  .join('\n')
+  .trim()
+  .slice(0, cap);
+
 export function say(room, actor, text, people = []) {
   if (!room.chat) room.chat = [];
-  const body = clean(text, MAX_CHAT_TEXT);
+  const body = cleanLines(text, MAX_CHAT_TEXT);
   if (!body) return { error: 'empty' };
 
   const now = Date.now();
