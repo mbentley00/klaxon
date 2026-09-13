@@ -524,7 +524,13 @@ function renderPipButton() {
   if (!b) return;
   // Players are the ones stuck behind a fullscreen call; staff drive the room
   // from this page (or MODAQ) with it in front of them.
-  const show = pipSupported && state.role === 'player';
+  //
+  // Never in a shootout: there the page is the game — the chat, the typed
+  // answer, the question feedback, the leaderboard — and a buzzer floating over
+  // everything else invites you to sit on the one thing it can do while the
+  // rest of the room happens somewhere you aren't looking.
+  const shootout = !!state.snapshot?.settings?.shootout;
+  const show = pipSupported && state.role === 'player' && !shootout;
   b.classList.toggle('hidden', !show);
   $('#pip-hint')?.classList.toggle('hidden', !show);
   b.textContent = pipWin ? 'Buzzer popped out ✓' : 'Pop out buzzer ↗';

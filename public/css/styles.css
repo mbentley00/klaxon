@@ -279,6 +279,15 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 .buzzer.pressed:not(:disabled) { transform: translate(8px, 8px); box-shadow: 0 0 0 var(--shadow-ink); }
 .feedback { font-family: var(--display); text-align: center; font-weight: 500; min-height: 1.4em; color: var(--accent-deep); }
 
+/* Everything under the buzzer lines up with it. The stuck-buzzer alert and the
+   pop-out button are inline-block, so they had been hanging off the left edge
+   of a column whose every other item was centred. */
+#buzz-area { text-align: center; }
+#buzz-area > .hint { margin-left: auto; margin-right: auto; max-width: 34em; }
+/* `margin-inline: auto` centres the block-level ones (the stuck-buzzer alert is
+   one); text-align does the rest for the inline-block ones. */
+#buzz-area > button { margin: 4px auto 0; }
+
 .badge { font-family: var(--mono); font-size: .68rem; padding: .12em .5em; border: 1.5px solid var(--line); border-radius: var(--radius); text-transform: uppercase; }
 
 /* panels / cards inside the room */
@@ -597,7 +606,12 @@ body.compact .scoresheet { display: none; }
 .recent-meta { font-size: .78rem; color: var(--muted); white-space: nowrap; }
 
 /* Quiet link out of a room to the feedback form. */
-.report-link { display: inline-block; margin-top: 6px; color: var(--muted); }
+.report-link {
+  display: inline-block; margin-top: 6px; color: var(--muted);
+  /* Last thing on the page, centred under everything rather than hung off the
+     left edge of whatever panel happens to be above it. */
+  text-align: center; justify-self: center; font-size: .85rem;
+}
 .report-link:hover { color: var(--ink); }
 body.compact .report-link { display: none; }
 
@@ -823,18 +837,19 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
   }
   /* Sharing the rail's height: each panel scrolls inside its own share of it
      rather than running off the bottom of the screen. */
+  /* The CHAT keeps its fixed height (see .chat-log): a window that resizes as
+     people talk is one you lose your place in, and it sits next to the buzzer.
+     The scoresheet is the one that gives — it's a table with its own scrollbar,
+     so it takes whatever height the chat leaves and scrolls inside it. */
   body.has-sheet .side-rail > #scoresheet-view, body.has-chat .side-rail > #scoresheet-view {
-    display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; max-height: 60%;
+    display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto;
   }
   body.has-sheet .side-rail > #scoresheet-view .ss-scroll,
   body.has-chat .side-rail > #scoresheet-view .ss-scroll {
     flex: 1 1 auto; max-height: none; min-height: 110px;
   }
   body.has-sheet .side-rail > #chat-view, body.has-chat .side-rail > #chat-view {
-    min-height: 0; flex: 1 1 auto;
-  }
-  body.has-sheet .side-rail > #chat-view .chat-log, body.has-chat .side-rail > #chat-view .chat-log {
-    flex: 1 1 auto; height: auto; min-height: 110px;
+    flex: 0 0 auto;
   }
 }
 

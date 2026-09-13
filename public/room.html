@@ -115,7 +115,6 @@
         <button id="pip-open" class="ghost tiny hidden">Pop out buzzer ↗</button>
         <p id="pip-hint" class="hint hidden">Keeps the buzzer on top of Zoom. Click it (or press Space
           while it's focused) to buzz.</p>
-        <a id="report-link" class="hint report-link" href="/feedback">Something wrong? Tell Michael</a>
       </section>
 
       <!-- Buzz queue / order — always on screen so nothing below it jumps -->
@@ -308,6 +307,10 @@
       <div id="t-next"></div>
       <div id="t-rooms" class="t-rooms"></div>
     </section>
+
+    <!-- Where to say something is wrong, at the foot of the page: findable when
+         you want it, not beside the buzzer when you don't. -->
+    <a id="report-link" class="hint report-link" href="/feedback">Report bugs or feature requests</a>
   </main>
 
   <script src="/socket.io/socket.io.js"></script>
