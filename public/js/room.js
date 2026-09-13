@@ -19,7 +19,9 @@ if (isStaffRole(urlRole)) {
   }
 }
 
-const state = { me: null, role: null, snapshot: null, tournament: null, offlineIds: null, soundedWave: null };
+const state = { me: null, role: null, snapshot: null, tournament: null, offlineIds: null, soundedWave: null,
+  // Whether the socket is up. A page on a phone spends half its life suspended.
+  connected: false };
 
 // ---- connect ----
 const socket = io({ transports: ['websocket', 'polling'], reconnection: true });
@@ -33,6 +35,8 @@ $('#room-code').textContent = code;
 document.title = `${code} · Klaxon`;
 
 socket.on('connect', () => {
+  state.connected = true;
+  if (state.snapshot) renderBuzzer(state.snapshot);
   setConn('sync', 'syncing…');
   // Decide what to show IMMEDIATELY — don't block on clock sync. (Awaiting the
   // sync first is what caused the join screen to flash before the reader view.)
@@ -43,8 +47,35 @@ socket.on('connect', () => {
     .catch(() => setConn('online', 'connected'));
 });
 
-socket.on('disconnect', () => setConn('offline', 'reconnecting…'));
+socket.on('disconnect', () => {
+  // The buzzer must stop looking live the moment it isn't. A press that goes
+  // nowhere is worse than a button that says why: on a phone the page is
+  // suspended whenever the screen is off, and what you come back to is the
+  // room as it was when you locked it.
+  state.connected = false;
+  if (state.snapshot) renderBuzzer(state.snapshot);
+  setConn('offline', 'reconnecting…');
+});
 socket.io.on('reconnect_attempt', () => setConn('offline', 'reconnecting…'));
+
+// Coming back to the page. A phone freezes a backgrounded tab — its timers
+// included — so socket.io's own retry can be a long way off when the screen
+// comes on again, and until it fires the page is showing a room that has moved
+// on. Ask at once instead of waiting for the backoff to come round.
+function wakeUp() {
+  if (document.visibilityState !== 'visible') return;
+  if (!socket.connected) {
+    setConn('offline', 'reconnecting…');
+    try { socket.connect(); } catch { /* already trying */ }
+  } else {
+    // Connected, but the clock stopped while we were asleep and a buzz is
+    // timed against it.
+    clock.sync(5).then(() => { latPill.textContent = `~${Math.round(clock.rtt)}ms`; }).catch(() => undefined);
+  }
+}
+document.addEventListener('visibilitychange', wakeUp);
+window.addEventListener('pageshow', wakeUp);
+window.addEventListener('focus', wakeUp);
 
 // Server RTT probes — answer immediately so the server can measure us. Two
 // channels (a routine probe and one the server fires right after a buzz) let it
@@ -2148,7 +2179,9 @@ function renderBuzzer(s) {
     setBuzzer(has ? 'RESET' : 'READY', has ? 'or press Space' : '');
   } else if (state.role === 'player') {
     const pos = q.findIndex((x) => x.playerId === state.me?.id);
-    const canBuzz = s.phase === 'open' && pos < 0;
+    // Nothing reaches the server while the socket is down, so the buzzer says
+    // so rather than taking a press that will never arrive.
+    const canBuzz = state.connected !== false && s.phase === 'open' && pos < 0;
     // "Buzzed!" is written the moment the button is pressed and cleared when
     // the moderator resets the buzzer — but withdrawing takes you out of the
     // queue without any reset, so it sat there under a buzzer that was ready
@@ -2170,13 +2203,15 @@ function renderBuzzer(s) {
       }
     }
     buzzer.disabled = !canBuzz;
-    tone = pos === 0 ? 'mine' : pos > 0 ? 'queued' : has ? 'locked' : canBuzz ? 'ready' : 'locked';
+    const offline = state.connected === false;
+    tone = offline ? 'locked' : pos === 0 ? 'mine' : pos > 0 ? 'queued' : has ? 'locked' : canBuzz ? 'ready' : 'locked';
     setBuzzer(
-      pos === 0 ? "YOU'RE IN" : pos > 0 ? `#${pos + 1} IN LINE` : canBuzz ? 'BUZZ' : 'LOCKED',
-      pos === 0 ? 'you have the floor'
-        : pos > 0 ? 'wait your turn'
-          : canBuzz ? 'or press Space'
-            : has ? `${q[0].name} buzzed` : 'not open');
+      offline ? 'OFFLINE' : pos === 0 ? "YOU'RE IN" : pos > 0 ? `#${pos + 1} IN LINE` : canBuzz ? 'BUZZ' : 'LOCKED',
+      offline ? 'reconnecting…'
+        : pos === 0 ? 'you have the floor'
+          : pos > 0 ? 'wait your turn'
+            : canBuzz ? 'or press Space'
+              : has ? `${q[0].name} buzzed` : 'not open');
   } else {
     buzzer.disabled = true;
     tone = has ? 'locked' : 'ready';
