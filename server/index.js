@@ -125,6 +125,13 @@ app.get('/api/rooms-summary', (req, res) => {
   res.json({ rooms });
 });
 
+// Games their hosts put on the home page. Deliberately thin: a code, a name,
+// how many are in there, and where the reading has got to — enough to decide
+// whether to join, and nothing that isn't already on the join page.
+app.get('/api/public-rooms', (_req, res) => {
+  res.json({ rooms: store.listPublicRooms() });
+});
+
 app.get('/api/rooms/:code', (req, res) => {
   const room = store.getRoom(req.params.code);
   if (!room) return res.status(404).json({ error: 'not_found' });
@@ -1613,6 +1620,11 @@ io.on('connection', (socket) => {
       if (!String(payload?.team ?? known ?? '').trim()) return ack?.({ error: 'team_required' });
     }
 
+    // The host called the game over. Staff still get in — the scoresheet, the
+    // exports and the log are wanted most right after the end, and reopening
+    // the room has to be possible from inside it.
+    if (!staffRole && room.ended) return ack?.({ error: 'game_ended' });
+
     const member = store.joinRoom(room, {
       playerId: payload?.playerId,
       name: payload?.name,
@@ -1692,6 +1704,7 @@ io.on('connection', (socket) => {
     const ctx = sock.get(socket.id);
     const room = ctx && store.getRoom(ctx.roomCode);
     if (!room || !ctx.playerId) return;
+    if (room.ended) return;   // the host called it: the buzzer is off
 
     const arrival = Date.now();
     // Client tells us, in *server time*, when it thinks the press happened
@@ -1887,6 +1900,27 @@ io.on('connection', (socket) => {
         emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));
         emitState(room);
         return ack?.({ ok: true, text: res.text });
+      }
+      // The host calls the game over: everyone is sent home, nobody new gets
+      // in, and it comes off the home page. Reversible on purpose (`end:
+      // false`) — it sits next to several other buttons, and a misclick
+      // should not cost the host the room.
+      case 'end_game': {
+        const end = payload?.end !== false;
+        const ended = store.endGame(room, end, store.memberName(room, ctx.playerId));
+        if (end) {
+          for (const m of [...room.members.values()]) {
+            if (m.role !== 'player') continue;
+            kickPlayer(room, m.id, 'ended');
+            // They are out of the room, not merely quiet: the player list has
+            // to say so, or the host is left looking at a roomful of ghosts.
+            store.setConnected(room, m.id, false);
+          }
+          store.resetBuzzer(room, { by: store.memberName(room, ctx.playerId), judged: true });
+        }
+        io.to(room.code).emit('game_ended', { ended });
+        emitState(room);
+        return ack?.({ ok: true, ended });
       }
       case 'clear_roster':
         store.clearRoster(room);

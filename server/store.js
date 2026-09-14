@@ -53,6 +53,9 @@ const serializeRoom = (r) => ({
   // What the room DID: clears, withdrawals, who joined, options changed. The
   // companion to buzzLog, and the thing you read when a buzz went missing.
   log: r.log || [],
+  // The host said the game was over (see endGame). Persisted, or a restart
+  // would quietly reopen a room the host had closed.
+  ended: r.ended || null,
   // What an upheld protest left to be played here (see createReplayRoom).
   replay: r.replay || null,
   // Protests the teams lodged (see protests.js). Durable: a protest outlives
@@ -191,7 +194,11 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
       answerGraceSeconds: clampNum(eff.answerGraceSeconds, 0, 10, DEFAULTS.answerGraceSeconds),
       // Every connected buzzer is its own scored individual rather than part of
       // a team — a Discord shootout, where usernames are the players.
-      shootout: eff.shootout === true
+      shootout: eff.shootout === true,
+      // Anyone may find this game from the home page and join it (see
+      // listPublicRooms). Off unless the host asks for it: a room's code is
+      // the only thing keeping strangers out of it.
+      listed: eff.listed === true
     },
     // Roster loaded from a QBJ registration file, so buzzers can be labelled
     // with the real player who is sitting behind them (see setRoster).
@@ -342,6 +349,61 @@ export function listTournaments() {
       requireReaderAccounts: !!t.requireReaderAccounts
     }))
     .sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || a.name.localeCompare(b.name));
+}
+
+/**
+ * Games the host has put on the home page — mostly Discord readings, where the
+ * point is that anybody can wander in.
+ *
+ * Listing is a claim that the game is happening NOW, so an empty room is not
+ * listed however its checkbox is set: a host who closed the laptop without
+ * unticking it would otherwise leave a dead room on the front page all week.
+ * Somebody has to be connected — the host counts, since a room waiting for its
+ * first player is exactly the one worth advertising.
+ */
+export function listPublicRooms(limit = 12) {
+  const out = [];
+  for (const room of rooms.values()) {
+    if (!room.settings?.listed || room.ended) continue;
+    const members = [...room.members.values()];
+    const players = members.filter((m) => m.role === 'player' && m.connected).length;
+    const host = members.some((m) => m.role !== 'player' && m.role !== 'spectator' && m.connected);
+    if (!host && !players) continue;
+    const session = room.shootoutSession;
+    const packets = session?.packets ?? [];
+    const at = packets.findIndex((p) => p.id === session?.current);
+    out.push({
+      code: room.code,
+      name: session?.name || room.name || 'Klaxon room',
+      shootout: !!room.settings.shootout,
+      players,
+      host,
+      // Where the reading has got to, when there is one.
+      packet: at >= 0 ? { at: at + 1, of: packets.length, name: packets[at].name } : null,
+      startedAt: room.createdAt || null
+    });
+  }
+  // The busiest first, then the ones with a host waiting, then the newest: a
+  // player scanning this list wants a game in progress.
+  out.sort((a, b) => b.players - a.players || Number(b.host) - Number(a.host) || (b.startedAt || 0) - (a.startedAt || 0));
+  return out.slice(0, limit);
+}
+
+/**
+ * The host says the game is over.
+ *
+ * Not a deletion: the scoresheet, the chat and the log are the record of what
+ * happened, and they are wanted most right after the end. It closes the room to
+ * players — they are sent home, and nobody new gets in — takes it off the home
+ * page, and can be undone, because "End the game" is one click next to several
+ * others and a host who hits it by mistake should not lose the room.
+ */
+export function endGame(room, ended, by = null) {
+  room.ended = ended ? { at: Date.now(), by } : null;
+  if (ended) room.settings.listed = false;
+  pushLog(room, { type: ended ? 'end_game' : 'reopen_game', by });
+  persistRooms(true);
+  return room.ended;
 }
 
 // schedule: [{ round, room, teams:[..] }] -> we keep it loose on purpose so a
@@ -1109,6 +1171,7 @@ export function setOptions(room, opts = {}) {
   if (typeof opts.modaqLite === 'boolean') room.settings.modaqLite = opts.modaqLite;
   if (typeof opts.typedAnswers === 'boolean') room.settings.typedAnswers = opts.typedAnswers;
   if (typeof opts.lockedAnswers === 'boolean') room.settings.lockedAnswers = opts.lockedAnswers;
+  if (typeof opts.listed === 'boolean') room.settings.listed = opts.listed;
   if (typeof opts.shootout === 'boolean') {
     room.settings.shootout = opts.shootout;
     if (opts.shootout) room.settings.requireTeam = false;
@@ -1225,6 +1288,10 @@ export function publicState(room) {
     replay: room.replay || null,
     // A shootout's leaderboard across every packet of the session, and its
     // chat (see shootout.js). Null in a room that isn't one.
+    // The host put this game on the home page, and/or called it over. Both are
+    // the room's business, not a secret: the page says so on every screen.
+    listed: room.settings.listed === true,
+    ended: room.ended ? { at: room.ended.at, by: room.ended.by || null } : null,
     shootout: room.settings.shootout
       ? {
         // The game on screen counts as the current packet's only while it IS
@@ -1506,6 +1573,10 @@ function logLine(e, room) {
       return ['PLAYERS', `${who} removed ${e.count} players`];
     case 'stuck_alert':
       return ['ALERT', `${e.name || e.playerId} says the buzzer is stuck`];
+    case 'end_game':
+      return ['END', `${who} ended the game — players sent home, room off the home page`];
+    case 'reopen_game':
+      return ['END', `${who} reopened the game`];
     case 'set_options':
       return ['OPTIONS', `settings changed \u2014 on: ${optionSummary(e.settings)}`];
     case 'set_roster':

@@ -100,6 +100,17 @@ socket.on('kicked', (info) => {
     msg.className = 'msg good';
     return;
   }
+  if (info?.reason === 'ended') {
+    // Not a removal: the game is simply over. Say so where they are, and leave
+    // the door shut — the room takes no more players.
+    $('#stage').classList.add('hidden');
+    document.body.classList.remove('has-chat', 'has-sheet');
+    showGate('player');
+    $('#gate-join').textContent = 'Join';
+    $('#gate-msg').textContent = 'The host ended this game. Thanks for playing!';
+    $('#gate-msg').className = 'msg good';
+    return;
+  }
   alert('You were removed from this room by the reader.');
   location.href = '/';
 });
@@ -292,9 +303,11 @@ function doJoin(role, name, team, roster) {
       showGate('player');
       $('#gate-msg').textContent = resp?.error === 'no_room'
         ? `Room ${code} doesn't exist — it may have expired. Check the code or ask for a new link.`
-        : resp?.error === 'team_required'
-          ? 'This room requires a team name — enter yours to join.'
-          : 'Could not join — try again.';
+        : resp?.error === 'game_ended'
+          ? 'This game is over — the host closed it. Ask them for a new room.'
+          : resp?.error === 'team_required'
+            ? 'This room requires a team name — enter yours to join.'
+            : 'Could not join — try again.';
       if (resp?.error === 'team_required') $('#gate-team').focus();
       return;
     }
@@ -616,6 +629,7 @@ function applyState(s) {
   renderBuzzer(s);
   renderQueue(s);
   renderOptions(s);
+  renderEnded(s);
   renderStuck(s);
   renderRoster(s);
   renderPlayers(s);
@@ -2551,6 +2565,7 @@ function renderOptions(s) {
   $('#opt-autoclear').checked = !!s.settings?.autoClear;
   $('#opt-require-team').checked = !!s.settings?.requireTeam;
   $('#opt-player-alerts').checked = s.settings?.playerAlerts !== false;
+  $('#opt-listed').checked = !!s.listed;
   $('#opt-withdraw-row').classList.toggle('hidden', !s.settings?.queueMode);
   // Auto-clear only applies in lock-to-first mode (server ignores it otherwise).
   $('#opt-autoclear').closest('.toggle').classList.toggle('hidden', !!s.settings?.queueMode);
@@ -2588,6 +2603,37 @@ $('#opt-require-team').onchange = (e) =>
   socket.emit('reader_action', { action: 'set_options', options: { requireTeam: e.target.checked } });
 $('#opt-player-alerts').onchange = (e) =>
   socket.emit('reader_action', { action: 'set_options', options: { playerAlerts: e.target.checked } });
+$('#opt-listed').onchange = (e) =>
+  socket.emit('reader_action', { action: 'set_options', options: { listed: e.target.checked } });
+
+// ---- ending the game (staff) ----
+// It sends everybody home, so it asks first. Reopening doesn't: nothing is
+// lost by it, and a host who ended the game by mistake wants it back now.
+$('#end-game').onclick = () => {
+  if (!confirm('End the game for everyone? Players are sent home and the room stops taking new ones. You can reopen it.')) return;
+  socket.emit('reader_action', { action: 'end_game', end: true });
+};
+$('#reopen-game').onclick = () => socket.emit('reader_action', { action: 'end_game', end: false });
+
+function renderEnded(s) {
+  const ended = s.ended;
+  const banner = $('#ended-banner');
+  banner.classList.toggle('hidden', !ended);
+  if (ended) {
+    const when = new Date(ended.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    banner.textContent = `This game ended at ${when}${ended.by ? ` — ${ended.by} closed it` : ''}.`;
+  }
+  $('#end-game').classList.toggle('hidden', !!ended);
+  $('#reopen-game').classList.toggle('hidden', !ended);
+  // The buzzer is the biggest thing on the page and it would still say READY.
+  // renderPhase/renderBuzzer ran first and will put it back when the game
+  // reopens, so this only has to overrule them while the game is over.
+  if (ended) {
+    $('#phase-label').textContent = 'Game over';
+    $('#buzzer').disabled = true;
+    $('#buzzer-label').textContent = 'OVER';
+  }
+}
 // Switching to a MODAQ mode moves this staff view over to the MODAQ reader.
 // The switch is acknowledged before navigating so the MODAQ page never lands
 // on a room that still says "standard buzzer" (it would bounce straight back).

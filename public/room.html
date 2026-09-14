@@ -62,6 +62,10 @@
   </div>
 
   <main id="stage" class="stage hidden">
+    <!-- The host called the game over. First thing on the page, because
+         everything below it still looks playable and isn't. -->
+    <div id="ended-banner" class="ended-banner hidden" role="status"></div>
+
     <!-- Discord shootout: what's being played, where the reader has got to, and
          the one rule players need. One line above the buzzer — it's reference,
          not something anybody reads twice. -->
@@ -294,7 +298,16 @@
         <option value="lite">MODAQ — lite (reader + buzzer)</option>
         <option value="full">MODAQ — with roster / packets / exports</option>
       </select>
+      <label class="toggle"><input type="checkbox" id="opt-listed" /> List this game on the Klaxon home page</label>
+      <p class="hint" id="opt-listed-hint">Anyone can find it and join — for Discord readings and open playtests.
+        It is listed only while someone is in the room, and ending the game takes it off.</p>
       <label class="toggle"><input type="checkbox" id="opt-disconnect-sound" /> Play a sound when a player disconnects</label>
+      <div class="end-row">
+        <button id="end-game" class="ghost tiny">End game for everyone</button>
+        <button id="reopen-game" class="ghost tiny hidden">Reopen the game</button>
+      </div>
+      <p class="hint">Ending it sends the players home and closes the room to new ones. The scoresheet,
+        the chat and the log stay — and you can reopen it.</p>
       <!-- For afterwards, when someone asks what happened to their buzz: every
            buzz, clear, withdrawal, join and chat line, stamped and in order. -->
       <p class="hint"><a id="log-link" href="#" download>Download the activity log</a> — buzz times, who

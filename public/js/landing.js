@@ -69,6 +69,38 @@ async function showRecentRooms() {
 }
 showRecentRooms();
 
+// Games their hosts put on the board — mostly Discord readings, where being
+// findable IS the point. Refreshed while the page is open, because the list is
+// a claim about right now: a room with nobody in it is not listed at all.
+const PUBLIC_REFRESH_MS = 30000;
+
+function publicMeta(room) {
+  const bits = [];
+  bits.push(room.players
+    ? `${room.players} playing`
+    : (room.host ? 'host is setting up' : 'open'));
+  if (room.packet) bits.push(`packet ${room.packet.at} of ${room.packet.of}`);
+  else if (room.shootout) bits.push('shootout');
+  return bits.join(' · ');
+}
+
+async function showPublicRooms() {
+  let rooms = [];
+  try { ({ rooms = [] } = await api('GET', '/api/public-rooms')); } catch { return; }
+  const ul = $('#public-list');
+  ul.replaceChildren();
+  for (const room of rooms) {
+    const link = el('a', { href: `/${room.code}`, className: 'recent-link' });
+    link.append(el('span', { className: 'recent-code' }, room.code));
+    link.append(el('span', { className: 'recent-name' }, room.name));
+    link.append(el('span', { className: 'recent-meta' }, publicMeta(room)));
+    ul.append(el('li', {}, link));
+  }
+  $('#public-section').classList.toggle('hidden', !rooms.length);
+}
+showPublicRooms();
+setInterval(() => { if (!document.hidden) showPublicRooms(); }, PUBLIC_REFRESH_MS);
+
 $('#join-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const code = $('#join-code').value.trim().toUpperCase();
