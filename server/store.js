@@ -166,6 +166,9 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
       reconcileWindowMs: clampNum(eff.reconcileWindowMs, 50, 1000, DEFAULTS.reconcileWindowMs),
       queueMode: !!eff.queueMode,        // accumulate a buzz queue vs lock to first
       allowWithdraw: !!eff.allowWithdraw, // (queue mode) players may remove themselves
+      // Questions a free withdrawal costs you before the next one is free too
+      // (the shootout's rationed mode). 0 = every withdrawal is free.
+      withdrawCooldown: clampNum(eff.withdrawCooldown, 0, 40, 0),
       autoClear: !!eff.autoClear,         // auto-reset the buzzer a few seconds after a buzz
       // Players must supply a team name to join — never in a shootout, where
       // a competitor is their own team and the roster is built from who is in
@@ -877,15 +880,53 @@ export function nextBuzz(room) {
  * the buzz menu's Withdrew), which is the same action with the authority it
  * needs.
  */
+/**
+ * A free withdrawal, and then a wait.
+ *
+ * In the rationed mode a withdrawal costs nothing, but not twice in a row: the
+ * next few questions are yours to answer. It is a ration rather than a
+ * penalty, so the rule is about WHEN the last free one was taken, counted in
+ * questions the room has read — not in seconds, and not in buzzes, both of
+ * which would turn on how fast the reader is going.
+ */
+export function withdrawFreeAgainAt(room, playerId) {
+  const wait = Number(room.settings.withdrawCooldown) || 0;
+  if (wait <= 0) return null;
+  const used = room.withdrawUsed?.[playerId];
+  return used == null ? null : used + wait;
+}
+
 export function withdraw(room, playerId, { byPlayer = false } = {}) {
   if (!room.settings.allowWithdraw) return { ok: false };
   if (byPlayer && room.queue[0]?.playerId === playerId) return { ok: false, reason: 'has_floor' };
   const before = room.queue.length;
-  const verdict = room.settings.lockedAnswers ? answers.withdrawal(room, playerId) : { free: true, reason: 'no_answers' };
+
+  const wait = Number(room.settings.withdrawCooldown) || 0;
+  const question = Number(room.scoresheet?.current) || 0;
+  let verdict;
+  if (room.settings.lockedAnswers) {
+    verdict = answers.withdrawal(room, playerId);
+  } else if (wait > 0) {
+    const freeAgainAt = withdrawFreeAgainAt(room, playerId);
+    const free = freeAgainAt == null || question <= 0 || question >= freeAgainAt;
+    verdict = free
+      ? { free: true, reason: 'rationed' }
+      : { free: false, reason: 'too_soon', freeAgainAt, questionsLeft: Math.max(0, freeAgainAt - question) };
+  } else {
+    verdict = { free: true, reason: 'no_answers' };
+  }
+
   room.queue = room.queue.filter((q) => q.playerId !== playerId);
   if (room.queue.length === before) return { ok: false };
+
+  // Only a FREE one starts the wait; one they were charged for doesn't buy
+  // them another ration.
+  if (wait > 0 && verdict.free && question > 0) {
+    if (!room.withdrawUsed) room.withdrawUsed = {};
+    room.withdrawUsed[playerId] = question;
+  }
   pushLog(room, { type: 'withdraw', playerId, free: verdict.free, reason: verdict.reason });
-  return { ok: true, ...verdict };
+  return { ok: true, ...verdict, freeAgainAt: withdrawFreeAgainAt(room, playerId) };
 }
 
 // Record an incoming buzz intent. Returns { accepted, reason, firstOfWindow }.
@@ -1031,6 +1072,7 @@ export function resolveWindow(room) {
 export function setOptions(room, opts = {}) {
   if (typeof opts.queueMode === 'boolean') room.settings.queueMode = opts.queueMode;
   if (typeof opts.allowWithdraw === 'boolean') room.settings.allowWithdraw = opts.allowWithdraw;
+  if (opts.withdrawCooldown != null) room.settings.withdrawCooldown = clampNum(opts.withdrawCooldown, 0, 40, 0);
   if (typeof opts.autoClear === 'boolean') room.settings.autoClear = opts.autoClear;
   if (typeof opts.requireTeam === 'boolean') room.settings.requireTeam = opts.requireTeam && !room.settings.shootout;
   if (typeof opts.playerAlerts === 'boolean') room.settings.playerAlerts = opts.playerAlerts;
@@ -1135,6 +1177,10 @@ export function publicState(room) {
     // players in the room have already heard.
     scoresheet: playerScoresheetOn(room) ? room.scoresheet || null : null,
     queue: room.queue,
+    // When each player's next free withdrawal comes round, in the rationed
+    // mode (see store.withdraw). Only people currently waiting are listed, and
+    // a question number is not a secret — the room watched them withdraw.
+    withdrawFreeAt: room.settings.withdrawCooldown > 0 ? { ...(room.withdrawUsed || {}) } : null,
     // A playtest room shows answer lines once a cycle is over and asks the
     // room what it thought (see playtest.js).
     playtest: playtestOn(room),
@@ -1255,7 +1301,7 @@ export function setShootoutSession(room, input) {
   if (!room.settings.shootout) return { error: 'disabled' };
   const session = shootout.normalizeSession(input, room.shootoutSession);
   room.shootoutSession = session;
-  Object.assign(room.settings, shootout.withdrawSettings(session.withdraw));
+  Object.assign(room.settings, shootout.withdrawSettings(session.withdraw, session.withdrawCooldown));
   // A buzz can only be withdrawn from a queue.
   if (room.settings.allowWithdraw) room.settings.queueMode = true;
   persistRooms(true);

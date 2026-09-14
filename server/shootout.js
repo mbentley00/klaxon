@@ -278,7 +278,12 @@ export const messages = (room) => (room.chat || []).map((m) => ({ ...m }));
 // Kept apart from the leaderboard (room.shootout) on purpose: "reset the
 // leaderboard" starts the scoring over, not the evening's plan.
 
-export const WITHDRAW_MODES = ['free', 'none', 'typed'];
+// 'rationed' is 'free', with a wait: taking a buzz back costs nothing, but not
+// twice in a row. After a free withdrawal you are on your own for the next few
+// questions — buzz in and you answer, or it costs you.
+export const WITHDRAW_MODES = ['free', 'none', 'typed', 'rationed'];
+export const DEFAULT_WITHDRAW_COOLDOWN = 5;
+const MAX_WITHDRAW_COOLDOWN = 40;
 export const SCHEMES = ['15/10/-5', '20/15/10/-5', '20/10/0'];
 const MAX_PACKETS = 40;
 const MAX_NOTES = 2000;
@@ -307,6 +312,9 @@ export function normalizeSession(input, prev = null) {
     // Line breaks are the host's formatting; only trailing space and length are policed.
     notes: String(input?.notes ?? '').replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim().slice(0, MAX_NOTES),
     withdraw: WITHDRAW_MODES.includes(input?.withdraw) ? input.withdraw : 'free',
+    // How many questions a free withdrawal costs you, in 'rationed'.
+    withdrawCooldown: Math.max(1, Math.min(MAX_WITHDRAW_COOLDOWN,
+      Math.floor(Number(input?.withdrawCooldown)) || DEFAULT_WITHDRAW_COOLDOWN)),
     scoring: {
       scheme: SCHEMES.includes(input?.scoring?.scheme) ? input.scoring.scheme : '15/10/-5',
       bonuses: input?.scoring?.bonuses === true
@@ -319,10 +327,18 @@ export function normalizeSession(input, prev = null) {
 
 // The room settings each way of handling a withdrawn buzz comes down to (see
 // answers.js for what the typed-answer window does).
-export function withdrawSettings(mode) {
-  if (mode === 'none') return { allowWithdraw: false, lockedAnswers: false };
-  if (mode === 'typed') return { allowWithdraw: true, lockedAnswers: true };
-  return { allowWithdraw: true, lockedAnswers: false };
+export function withdrawSettings(mode, cooldown = 0) {
+  if (mode === 'none') return { allowWithdraw: false, lockedAnswers: false, withdrawCooldown: 0 };
+  if (mode === 'typed') return { allowWithdraw: true, lockedAnswers: true, withdrawCooldown: 0 };
+  if (mode === 'rationed') {
+    return {
+      allowWithdraw: true,
+      lockedAnswers: false,
+      withdrawCooldown: Math.max(1, Math.min(MAX_WITHDRAW_COOLDOWN,
+        Math.floor(Number(cooldown)) || DEFAULT_WITHDRAW_COOLDOWN))
+    };
+  }
+  return { allowWithdraw: true, lockedAnswers: false, withdrawCooldown: 0 };
 }
 
 /**
@@ -336,6 +352,7 @@ export function publicSession(session) {
     name: session.name,
     notes: session.notes,
     withdraw: session.withdraw,
+    withdrawCooldown: session.withdrawCooldown,
     scoring: { ...session.scoring },
     packets: session.packets.map((p) => ({ ...p })),
     current: session.current,

@@ -673,9 +673,22 @@ function renderScoresheet(s) {
 
   // However many sides the game has — two reads as "A: 120, B: 95", and a
   // shootout lists every competitor.
-  $('#ss-status').textContent = sheet.teams
-    .map((t, i) => `${t.name}: ${sheet.scores[i] ?? 0}`)
-    .join(', ');
+  //
+  // SAID OUTRIGHT that this is the packet being read, because in a shootout it
+  // sits a few inches from the leaderboard, which is the same people with
+  // different numbers beside them (banked packets plus this one). Two score
+  // lists side by side, neither labelled, read as a contradiction rather than
+  // as the two things they are.
+  //
+  // And ordered by score once there are more than two, so it can be compared
+  // with the ranked board underneath it instead of being a game-order list
+  // that opens with eight zeroes.
+  const line = sheet.teams.map((t, i) => ({ name: t.name, points: sheet.scores[i] ?? 0 }));
+  if (line.length > 2) line.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+  $('#ss-status').replaceChildren(
+    el('span', { className: 'ss-score-label' }, s.shootout ? 'This packet' : 'Score'),
+    el('span', { className: 'ss-score-line' }, line.map((x) => `${x.name}: ${x.points}`).join(', '))
+  );
   if (!wanted) { ssLastKey = ''; return; }   // collapsed: the table isn't drawn
   // State broadcasts arrive on every buzz; only redraw when the sheet changed.
   const key = JSON.stringify([sheet.teams, sheet.rows, sheet.scores, sheet.current, sheet.total,
@@ -1107,7 +1120,8 @@ function renderShootout(s) {
 const WITHDRAW_RULE = {
   free: 'Withdrawing a buzz is free.',
   none: 'No withdrawing: a buzz stands once it’s in.',
-  typed: 'Type your answer while you wait your turn; withdrawing is free only if you hadn’t committed to a different answer.'
+  typed: 'Type your answer while you wait your turn; withdrawing is free only if you hadn’t committed to a different answer.',
+  rationed: 'Withdrawing is free, but not twice in a row — the next few questions after one are yours to answer.'
 };
 // The strip above the buzzer gets the rule in a few words; the full sentence is
 // its tooltip. It is a standing rule, not news — it doesn't get three lines at
@@ -1115,7 +1129,8 @@ const WITHDRAW_RULE = {
 const WITHDRAW_SHORT = {
   free: 'Withdrawing is free',
   none: 'No withdrawing',
-  typed: 'Type your answer while you wait'
+  typed: 'Type your answer while you wait',
+  rationed: 'One free withdraw, then a wait'
 };
 
 function renderSession(s) {
@@ -1142,7 +1157,10 @@ function renderSession(s) {
   }
   $('#session-progress').textContent = bits.join(' · ');
   const rule = $('#session-rule');
-  rule.textContent = WITHDRAW_SHORT[session.withdraw] || '';
+  const wait = Number(session.withdrawCooldown) || 0;
+  rule.textContent = session.withdraw === 'rationed' && wait
+    ? `One free withdraw every ${wait} questions`
+    : WITHDRAW_SHORT[session.withdraw] || '';
   rule.title = WITHDRAW_RULE[session.withdraw] || '';
   $('#leave-game').classList.toggle('hidden', state.role !== 'player');
 }
@@ -1300,12 +1318,30 @@ const chatDayLabel = (at) => {
   } catch { return day; }
 };
 
+// Typing "buzz" IS buzzing. Someone following the chat has their hands in the
+// wrong place when a question ends, and the fix people reach for on their own
+// is to type the word — so it does what they meant. Pressed here rather than
+// sent to the server as a message, so the buzz is timed from the keystroke
+// like any other press, and the word never lands in the log.
+const BUZZ_WORD = /^buzz[!.]*$/i;
+
 function sendChat() {
   clearTimeout(typingStopTimer);
   sendTyping(false);
   const box = $('#chat-box');
   const text = box.value.trim();
   if (!text) return;
+
+  // Only when it would actually buzz: a player, with a live buzzer. Any other
+  // time "buzz" is just a word somebody typed, and it goes to the chat.
+  if (BUZZ_WORD.test(text) && state.role === 'player' && !buzzer.disabled) {
+    box.value = '';
+    autosizeChat();
+    $('#chat-mentions').classList.add('hidden');
+    mentionMatches = [];
+    buzzerAction();
+    return;
+  }
   box.value = '';
   autosizeChat();
   $('#chat-mentions').classList.add('hidden');
@@ -2438,13 +2474,13 @@ function renderQueue(s) {
   // everything below it up and down. Empty state instead, and outside queue mode
   // there's only ever one name to show.
   $('#queue-title').textContent = queueMode ? 'Buzz queue' : 'Buzzed in player';
-  // Which way the buzzer works in this room. Said outright, not left to be
-  // inferred from whether a second name ever turns up: it changes what buzzing
-  // early costs you.
+  // Only the lock-to-first case needs saying. "Buzz queue" over a list of names
+  // already tells a player everything the sentence under it did; that the
+  // buzzer LOCKS on the first buzz is not something the heading gives away.
   const how = $('#queue-how');
   if (how) {
     how.textContent = queueMode
-      ? 'Everyone who buzzes joins the queue, in the order the server timed them.'
+      ? ''
       : 'The first buzz locks the buzzer — nobody else can buzz until it is cleared.';
   }
   const list = $('#queue-list');
@@ -2471,7 +2507,24 @@ function renderQueue(s) {
   // Not from the front of the queue: once you have the floor, letting the buzz
   // go is the moderator's call (see store.withdraw).
   const canWithdraw = state.role === 'player' && s.settings?.allowWithdraw && pos > 0;
-  $('#ctl-withdraw').classList.toggle('hidden', !canWithdraw);
+  const btn = $('#ctl-withdraw');
+  btn.classList.toggle('hidden', !canWithdraw);
+  if (canWithdraw) {
+    // In the rationed mode a withdrawal is free, but not twice in a row. Say
+    // which kind this press would be BEFORE it is pressed — finding out
+    // afterwards is no use to anyone.
+    const wait = Number(s.settings?.withdrawCooldown) || 0;
+    const usedAt = wait > 0 ? s.withdrawFreeAt?.[state.me?.id] : undefined;
+    const question = Number(s.scoresheet?.current) || 0;
+    const left = usedAt == null || question <= 0 ? 0 : Math.max(0, usedAt + wait - question);
+    btn.textContent = left > 0
+      ? `Withdraw my buzz — costs you (free again in ${left})`
+      : 'Withdraw my buzz';
+    btn.classList.toggle('costly', left > 0);
+    btn.title = left > 0
+      ? `You withdrew on question ${usedAt}. The next free one is question ${usedAt + wait}.`
+      : wait > 0 ? 'Free — and then not again for a few questions.' : '';
+  }
   const note = $('#queue-note');
   if (note) {
     note.textContent = state.role === 'player' && s.settings?.allowWithdraw && pos === 0

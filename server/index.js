@@ -2277,7 +2277,15 @@ io.on('connection', (socket) => {
       }
       emitState(room);
     }
-    ack?.({ ok: res.ok, free: res.free, reason: res.reason });
+    // `freeAgainAt` / `questionsLeft` so the page can say what the NEXT one
+    // will cost rather than leaving them to find out by pressing it.
+    ack?.({
+      ok: res.ok,
+      free: res.free,
+      reason: res.reason,
+      freeAgainAt: res.freeAgainAt ?? null,
+      questionsLeft: res.questionsLeft ?? null
+    });
   });
 
   socket.on('disconnect', () => {
