@@ -21,7 +21,12 @@
 //     without somewhere to put it, it ends up in the answer box.
 // ---------------------------------------------------------------------------
 
-const MAX_CHAT = 120;              // messages kept per room
+// What a room KEEPS, and what it SENDS, are different numbers. Every state
+// broadcast used to carry the whole log, so the log had to stay small — which
+// also meant an evening's conversation was gone by the end of it. The room now
+// keeps the evening and sends the tail of it; the rest is for the export.
+const MAX_CHAT = 4000;             // messages kept per room
+const CHAT_IN_STATE = 120;         // how many of them ride in a state broadcast
 const MAX_CHAT_TEXT = 400;
 const CHAT_COOLDOWN_MS = 350;      // per player, so one person can't flood it
 // 350ms stops a script without getting in the way of a person: two short
@@ -266,7 +271,44 @@ export function announce(room, kind, { name, text }) {
   return { ok: true, message };
 }
 
-export const messages = (room) => (room.chat || []).map((m) => ({ ...m }));
+// The tail, for the room's own screens. `all` is for the moderator's export,
+// which is the only place the whole evening is wanted.
+export const messages = (room, limit = CHAT_IN_STATE) => {
+  const log = room.chat || [];
+  const from = limit > 0 ? Math.max(0, log.length - limit) : 0;
+  return log.slice(from).map((m) => ({ ...m }));
+};
+
+export const allMessages = (room) => (room.chat || []).map((m) => ({ ...m }));
+
+/**
+ * The chat as something to read afterwards: one line per message, the room's
+ * own events among them, in the order they happened. Plain text because that is
+ * what a moderator wants of a conversation — to read it, paste it, or send it
+ * to somebody.
+ */
+export function transcript(room, { name, code } = {}) {
+  const when = (at) => new Date(at).toLocaleString('en-US', {
+    year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+  });
+  const log = room.chat || [];
+  const head = [
+    `${name || room.name || 'Klaxon room'} — chat`,
+    `Room ${code || room.code}`,
+    log.length ? `${log.length} line${log.length === 1 ? '' : 's'}, ${when(log[0].at)} to ${when(log[log.length - 1].at)}` : 'Nothing was said.',
+    ''
+  ];
+  const body = log.map((m) => {
+    const stamp = new Date(m.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    if (m.system === 'cycle') return `\n--- ${m.text} ---`;
+    if (m.system === 'answer') return `[${stamp}] ** ANSWER — ${m.name}: ${m.text}`;
+    // A line someone typed may have line breaks in it; keep them, indented so
+    // the log still reads as one line per person.
+    const text = String(m.text).split('\n').join('\n' + ' '.repeat(stamp.length + 3));
+    return `[${stamp}] ${m.name}${m.staff ? ' (moderator)' : ''}: ${text}`;
+  });
+  return head.concat(body).join('\n') + '\n';
+}
 
 // --- the session -------------------------------------------------------------
 // What the host set up before anyone joined: what's being played, notes for the

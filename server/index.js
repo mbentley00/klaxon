@@ -939,6 +939,30 @@ app.delete('/api/tournaments/:code/roster-alerts', ah(async (req, res) => {
 // Every buzz attempt in the room — including buzzes that lost to the lock —
 // with per-cycle order and the MODAQ question read at the time. For buzz-point
 // tracking tools; staff only.
+// The room's chat, for the moderator to keep. Staff only: it is the room's
+// conversation, and handing it out on a room code would hand it to anyone who
+// has ever been given the code.
+app.get('/api/rooms/:code/chat', ah(async (req, res) => {
+  const room = roomOr(res, req.params.code); if (!room) return;
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.type('text/plain; charset=utf-8');
+  res.setHeader('content-disposition', `attachment; filename="klaxon-${room.code}-chat-${stamp}.txt"`);
+  res.send(store.chatTranscript(room));
+}));
+
+// What the room did, all of it, in one readable list: buzz times, clears and
+// who made them, withdrawals, who joined and dropped, and the chat alongside.
+// Staff only, for the same reason the chat export is (see store.activityLog).
+app.get('/api/rooms/:code/log', ah(async (req, res) => {
+  const room = roomOr(res, req.params.code); if (!room) return;
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.type('text/plain; charset=utf-8');
+  res.setHeader('content-disposition', `attachment; filename="klaxon-${room.code}-log-${stamp}.txt"`);
+  res.send(store.activityLog(room));
+}));
+
 app.get('/api/rooms/:code/fullbuzz', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
   if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
@@ -1752,7 +1776,7 @@ io.on('connection', (socket) => {
           const cycleAtBuzz = room.cycleNo;
           setTimeout(() => {
             if (room.cycleNo !== cycleAtBuzz || room.phase !== 'locked') return;
-            store.resetBuzzer(room);
+            store.resetBuzzer(room, { by: 'Auto-clear' });
             io.to(room.code).emit('buzzer_reset', { cycleNo: room.cycleNo });
             emitState(room);
           }, DEFAULTS.autoClearMs);
@@ -1779,11 +1803,13 @@ io.on('connection', (socket) => {
         // buzz point) and it is the one thing the ACF rules single out as never
         // protestable (H.6).
         store.markAccidentalBuzz(room, payload?.judged === true);
-        store.resetBuzzer(room);
+        // Named in the log, because "who cleared that?" is the whole question
+        // when two people have buzzer control (see store.activityLog).
+        store.resetBuzzer(room, { by: store.memberName(room, ctx.playerId), judged: payload?.judged === true });
         io.to(room.code).emit('buzzer_reset', { cycleNo: room.cycleNo });
         break;
       case 'next_buzz':
-        store.nextBuzz(room);
+        store.nextBuzz(room, { by: store.memberName(room, ctx.playerId) });
         break;
       case 'set_options':
         store.setOptions(room, payload.options || {});

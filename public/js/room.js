@@ -2620,6 +2620,15 @@ function buildShareLinks() {
   } else {
     coRow.classList.add('hidden');
   }
+  // The activity log is staff-only on the server too; the link just carries
+  // whichever staff token this page already holds.
+  const logLink = $('#log-link');
+  const token = recall('staffToken:' + code) || coToken || '';
+  const session = localStorage.getItem('bz_sessionToken') || '';
+  if (logLink) {
+    logLink.href = `/api/rooms/${code}/log?token=${encodeURIComponent(token)}`
+      + (session ? `&sessionToken=${encodeURIComponent(session)}` : '');
+  }
 }
 document.querySelectorAll('.copy-btn').forEach((b) => {
   b.onclick = async () => {

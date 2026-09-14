@@ -50,6 +50,9 @@ const serializeRoom = (r) => ({
   scoresheetPacket: r.scoresheetPacket || null,
   // Every buzz attempt, for the full-buzz export (buzz-point tracking).
   buzzLog: r.buzzLog || [],
+  // What the room DID: clears, withdrawals, who joined, options changed. The
+  // companion to buzzLog, and the thing you read when a buzz went missing.
+  log: r.log || [],
   // What an upheld protest left to be played here (see createReplayRoom).
   replay: r.replay || null,
   // Protests the teams lodged (see protests.js). Durable: a protest outlives
@@ -132,7 +135,7 @@ export function hydrate({ tournaments: tournamentRecords = [], rooms: roomRecord
       lastBuzzAt: null,
       queue: [],
       members: new Map(),
-      log: []
+      log: Array.isArray(r.log) ? r.log : []
     });
   }
 }
@@ -477,6 +480,7 @@ export function joinRoom(room, { playerId, name, role, team, rosterTeam, rosterP
   const id = playerId || uuid();
   const normRole = ROLES.has(role) ? role : 'player';
   const existing = room.members.get(id);
+  const wasConnected = existing?.connected === true;
   const member = existing || {
     id,
     name: (name || 'Player').slice(0, 40),
@@ -499,6 +503,14 @@ export function joinRoom(room, { playerId, name, role, team, rosterTeam, rosterP
     if (team !== undefined) member.team = team ? String(team).slice(0, 40) : null;
     member.role = normRole; // reflect (re)authorized role on reconnect
     member.connected = true;
+  }
+  // Coming and going is half of what the activity log is for: a buzz that
+  // never arrived and a player who was reconnecting at the time are the same
+  // story. A reconnect is only worth a line when they had actually dropped.
+  if (!existing) {
+    pushLog(room, { type: 'join', playerId: id, name: member.name, role: normRole });
+  } else if (!wasConnected) {
+    pushLog(room, { type: 'rejoin', playerId: id, name: member.name, role: normRole });
   }
   room.members.set(id, member);
 
@@ -546,7 +558,9 @@ export function detachSocket(room, playerId, socketId) {
   m.sockets?.delete(socketId);
   const wasConnected = m.connected;
   m.connected = (m.sockets?.size ?? 0) > 0;
-  return wasConnected && !m.connected;
+  const left = wasConnected && !m.connected;
+  if (left) pushLog(room, { type: 'offline', playerId, name: m.name });
+  return left;
 }
 
 export function setConnected(room, playerId, connected) {
@@ -562,7 +576,7 @@ export function removePlayer(room, playerId) {
   if (!m || m.role !== 'player') return false;
   room.members.delete(playerId);
   room.queue = room.queue.filter((q) => q.playerId !== playerId);
-  pushLog(room, { type: 'remove_player', playerId });
+  pushLog(room, { type: 'remove_player', playerId, name: m.name });
   return true;
 }
 
@@ -844,21 +858,33 @@ export const displayName = (member) => member?.rosterPlayer || member?.name || '
 //    head ("next") or clear the whole queue, and players may withdraw.
 
 // Manual "reset the buzzer" / "clear queue": empty it and reopen buzzers.
-export function resetBuzzer(room) {
+//
+// `by` and `judged` are recorded because this is the one action that destroys
+// evidence: the queue it emptied is gone afterwards, and the difference between
+// "the moderator scored that buzz" and "the moderator cleared it" exists
+// nowhere else. Whoever it was and whoever they dropped goes in the log, which
+// is what the activity log is read for (see activityLog).
+export function resetBuzzer(room, { by = null, judged = false } = {}) {
+  const dropped = room.queue.map((q) => q.name);
   room.cycleNo += 1;
   room.cycle = freshCycle(room.cycleNo);
   room.queue = [];
   room.lastBuzzAt = null;
   room.phase = 'open';
-  pushLog(room, { type: 'reset_buzzer', cycleNo: room.cycleNo });
+  pushLog(room, { type: 'reset_buzzer', cycleNo: room.cycleNo, by, judged, dropped });
+  persistRooms();
 }
 
 // Queue mode: drop the current head so the next buzzer is "on the buzz".
-export function nextBuzz(room) {
+export function nextBuzz(room, { by = null } = {}) {
+  const done = room.queue[0]?.name || null;
   room.queue.shift();
   if (!room.queue.length) room.lastBuzzAt = null;
   if (!room.settings.queueMode) room.phase = room.queue.length ? 'locked' : 'open';
-  pushLog(room, { type: 'next_buzz', head: room.queue[0]?.playerId || null });
+  pushLog(room, {
+    type: 'next_buzz', by, done,
+    head: room.queue[0]?.playerId || null, headName: room.queue[0]?.name || null
+  });
 }
 
 // Queue mode: a player removes themselves (only if the room allows it).
@@ -896,7 +922,7 @@ export function withdrawFreeAgainAt(room, playerId) {
   return used == null ? null : used + wait;
 }
 
-export function withdraw(room, playerId, { byPlayer = false } = {}) {
+export function withdraw(room, playerId, { byPlayer = false, by = null } = {}) {
   if (!room.settings.allowWithdraw) return { ok: false };
   if (byPlayer && room.queue[0]?.playerId === playerId) return { ok: false, reason: 'has_floor' };
   const before = room.queue.length;
@@ -925,7 +951,10 @@ export function withdraw(room, playerId, { byPlayer = false } = {}) {
     if (!room.withdrawUsed) room.withdrawUsed = {};
     room.withdrawUsed[playerId] = question;
   }
-  pushLog(room, { type: 'withdraw', playerId, free: verdict.free, reason: verdict.reason });
+  pushLog(room, {
+    type: 'withdraw', playerId, name: memberName(room, playerId),
+    free: verdict.free, reason: verdict.reason, byPlayer, by
+  });
   return { ok: true, ...verdict, freeAgainAt: withdrawFreeAgainAt(room, playerId) };
 }
 
@@ -1116,13 +1145,21 @@ export function raiseStuckAlert(room, playerId) {
   if (!stuckAlertReady(room, now)) return { ok: false, reason: 'too_soon' };
   if (now - (member.lastAlertAt || 0) < STUCK_ALERT_COOLDOWN_MS) return { ok: false, reason: 'cooldown' };
   member.lastAlertAt = now;
-  pushLog(room, { type: 'stuck_alert', playerId });
+  pushLog(room, { type: 'stuck_alert', playerId, name: member.name });
   return { ok: true, member };
 }
 
+// The room's activity log. Two hundred entries covered "what happened just
+// now" and nothing else: by the end of an evening the clear you wanted to look
+// at was long gone. It is a few hundred KB at worst, it is written to disk with
+// the room, and it is the only record of a buzz that was cleared rather than
+// scored — so it keeps the evening.
+const LOG_CAP = 4000;
+
 function pushLog(room, entry) {
+  if (!room.log) room.log = [];
   room.log.push({ ...entry, at: Date.now() });
-  if (room.log.length > 200) room.log.shift();
+  if (room.log.length > LOG_CAP) room.log.splice(0, room.log.length - LOG_CAP);
 }
 
 // Serializable snapshot sent to clients. Never includes secret tokens.
@@ -1200,6 +1237,8 @@ export function publicState(room) {
         session: shootout.publicSession(room.shootoutSession)
       }
       : null,
+    // The tail of it: the whole log would ride in every broadcast, and a buzz
+    // causes one. The moderator's export reads the rest (see chatTranscript).
     chat: room.settings.shootout ? shootout.messages(room) : [],
     // The typed-answer window, when the room uses one (answers.js). Nobody's
     // committed answer is in here — a page knows its own because it typed it.
@@ -1373,6 +1412,175 @@ export function cycleDivider(room) {
   if (n <= mark.n) return null;
   room.chatCycleMark = { packet, n };
   return `Question ${n}`;
+}
+
+// The whole conversation, as something to read afterwards.
+export const chatTranscript = (room) => shootout.transcript(room, {
+  name: room.shootoutSession?.name, code: room.code
+});
+
+// --- the activity log ------------------------------------------------------
+/**
+ * Everything the room did, in one list, in the order it happened: every buzz
+ * attempt (the ones that lost the race included), every clear and who did it,
+ * withdrawals, players arriving and dropping out, options changed, and the
+ * chat alongside it.
+ *
+ * This exists for the question "what happened to that buzz?". Each of those
+ * records already lived somewhere — the buzz log, the room log, the chat — but
+ * separately, none of them readable. Apart they answer nothing; interleaved
+ * they answer it at a glance, which is why the export merges rather than dumps.
+ *
+ * Plain text on purpose: it gets read, pasted into a message, and sent to
+ * whoever is arguing about the tossup.
+ */
+const CLOCK = { hour: 'numeric', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 };
+const stampOf = (at) => {
+  try {
+    return new Date(at).toLocaleTimeString('en-US', CLOCK);
+  } catch {
+    // fractionalSecondDigits is recent; a runtime without it still gets a log.
+    return new Date(at).toLocaleTimeString('en-US');
+  }
+};
+
+// Why a buzz didn't make it. The stored reasons are the server's words for it
+// (see recordBuzz); these are the moderator's.
+const BUZZ_REASONS = {
+  locked: 'the buzzer was already locked',
+  queued: 'already in the queue',
+  duplicate: 'too many tries on this question',
+  not_player: 'not a player',
+  not_open: 'the buzzer was not open'
+};
+
+const OPTION_LABELS = {
+  queueMode: 'buzzer queue', allowWithdraw: 'withdrawals', autoClear: 'auto-clear',
+  typedAnswers: 'typed answers', lockedAnswers: 'committed answers',
+  requireTeam: 'team required', playerAlerts: 'player alerts',
+  modaqMode: 'MODAQ', modaqLite: 'MODAQ lite', shootout: 'shootout'
+};
+
+function optionSummary(settings = {}) {
+  const on = [];
+  for (const [key, label] of Object.entries(OPTION_LABELS)) {
+    if (settings[key]) on.push(label);
+  }
+  const extra = [];
+  if (settings.withdrawCooldown) extra.push(`withdraw cooldown ${settings.withdrawCooldown}`);
+  if (settings.answerSeconds) extra.push(`${settings.answerSeconds}s to answer`);
+  return (on.length ? on.join(', ') : 'nothing') + (extra.length ? ` \u00b7 ${extra.join(', ')}` : '');
+}
+
+// The room log's entries, one line each. Anything unrecognized still prints: a
+// log that silently drops the event you were looking for is worse than one that
+// prints it roughly.
+function logLine(e, room) {
+  const who = e.by ? `${e.by}` : 'A moderator';
+  switch (e.type) {
+    case 'reset_buzzer': {
+      const dropped = (e.dropped || []).filter(Boolean);
+      const what = e.judged === true
+        ? 'cleared the buzzer after scoring it'
+        : 'CLEARED the buzzer without scoring it (counted as an accidental buzz)';
+      const lost = dropped.length ? ` \u2014 dropped ${dropped.join(', ')}` : ' \u2014 nobody was on it';
+      return ['CLEAR', `${who} ${what}${lost}`];
+    }
+    case 'next_buzz':
+      return ['NEXT', `${who} moved past ${e.done || 'the buzz'}${e.headName ? ` \u2014 now on ${e.headName}` : ' \u2014 queue empty'}`];
+    case 'withdraw': {
+      const by = e.byPlayer ? `${e.name || e.playerId} withdrew` : `${who} withdrew ${e.name || e.playerId}`;
+      return ['WITHDRAW', `${by} (${e.free ? 'free' : 'not free'}: ${e.reason})`];
+    }
+    case 'buzz':
+      return ['QUEUE', `buzz window resolved \u2014 ${e.size} waiting`];
+    case 'join':
+      return ['JOIN', `${e.name || e.playerId} joined as ${e.role || 'player'}`];
+    case 'rejoin':
+      return ['JOIN', `${e.name || e.playerId} reconnected`];
+    case 'offline':
+      return ['LEFT', `${e.name || e.playerId} went offline`];
+    case 'remove_player':
+      return ['PLAYERS', `${who} removed ${e.name || e.playerId}`];
+    case 'remove_all_players':
+      return ['PLAYERS', `${who} removed ${e.count} players`];
+    case 'stuck_alert':
+      return ['ALERT', `${e.name || e.playerId} says the buzzer is stuck`];
+    case 'set_options':
+      return ['OPTIONS', `settings changed \u2014 on: ${optionSummary(e.settings)}`];
+    case 'set_roster':
+      return ['ROSTER', `roster loaded (${e.teams} teams)`];
+    case 'clear_roster':
+      return ['ROSTER', 'roster cleared'];
+    case 'set_member_team':
+      return ['ROSTER', `${e.playerId} put on ${e.team || 'no team'}`];
+    case 'set_captain':
+      return ['ROSTER', `${e.playerId} made captain of ${e.team}`];
+    case 'assign_roster_player':
+      // In a shootout every player IS their own team, so this fires on every
+      // join and says nothing: it would bury the events worth reading.
+      if (room?.settings?.shootout) return null;
+      return ['ROSTER', `${e.playerId} is ${e.player} (${e.team})`];
+    default:
+      return [String(e.type || 'event'), JSON.stringify({ ...e, type: undefined, at: undefined })];
+  }
+}
+
+export function activityLog(room) {
+  const rows = [];
+
+  // Buzzes, with the margin measured the way the room measures it: behind the
+  // buzz that won the question, not behind whoever this wave started with.
+  const firstOf = new Map();
+  for (const b of room.buzzLog || []) {
+    if (!b.accepted) continue;
+    const best = firstOf.get(b.cycleNo);
+    if (best == null || b.t < best) firstOf.set(b.cycleNo, b.t);
+  }
+  for (const b of room.buzzLog || []) {
+    const q = b.question ? ` [q${b.question}]` : '';
+    if (b.accepted) {
+      const base = firstOf.get(b.cycleNo);
+      const ms = base == null ? 0 : Math.max(0, Math.round(b.t - base));
+      const mark = b.accidental ? ', later cleared as accidental' : '';
+      rows.push([b.at, 'BUZZ', `${b.name} buzzed${ms ? ` (+${ms}ms)` : ' (first)'}${mark}${q}`]);
+    } else {
+      rows.push([b.at, 'no buzz', `${b.name} pressed but did not get in \u2014 ${BUZZ_REASONS[b.reason] || b.reason || 'turned away'}${q}`]);
+    }
+  }
+
+  for (const e of room.log || []) {
+    const line = logLine(e, room);
+    if (line) rows.push([e.at, line[0], line[1]]);
+  }
+
+  for (const m of room.chat || []) {
+    if (m.system === 'cycle') rows.push([m.at, '', `--- ${m.text} ---`]);
+    else if (m.system === 'answer') rows.push([m.at, 'ANSWER', `${m.name}: ${m.text}`]);
+    else rows.push([m.at, 'CHAT', `${m.name}${m.staff ? ' (moderator)' : ''}: ${String(m.text).split('\n').join(' / ')}`]);
+  }
+
+  rows.sort((a, b) => a[0] - b[0]);
+
+  const when = (at) => new Date(at).toLocaleString('en-US', {
+    year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+  });
+  const head = [
+    `${room.shootoutSession?.name || room.name || 'Klaxon room'} \u2014 activity log`,
+    `Room ${room.code} \u00b7 downloaded ${when(Date.now())}`,
+    rows.length
+      ? `${rows.length} events, ${when(rows[0][0])} to ${when(rows[rows.length - 1][0])}`
+      : 'Nothing has happened here yet.',
+    '',
+    'Times are the server\u2019s own clock \u2014 the clock buzzes are ordered on. A buzz says',
+    'how far behind the winning buzz it was. A CLEAR says whether the moderator had',
+    'scored that buzz first; one that was not scored is the room calling it an',
+    'accidental buzz.',
+    ''
+  ];
+  const body = rows.map(([at, kind, text]) =>
+    `[${stampOf(at)}]  ${String(kind).padEnd(8)} ${text}`);
+  return head.concat(body).join('\n') + '\n';
 }
 
 // An answer the room heard, written into the chat so everyone sees it — not
