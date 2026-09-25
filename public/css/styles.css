@@ -20,6 +20,10 @@
   --accent-fill: #d8401f; /* vermilion as a background (primary buttons, the buzzed buzzer) */
   --accent-fill-hover: #b3300f;
   --on-accent: #fff;      /* text on a vermilion or red fill */
+  --modaq-fill: #1f5fa8;  /* the home page's MODAQ button (white text) */
+  --modaq-fill-hover: #174a85;
+  --shootout-fill: #6b3fa0; /* the home page's shootout button (white text) */
+  --shootout-fill-hover: #56317f;
   --accent-bg: #fff6f3;   /* a line of chat that names you */
   --ok: #2f7d4f;
   --ok-deep: #1e7d32;
@@ -70,6 +74,10 @@
   --accent-deep: #ffa084;
   --accent-fill: #d8401f;
   --accent-fill-hover: #bf3517;
+  --modaq-fill: #2a64a8;
+  --modaq-fill-hover: #22558f;
+  --shootout-fill: #7244a6;
+  --shootout-fill-hover: #5f378c;
   --on-accent: #fff;
   --accent-bg: #3a2219;
   --ok: #6cc893;
@@ -116,6 +124,10 @@ button:active, .btnlink:active { transform: translate(3px, 3px); box-shadow: 0 0
 button:disabled { opacity: .45; cursor: not-allowed; box-shadow: 3px 3px 0 var(--soft); border-color: var(--soft); }
 button.primary { background: var(--accent-fill); color: var(--on-accent); border-color: var(--line); }
 button.primary:hover { background: var(--accent-fill-hover); }
+button.modaq { background: var(--modaq-fill); color: var(--on-accent); }
+button.modaq:hover { background: var(--modaq-fill-hover); }
+button.shootout { background: var(--shootout-fill); color: var(--on-accent); }
+button.shootout:hover { background: var(--shootout-fill-hover); }
 button.ghost, .btnlink.ghost { box-shadow: none; background: transparent; }
 button.ghost:hover, .btnlink.ghost:hover { background: var(--ghost-hover); }
 button.tiny, .btnlink.tiny { font-size: .75rem; padding: .3em .6em; box-shadow: 2px 2px 0 var(--shadow-ink); }
