@@ -806,7 +806,9 @@ export async function listArchivedGames() {
     if (text == null) continue;
     try { out.push(JSON.parse(text)); } catch { /* skip a bad file */ }
   }
-  out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  // When the game was played, not when it was last touched: reopening an old
+  // game to fix a score mustn't move it to the top.
+  out.sort((a, b) => (b.startedAt || b.updatedAt || 0) - (a.startedAt || a.updatedAt || 0));
   return out;
 }
 

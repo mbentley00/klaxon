@@ -47,6 +47,8 @@ function details(g) {
   }
   return box.childElementCount ? box : null;
 }
+// A game runs an hour or two; an edit later than this was a reopen.
+const EDITED_AFTER_MS = 3 * 60 * 60 * 1000;
 function when(ts) {
   return ts ? new Date(ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
 }
@@ -157,11 +159,19 @@ function row(g) {
     g.tournament ? g.tournament.name || g.tournament.code : g.roomName,
     g.round && g.round !== 'lite' ? `Round ${g.round}` : '',
     g.total ? `Q${Math.min(g.current, g.total)}/${g.total}` : g.current ? plural(g.current, 'tossup') + ' scored' : '',
-    when(g.updatedAt),
     played ? 'you played' : '',
     g.legacy ? 'saved before the archive' : ''
   ].filter(Boolean);
-  const meta = el('div', { className: 'recent-meta archive-meta' }, bits.join(' · '));
+  // When: the game itself, then (if it was reopened and changed well after)
+  // the last edit, and when its room was made. A reopen never moves "played".
+  const started = g.startedAt || g.updatedAt;
+  const dates = [
+    `Played ${when(started)}`,
+    g.updatedAt && started && g.updatedAt - started > EDITED_AFTER_MS ? `last edited ${when(g.updatedAt)}` : '',
+    g.roomCreatedAt ? `room created ${when(g.roomCreatedAt)}` : ''
+  ].filter(Boolean);
+  const meta = el('div', { className: 'recent-meta archive-meta' },
+    el('div', {}, bits.join(' · ')), el('div', {}, dates.join(' · ')));
   const actions = el('div', { className: 'row archive-actions' });
   const base = fileSafe(`${(g.teams || []).join(' vs ') || g.room}${g.round && g.round !== 'lite' ? ' R' + g.round : ''}`);
   const more = details(g);

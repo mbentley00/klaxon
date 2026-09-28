@@ -1552,6 +1552,18 @@ app.post('/api/games/:id/reopen', ah(async (req, res) => {
   });
   room.modaqState = { seq: 1, round: 'lite', json: body.json, by: null, at: Date.now() };
   await artifacts.saveModaqState(room.code, room.modaqState);
+  // Scoring it here edits the same game, not a copy dated today: the room
+  // files into the original entry for as long as it's this game (a new game
+  // started in the room gets its own).
+  room.archive = {
+    id: meta.id,
+    round: 'lite',
+    teamsKey: [...(meta.teams || [])].sort().join('|'),
+    startedAt: meta.startedAt,
+    accounts: [],
+    events: 1,
+    continues: true
+  };
   res.json({ code: room.code, readerToken: room.readerToken, coReaderToken: room.coReaderToken });
 }));
 
@@ -1787,17 +1799,23 @@ async function writeArchiveNow(room, a) {
   const json = state?.json && String(state.round ?? '') === a.round
     ? state.json
     : (await artifacts.getArchivedBody(a.id))?.json ?? null;
+  // A reopened game carries on its original entry (see /reopen): it keeps
+  // where and when it was played; only the score and the edit time move.
+  const keep = a.continues && prev;
   await artifacts.saveArchivedGame({
     id: a.id,
-    room: room.code,
-    roomName: room.name,
-    tournament: tournament ? { code: tournament.code, name: tournament.name } : null,
-    round: a.round,
+    room: keep ? prev.room : room.code,
+    roomName: keep ? prev.roomName : room.name,
+    roomCreatedAt: keep ? prev.roomCreatedAt ?? null : room.createdAt ?? null,
+    tournament: keep ? prev.tournament ?? null : tournament ? { code: tournament.code, name: tournament.name } : null,
+    round: keep ? prev.round : a.round,
+    ...(keep && prev.legacy ? { legacy: true } : {}),
+    ...(keep ? { reopenedIn: room.code } : {}),
     teams: sheet ? sheet.teams.map((t) => t.name) : [],
     scores: sheet ? sheet.scores : [],
     current: sheet ? sheet.current : 0,
     total: sheet ? sheet.total : 0,
-    startedAt: a.startedAt,
+    startedAt: prev?.startedAt ?? a.startedAt,
     updatedAt: Date.now(),
     ended: !!room.ended,
     hasQbj: true,

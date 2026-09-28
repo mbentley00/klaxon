@@ -3,6 +3,13 @@ import { api, remember, recall, $, el } from './util.js';
 const msg = $('#msg');
 const say = (t, ok = true) => { msg.textContent = t; msg.className = 'msg ' + (ok ? 'good' : 'bad'); };
 
+// Back from the room we just opened: the browser restores this page from its
+// back/forward cache exactly as we left it, "Opening as reader…" and all.
+// That message was about a navigation that already happened.
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted) { msg.textContent = ''; msg.className = 'msg'; }
+});
+
 // Remember the player's name across sessions.
 $('#join-name').value = recall('name') || '';
 
