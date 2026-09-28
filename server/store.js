@@ -48,6 +48,9 @@ const serializeRoom = (r) => ({
   // and — in a shootout — which packet that game is.
   scoresheet: r.scoresheet || null,
   scoresheetPacket: r.scoresheetPacket || null,
+  // Which game-archive entry the game on screen is filed under, so a restart
+  // mid-game keeps filing into the same one.
+  archive: r.archive || null,
   // Every buzz attempt, for the full-buzz export (buzz-point tracking).
   buzzLog: r.buzzLog || [],
   // What the room DID: clears, withdrawals, who joined, options changed. The

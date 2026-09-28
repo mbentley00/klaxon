@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <script src="/js/theme.js"></script>
+  <link rel="icon" href="/favicon.ico?v=2" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=2" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=2" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+  <title>Your games — Klaxon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="landing">
+  <main class="card">
+    <h1 class="wordmark">Klaxon</h1>
+    <p class="tag">Your MODAQ games</p>
+
+    <section>
+      <p class="hint" id="games-who">Every game scored in MODAQ is kept on the server. You see the ones
+        read in rooms this browser created or co-read, and — when you're logged in — the ones your
+        account moderated or played in. As a player, ask the moderator for a game's scoresheet here.</p>
+      <div class="row hidden" id="admin-row">
+        <label class="check"><input type="checkbox" id="show-all" /> Show every game on the server (admin)</label>
+      </div>
+      <ul id="games-list" class="recent archive-list"></ul>
+      <p class="hint hidden" id="games-empty">No games found. Games appear here once something has been
+        scored in one, on this browser or while logged in.</p>
+    </section>
+
+    <p id="msg" class="msg" role="status"></p>
+  </main>
+
+  <footer class="site-foot">
+    <a href="/">Home</a> · <a href="/account?return=/games">Account</a> · <a href="/about">About</a>
+  </footer>
+  <script type="module" src="/js/games.js"></script>
+</body>
+</html>

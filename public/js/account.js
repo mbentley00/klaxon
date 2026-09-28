@@ -1,4 +1,4 @@
-import { api, $, remember } from './util.js';
+import { api, $, el, remember } from './util.js';
 
 // The account session is shared with the moderator page under this key.
 const SESSION_KEY = 'bz_sessionToken';
@@ -18,6 +18,8 @@ let mode = 'login'; // 'login' | 'register'
 
 function showSignedIn(account) {
   $('#who').textContent = account.username;
+  $('#admin-section').classList.toggle('hidden', !account.isAdmin);
+  if (account.isAdmin) loadAdmins(account);
   $('#acct-display').value = account.displayName || '';
   $('#acct-email').value = account.email || '';
   $('#signed-in').classList.remove('hidden');
@@ -38,8 +40,10 @@ function showSignedOut() {
 
 function setMode(next) {
   mode = next;
-  $('#tab-login').classList.toggle('ghost', mode !== 'login');
-  $('#tab-register').classList.toggle('ghost', mode !== 'register');
+  for (const [id, m] of [['#tab-login', 'login'], ['#tab-register', 'register']]) {
+    $(id).classList.toggle('on', mode === m);
+    $(id).setAttribute('aria-selected', String(mode === m));
+  }
   $('#acct-submit').textContent = mode === 'register' ? 'Create account' : 'Log in';
   $('#acct-password').setAttribute('autocomplete', mode === 'register' ? 'new-password' : 'current-password');
   $('#acct-display-reg').classList.toggle('hidden', mode !== 'register');
@@ -47,7 +51,51 @@ function setMode(next) {
   say('');
 }
 
+// The admin list: everyone but a permanent (KLAXON_ADMINS) admin and yourself
+// can be removed here.
+function renderAdmins(admins, me) {
+  $('#admin-list').replaceChildren(...admins.map((a) => {
+    const li = el('li', { className: 'row admin-row' },
+      el('span', { className: 'admin-name' }, a.displayName ? `${a.displayName} (${a.username})` : a.username));
+    if (a.permanent) li.append(el('span', { className: 'hint' }, 'permanent'));
+    else if (a.id === me.id) li.append(el('span', { className: 'hint' }, 'you'));
+    else {
+      const b = el('button', { className: 'tiny ghost', type: 'button' }, 'Remove');
+      b.onclick = async () => {
+        try {
+          const r = await api('POST', `/api/admins/${encodeURIComponent(a.id)}/remove`, { sessionToken: session() });
+          renderAdmins(r.admins, me);
+          say(`${a.username} is no longer an admin.`);
+        } catch (e) { say(friendly(e.message), false); }
+      };
+      li.append(b);
+    }
+    return li;
+  }));
+}
+async function loadAdmins(me) {
+  try {
+    const r = await api('GET', `/api/admins?sessionToken=${encodeURIComponent(session())}`);
+    renderAdmins(r.admins, me);
+  } catch (e) { say(friendly(e.message), false); }
+  $('#admin-add').onsubmit = async (e) => {
+    e.preventDefault();
+    const identifier = $('#admin-identifier').value.trim();
+    if (!identifier) return;
+    try {
+      const r = await api('POST', '/api/admins', { sessionToken: session(), identifier });
+      renderAdmins(r.admins, me);
+      $('#admin-identifier').value = '';
+      say(`${identifier} is now an admin.`);
+    } catch (err) { say(friendly(err.message), false); }
+  };
+}
+
 const friendly = (e) => ({
+  no_such_account: 'No account with that username or email.',
+  not_admin: 'Only admins can do that.',
+  permanent_admin: 'That admin is set on the server and can\'t be removed here.',
+  cannot_remove_self: 'You can\'t remove yourself.',
   username_taken: 'That username is taken.',
   bad_credentials: 'Wrong username or password.',
   bad_password: 'Password must be at least 6 characters.',

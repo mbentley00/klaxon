@@ -9,9 +9,12 @@ $('#join-name').value = recall('name') || '';
 // Signed in? Label the account link, and refresh the name/settings the account
 // carries so a player landing here on a new device gets theirs back.
 const sessionToken = localStorage.getItem('bz_sessionToken');
+// Whether the session is good (a stale one — the server restarted — isn't).
+let signedIn = false;
 if (sessionToken) {
   api('GET', `/api/accounts/me?sessionToken=${encodeURIComponent(sessionToken)}`)
     .then(({ account }) => {
+      signedIn = true;
       $('#account-link').textContent = `Account: ${account.displayName || account.username}`;
       $('#account-link').href = '/account';
       if (account.displayName) remember('name', account.displayName);
@@ -131,13 +134,31 @@ $('#create-room').addEventListener('submit', (e) => {
   createRoom(null, (code) => go(code, '?role=reader'));
 });
 
+// A MODAQ game is kept on the server (see /games), but a logged-out reader
+// can only get it back from this browser. Say so before the room exists, once
+// per create, until they tick "don't warn me again".
+function afterAccountWarning(proceed) {
+  if (signedIn || recall('noAccountWarnOff') === '1') return proceed();
+  const box = $('#no-account-warn');
+  box.classList.remove('hidden');
+  $('#naw-continue').focus();
+  $('#naw-continue').onclick = () => {
+    if ($('#naw-never').checked) remember('noAccountWarnOff', '1');
+    box.classList.add('hidden');
+    proceed();
+  };
+  $('#naw-login').onclick = () => {
+    if ($('#naw-never').checked) remember('noAccountWarnOff', '1');
+  };
+}
+
 // One-off packet reading: a MODAQ-lite room (MODAQ reader + buzzer, no
 // tournament artifacts), opened straight into the MODAQ page.
-$('#create-modaq').addEventListener('click', () => {
+$('#create-modaq').addEventListener('click', () => afterAccountWarning(() => {
   createRoom({ modaqMode: true, modaqLite: true }, (code) => {
     location.href = `/modaq?room=${code}`;
   });
-});
+}));
 
 // A Discord shootout: everyone for themselves. The settings are the ones a
 // shootout always wants, so the host doesn't have to find them on /advanced —
@@ -145,7 +166,7 @@ $('#create-modaq').addEventListener('click', () => {
 // withdrawing allowed, because a reaction buzz in a shootout should cost
 // nothing, and MODAQ to read and keep score. The forced-answer mode is left
 // off: it changes the game, so it is the host's to switch on in the room.
-$('#create-shootout').addEventListener('click', () => {
+$('#create-shootout').addEventListener('click', () => afterAccountWarning(() => {
   createRoom({
     modaqMode: true,
     modaqLite: true,
@@ -155,4 +176,4 @@ $('#create-shootout').addEventListener('click', () => {
   }, (code) => {
     location.href = `/modaq?room=${code}`;
   });
-});
+}));

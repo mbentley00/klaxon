@@ -175,6 +175,23 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
   margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--soft);
 }
 .card .modes .btnlink { font-size: .85rem; }
+/* A two-way switch (the account page's Log in / Create account): one bordered
+   bar, the chosen half filled, so it can't be mistaken for two actions. */
+.seg { display: grid; grid-template-columns: 1fr 1fr; border: 2px solid var(--line);
+  border-radius: var(--radius); overflow: hidden; margin-bottom: 14px; }
+.seg button { border: 0; border-radius: 0; box-shadow: none; background: transparent; color: var(--ink); padding: .55em .5em; }
+.seg button + button { border-left: 2px solid var(--line); }
+.seg button:hover { background: var(--ghost-hover); }
+.seg button:active { transform: none; }
+.seg button.on { background: var(--ink); color: var(--surface); }
+/* An input with its own Save: the button sits flush, never wrapping under. */
+.field-row { flex-wrap: nowrap; margin-bottom: 18px; }
+.field-row > button { flex: 0 0 auto; }
+/* A caution that asks for a decision (the home page's logged-out warning). */
+.warn-box { border: 2px solid var(--warn); background: var(--warn-bg-soft); border-radius: var(--radius);
+  padding: 12px 14px; font-size: .9rem; }
+.warn-box p { margin: 0 0 8px; }
+.warn-box .row { margin: 10px 0 8px; }
 
 .site-foot { margin-top: 18px; text-align: center; }
 .site-foot a { color: var(--muted); font-size: .8rem; text-decoration: none; }
@@ -587,6 +604,15 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
 .scoresheet .ss-events .ss-num { width: 2.6em; font-weight: 600; color: var(--ss-ink); white-space: nowrap; }
 .scoresheet .ss-events tr.ss-current td { background: var(--ss-current); }
 .scoresheet .ss-item { margin-bottom: 4px; }
+/* A buzz reads by colour before it reads by word: red neg, green get, a
+   solid green chip for a power. */
+.scoresheet .ss-buzz { padding: 1px 6px; border-left: 3px solid transparent; border-radius: 2px; }
+.scoresheet .ss-neg { background: var(--bad-bg); border-left-color: var(--bad); color: var(--bad); }
+.scoresheet .ss-get { background: var(--ok-bg); border-left-color: var(--ok); color: var(--ok-deep); }
+.scoresheet .ss-power { background: var(--mine-fill); border-left-color: var(--ok-deep); color: var(--on-mine); font-weight: 600; }
+.scoresheet .ss-zero { border-left-color: var(--ss-line); color: var(--ss-muted); }
+.scoresheet .ss-part-got { color: var(--ok-deep); font-weight: 700; }
+.scoresheet .ss-part-miss { color: var(--bad); font-weight: 700; }
 .scoresheet .ss-score-line { color: var(--ss-ink); }
 /* Which scores these are. The leaderboard below carries the other kind. */
 .scoresheet .ss-score-label {
@@ -684,6 +710,22 @@ body.compact .scoresheet { display: none; }
 .recent-code { font-family: var(--mono); font-weight: 600; letter-spacing: .1em; color: var(--accent); }
 .recent-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recent-meta { font-size: .78rem; color: var(--muted); white-space: nowrap; }
+/* The game archive (/games): one card per game, its actions under it. */
+.archive-game { border: 1.5px solid var(--soft); border-radius: var(--radius); padding: 8px 10px; }
+.archive-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.archive-teams { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.archive-meta { white-space: normal; margin-top: 2px; }
+.archive-actions { margin-top: 6px; gap: 6px; flex-wrap: wrap; }
+.archive-requests { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--soft); }
+.archive-request { align-items: center; margin-top: 4px; }
+.archive-request > span:first-child { font-weight: 600; margin-right: auto; }
+.archive-sheet-wrap { margin-top: 8px; }
+.archive-sheet-wrap .ss-scroll { max-height: 50vh; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: .9rem; }
+.check input { width: auto; margin: 0; }
+.admin-list { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 6px; }
+.admin-row { align-items: center; flex-wrap: nowrap; }
+.admin-name { margin-right: auto; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
 
 /* Quiet link out of a room to the feedback form. */
 .report-link {

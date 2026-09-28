@@ -125,6 +125,17 @@ export function setEmail(account, email) {
   return { account };
 }
 
+// Admin, granted by another admin (see the admin list in index.js; the
+// operator's own admins come from KLAXON_ADMINS and aren't stored here).
+export function setAdmin(account, on) {
+  if (on) account.admin = true; else delete account.admin;
+  saveToDisk();
+  return account;
+}
+export function storedAdmins() {
+  return [...accounts.values()].filter((a) => a.admin === true);
+}
+
 // Look an account up the way a director types it: an email address (anything
 // with an @) or a username.
 export function findByIdentifier(identifier) {

@@ -27,29 +27,41 @@
         straight from the reader page.</p>
       <p class="hint">Your name prefills the "Your name" box when you join a room —
         it doesn't have to match your username.</p>
-      <div class="row">
-        <input id="acct-display" placeholder="Your name" maxlength="40" autocomplete="name" />
+      <div class="row field-row">
+        <input id="acct-display" placeholder="Your name" maxlength="40" autocomplete="name" aria-label="Your name" />
         <button id="save-display">Save</button>
       </div>
       <p class="hint">Your email lets a tournament director add you as a moderator directly,
         without you having to request access.</p>
-      <div class="row">
-        <input id="acct-email" type="email" placeholder="Email (optional)" maxlength="80" autocomplete="email" />
+      <div class="row field-row">
+        <input id="acct-email" type="email" placeholder="Email (optional)" maxlength="80" autocomplete="email" aria-label="Email" />
         <button id="save-email">Save</button>
       </div>
-      <div class="row">
-        <a class="btnlink" href="/">Home</a>
-        <button id="logout" class="ghost">Sign out</button>
+      <!-- Admins only: who else is one. -->
+      <div id="admin-section" class="hidden">
+        <h2>Admins</h2>
+        <p class="hint">Admins can list every MODAQ game on the server (results only, never the
+          questions) and answer players' scoresheet requests.</p>
+        <ul id="admin-list" class="admin-list"></ul>
+        <form id="admin-add" class="row field-row">
+          <input id="admin-identifier" placeholder="Username or email" autocapitalize="none" aria-label="Username or email of the new admin" />
+          <button type="submit">Make admin</button>
+        </form>
       </div>
+      <nav class="modes" aria-label="More">
+        <a class="btnlink" href="/">Home</a>
+        <a class="btnlink" href="/games">Your games</a>
+        <button id="logout" class="btnlink">Sign out</button>
+      </nav>
     </section>
 
     <!-- Signed-out view -->
     <section id="signed-out" class="hidden">
       <p class="hint">An account is only needed to read at a tournament that requires
         director-approved readers. Otherwise you don't need one.</p>
-      <div class="row" role="tablist">
-        <button id="tab-login" class="tab">Log in</button>
-        <button id="tab-register" class="tab ghost">Create account</button>
+      <div class="seg" role="tablist" aria-label="Log in or create an account">
+        <button id="tab-login" type="button" role="tab" class="on" aria-selected="true">Log in</button>
+        <button id="tab-register" type="button" role="tab" aria-selected="false">Create account</button>
       </div>
       <form id="account-form" class="stack">
         <input id="acct-username" placeholder="Username" autocapitalize="none" autocomplete="username" />
@@ -58,7 +70,7 @@
           maxlength="40" autocomplete="name" />
         <input id="acct-email-reg" class="hidden" type="email" maxlength="80" autocomplete="email"
           placeholder="Email (optional — lets directors add you as a moderator)" />
-        <button type="submit" id="acct-submit">Log in</button>
+        <button type="submit" id="acct-submit" class="primary">Log in</button>
       </form>
     </section>
 

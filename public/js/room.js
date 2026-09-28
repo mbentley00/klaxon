@@ -293,8 +293,9 @@ function doJoin(role, name, team, roster) {
     rosterPlayer: roster?.rosterPlayer,
     staffToken: isStaffRole(role) ? recall('staffToken:' + code) : undefined,
     // A logged-in account a director approved for this tournament is a
-    // moderator credential too — no reader link needed.
-    sessionToken: isStaffRole(role) ? localStorage.getItem('bz_sessionToken') || undefined : undefined
+    // moderator credential too — no reader link needed. A logged-in player
+    // sends it as well, so the games they play in are listed on their /games.
+    sessionToken: localStorage.getItem('bz_sessionToken') || undefined
   }, (resp) => {
     if (!resp?.ok) {
       // The reader may have switched "require team name" on since we last
@@ -725,6 +726,11 @@ function renderScoresheet(s) {
   const tbody = el('tbody');
   let carried = sheet.teams.map(() => 0);
   let currentRow = null;
+  // A power is any tossup worth more than a plain get. The sheet doesn't carry
+  // the format, so a get is 10 — or less, if the game has scored a smaller
+  // positive (a format with cheaper tossups).
+  let getValue = 10;
+  for (const r of sheet.rows) for (const z of r.buzzes) if (z.points > 0 && z.points < getValue) getValue = z.points;
   for (let n = 1; n <= total; n++) {
     const row = byN.get(n);
     const tr = el('tr', { className: n === sheet.current ? 'ss-current' : '' });
@@ -753,14 +759,17 @@ function renderScoresheet(s) {
       for (const z of row.buzzes) {
         const team = sheet.teams[z.team]?.name ?? '';
         const desc = z.points > 0 ? `for ${z.points} ✓` : `for ${z.points} ✗`;
-        ev.append(el('div', { className: 'ss-item' }, `${z.player} (${team}) ${desc}`));
+        // Coloured by outcome, so a neg or a power stands out at a glance.
+        const kind = z.points > getValue ? 'ss-power' : z.points > 0 ? 'ss-get' : z.points < 0 ? 'ss-neg' : 'ss-zero';
+        ev.append(el('div', { className: `ss-item ss-buzz ${kind}` }, `${z.player} (${team}) ${desc}`));
       }
       if (row.bonus) {
         const team = sheet.teams[row.bonus.team]?.name ?? '';
-        const icons = row.bonus.parts.map((p) => (p > 0 ? '✓' : '✗')).join('');
-        let text = `${team} ${row.bonus.total} on bonus (${icons})`;
-        if (row.bonus.bounceback) text += ` (stolen for ${row.bonus.bounceback} points)`;
-        ev.append(el('div', { className: 'ss-item' }, text));
+        const line = el('div', { className: 'ss-item ss-bonus' }, `${team} ${row.bonus.total} on bonus (`);
+        for (const p of row.bonus.parts) line.append(el('span', { className: p > 0 ? 'ss-part-got' : 'ss-part-miss' }, p > 0 ? '✓' : '✗'));
+        line.append(')');
+        if (row.bonus.bounceback) line.append(` (stolen for ${row.bonus.bounceback} points)`);
+        ev.append(line);
       }
       // What this browser thought of the question, once the room has
       // finished it. Sits after the events, so a row reads: the question, what
@@ -2139,8 +2148,23 @@ function renderPlayers(s) {
   if (active?.classList.contains('seat-pick') && ul.contains(active)) return;
   ul.innerHTML = '';
   if (!players.length) { ul.append(el('li', { className: 'empty' }, 'No players yet')); return; }
-  // Show disconnected players first so they're the first thing the reader sees.
-  const sorted = [...players].sort((a, b) => Number(a.connected) - Number(b.connected));
+  // Teammates together: the roster's teams in roster order, any other team
+  // alphabetically, the unteamed last. A shootout's "teams" are just the
+  // players' own names, so there it stays one list. Within a team (or the one
+  // list) disconnected players come first, so they're what the reader sees.
+  const teamOf = (p) => (s.shootout ? null : (p.rosterPlayer ? p.rosterTeam : p.team) || null);
+  const rosterOrder = (s.roster?.teams || []).map((t) => t.name);
+  const teamRank = (t) => {
+    if (!t) return [2, ''];
+    const i = rosterOrder.indexOf(t);
+    return i >= 0 ? [0, i] : [1, t.toLowerCase()];
+  };
+  const sorted = [...players].sort((a, b) => {
+    const [ga, ka] = teamRank(teamOf(a)), [gb, kb] = teamRank(teamOf(b));
+    if (ga !== gb) return ga - gb;
+    if (ka !== kb) return ka < kb ? -1 : 1;
+    return Number(a.connected) - Number(b.connected);
+  });
   for (const p of sorted) {
     const li = el('li', { className: p.connected ? '' : 'gone' });
     const col = el('span', { className: 'pcol' });

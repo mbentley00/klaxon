@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import express from 'express';
 import { Server } from 'socket.io';
 
@@ -328,7 +329,51 @@ app.post('/api/accounts/login', (req, res) => {
 app.get('/api/accounts/me', (req, res) => {
   const account = accounts.accountForSession(req.query.sessionToken);
   if (!account) return res.status(401).json({ error: 'not_logged_in' });
-  res.json({ account: accounts.publicAccount(account) });
+  res.json({ account: { ...accounts.publicAccount(account), isAdmin: isAdmin(account) } });
+});
+
+// --- admins ------------------------------------------------------------------
+// Who the admins are, and adding or removing one. Admins only.
+function adminList() {
+  const out = new Map();
+  for (const a of accounts.storedAdmins()) out.set(a.id, a);
+  for (const name of ADMINS) {
+    const a = accounts.findByIdentifier(name);
+    if (a) out.set(a.id, a);
+  }
+  return [...out.values()]
+    .map((a) => ({ id: a.id, username: a.username, displayName: a.displayName || '', permanent: envAdmin(a) }))
+    .sort((x, y) => x.username.localeCompare(y.username));
+}
+function requireAdmin(req, res) {
+  const account = accounts.accountForSession(req.body?.sessionToken ?? req.query.sessionToken);
+  if (!isAdmin(account)) { res.status(403).json({ error: 'not_admin' }); return null; }
+  return account;
+}
+app.get('/api/admins', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ admins: adminList() });
+});
+// By username or email, the way a director adds a moderator.
+app.post('/api/admins', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const target = accounts.findByIdentifier(req.body?.identifier);
+  if (!target) return res.status(404).json({ error: 'no_such_account' });
+  accounts.setAdmin(target, true);
+  console.log(`admin added: ${target.username}`);
+  res.json({ admins: adminList() });
+});
+app.post('/api/admins/:id/remove', (req, res) => {
+  const me = requireAdmin(req, res);
+  if (!me) return;
+  const target = accounts.getAccount(req.params.id);
+  if (!target) return res.status(404).json({ error: 'no_such_account' });
+  if (envAdmin(target)) return res.status(409).json({ error: 'permanent_admin' });
+  // Not yourself: a slip here would lock you out with nobody to notice.
+  if (target.id === me.id) return res.status(409).json({ error: 'cannot_remove_self' });
+  accounts.setAdmin(target, false);
+  console.log(`admin removed: ${target.username}`);
+  res.json({ admins: adminList() });
 });
 
 // Update the display name (the name players see, distinct from the username)
@@ -1393,6 +1438,113 @@ app.get('/new-tournament', (_req, res) => res.sendFile(path.join(publicDir, 'new
 // reader account page
 app.get('/account', (_req, res) => res.sendFile(path.join(publicDir, 'account.html')));
 
+// the MODAQ games this browser / account / admin can have back
+app.get('/games', (_req, res) => res.sendFile(path.join(publicDir, 'games.html')));
+
+// The archive's listing: the caller's own games, or with `all` (admins only)
+// every game on the server. POST, so the staff tokens stay out of URLs/logs.
+app.post('/api/games/list', ah(async (req, res) => {
+  const caller = archiveCaller(req.body);
+  const all = req.body?.all === true && caller.admin;
+  const mine = { ...caller, admin: false };
+  const games = (await artifacts.listArchivedGames())
+    .filter((m) => all || archiveOwns(mine, m) || archivePlayed(caller, m));
+  // `access` says what the page may offer: 'owner' opens it in full; 'admin'
+  // (someone else's, seen only as admin) and 'granted' (a player whose
+  // request was approved) get results only; 'player' may ask for them.
+  const access = (m) => (archiveOwns(mine, m) ? 'owner'
+    : caller.admin && all ? 'admin'
+    : archiveGranted(caller, m) ? 'granted' : 'player');
+  res.json({
+    admin: caller.admin,
+    loggedIn: !!caller.account,
+    games: games.map((m) => {
+      const a = access(m);
+      return { ...publicArchiveMeta(m, caller, a === 'owner' || a === 'admin'), access: a, owned: a === 'owner' };
+    })
+  });
+}));
+
+// One game's results: the match QBJ and MODAQ's own copy. An admin reaching
+// a game only BY being admin gets the results and nothing that could show a
+// question: no MODAQ copy (it carries the whole packet), and a QBJ cut down to
+// names and numbers (its notes can quote an answer line in a protest reason).
+app.post('/api/games/:id', ah(async (req, res) => {
+  const meta = await artifacts.getArchivedMeta(req.params.id);
+  const caller = archiveCaller(req.body);
+  const owner = meta && archiveOwns({ ...caller, admin: false }, meta);
+  if (!meta || !(owner || caller.admin || archiveGranted(caller, meta))) return res.status(404).json({ error: 'not_found' });
+  const body = await artifacts.getArchivedBody(meta.id);
+  if (!owner) {
+    return res.json({ meta: publicArchiveMeta(meta, caller), qbj: resultsOnlyQbj(body?.qbj), json: null, resultsOnly: true });
+  }
+  res.json({ meta: publicArchiveMeta(meta, caller, true), qbj: body?.qbj ?? null, json: body?.json ?? null });
+}));
+
+// A player who played in a game asks for its scoresheet. The game's
+// moderators (and admins) see the request on their /games and answer it.
+app.post('/api/games/:id/request', ah(async (req, res) => {
+  const caller = archiveCaller(req.body);
+  if (!caller.account) return res.status(401).json({ error: 'not_logged_in' });
+  const out = await withArchiveLock(String(req.params.id), async () => {
+    const meta = await artifacts.getArchivedMeta(req.params.id);
+    if (!meta || !archivePlayed(caller, meta)) return { status: 404, error: 'not_found' };
+    meta.requests ||= [];
+    let r = meta.requests.find((x) => x.accountId === caller.account.id);
+    if (r?.status === 'approved') return { ok: true, status: 'approved' };
+    if (!r) {
+      if (meta.requests.length >= 200) return { status: 429, error: 'too_many_requests' };
+      r = { accountId: caller.account.id, at: Date.now() };
+      meta.requests.push(r);
+    }
+    r.name = String(caller.account.displayName || caller.account.username).slice(0, 40);
+    r.status = 'pending';
+    r.at = Date.now();
+    await artifacts.saveArchivedMeta(meta);
+    return { ok: true, status: 'pending' };
+  });
+  if (out.error) return res.status(out.status).json({ error: out.error });
+  res.json(out);
+}));
+
+// A moderator of the game (or an admin) answers a request: approve | deny.
+app.post('/api/games/:id/requests/:accountId', ah(async (req, res) => {
+  const caller = archiveCaller(req.body);
+  const decision = req.body?.decision === 'approve' ? 'approved' : req.body?.decision === 'deny' ? 'denied' : null;
+  if (!decision) return res.status(400).json({ error: 'bad_decision' });
+  const out = await withArchiveLock(String(req.params.id), async () => {
+    const meta = await artifacts.getArchivedMeta(req.params.id);
+    if (!meta || !archiveOwns(caller, meta)) return { status: 404, error: 'not_found' };
+    const r = (meta.requests || []).find((x) => x.accountId === req.params.accountId);
+    if (!r) return { status: 404, error: 'no_request' };
+    r.status = decision;
+    r.decidedAt = Date.now();
+    await artifacts.saveArchivedMeta(meta);
+    return { ok: true, status: decision };
+  });
+  if (out.error) return res.status(out.status).json({ error: out.error });
+  res.json(out);
+}));
+
+// Put a game back in front of a moderator: a new MODAQ room whose shared game
+// IS the archived one, so the page opens on it — to fix a score or export.
+// Scoring it there files a fresh archive entry; the original stays as it was.
+app.post('/api/games/:id/reopen', ah(async (req, res) => {
+  const meta = await artifacts.getArchivedMeta(req.params.id);
+  // Owners only, admins included: the reopened page shows the packet.
+  if (!meta || !archiveOwns({ ...archiveCaller(req.body), admin: false }, meta)) return res.status(404).json({ error: 'not_found' });
+  const body = await artifacts.getArchivedBody(meta.id);
+  if (!body?.json) return res.status(409).json({ error: 'no_modaq_copy' });
+  const teams = (meta.teams || []).join(' vs ');
+  const room = store.createRoom({
+    name: `Reopened: ${teams || meta.round || meta.id}`.slice(0, 60),
+    settings: { modaqMode: true, modaqLite: true }
+  });
+  room.modaqState = { seq: 1, round: 'lite', json: body.json, by: null, at: Date.now() };
+  await artifacts.saveModaqState(room.code, room.modaqState);
+  res.json({ code: room.code, readerToken: room.readerToken, coReaderToken: room.coReaderToken });
+}));
+
 // public tournament directory (browse + request to moderate)
 app.get('/tournaments', (_req, res) => res.sendFile(path.join(publicDir, 'directory.html')));
 
@@ -1535,6 +1687,193 @@ async function modaqStateFor(room) {
 }
 const MODAQ_STATE_MAX = 6 * 1024 * 1024;
 
+// --- the game archive ----------------------------------------------------------
+// Every MODAQ game with something scored in it is filed in the archive (see
+// artifacts.saveArchivedGame) as it's played, so the results survive the
+// moderator closing the tab, the room ageing out, and a restart. The room
+// keeps which archive entry the game on screen is (`room.archive`); a new
+// entry starts when the game does — a different round or different teams, or
+// a game with nothing scored after one that had something.
+const hashToken = (t) => createHash('sha256').update(String(t)).digest('hex');
+const roomTokenHashes = (room) => [room.readerToken, room.coReaderToken].filter(Boolean).map(hashToken);
+
+// Admins recover any game. Named by account username in KLAXON_ADMINS
+// (comma-separated), so there's no admin until the operator says who it is.
+// Admins other admins added are marked on the account itself. The env ones
+// can't be removed from the page — that's what keeps the operator from being
+// locked out.
+const ADMINS = new Set(String(process.env.KLAXON_ADMINS || '').split(',').map((u) => u.trim().toLowerCase()).filter(Boolean));
+const envAdmin = (account) => !!account && ADMINS.has(String(account.username).toLowerCase());
+const isAdmin = (account) => envAdmin(account) || account?.admin === true;
+
+const archiveTimers = new Map(); // room code -> pending write
+const ARCHIVE_WRITE_MS = 2000;
+
+function countBuzzes(match) {
+  return (Array.isArray(match?.match_questions) ? match.match_questions : [])
+    .reduce((n, q) => n + (Array.isArray(q?.buzzes) ? q.buzzes.length : 0), 0);
+}
+
+// A new QBJ from the reader's page: decide which archive entry it belongs to
+// and queue the write. `accountId` is whoever sent it, if logged in.
+function trackArchive(room, match, accountId) {
+  if (!match || typeof match !== 'object') { room.archive = null; return; }
+  const events = countBuzzes(match);
+  if (events === 0) {
+    // A fresh game after a scored one: the scored one is finished with.
+    if (room.archive?.events > 0) room.archive = null;
+    return;
+  }
+  const round = String(room.modaqState?.round ?? '');
+  const teams = (Array.isArray(match.match_teams) ? match.match_teams : []).map((mt) => String(mt?.team?.name ?? ''));
+  const teamsKey = [...teams].sort().join('|');
+  const a = room.archive;
+  if (!a || a.round !== round || a.teamsKey !== teamsKey) {
+    room.archive = { id: `${room.code}-${Date.now().toString(36)}-${uuid().slice(0, 8)}`, round, teamsKey, startedAt: Date.now(), accounts: [], events };
+  }
+  room.archive.events = events;
+  if (accountId && !room.archive.accounts.includes(accountId)) room.archive.accounts.push(accountId);
+  // Logged-in players who are here for it. They don't own the game — they may
+  // see that it happened and ask a moderator for its scoresheet.
+  room.archive.players ||= [];
+  for (const [, c] of sock) {
+    if (c.roomCode === room.code && !c.staffRole && c.accountId && !room.archive.players.includes(c.accountId)) {
+      room.archive.players.push(c.accountId);
+    }
+  }
+  room.archiveQbj = match;
+  if (!archiveTimers.has(room.code)) {
+    archiveTimers.set(room.code, setTimeout(() => {
+      archiveTimers.delete(room.code);
+      writeArchive(room).catch((e) => console.error('game archive write failed:', e));
+    }, ARCHIVE_WRITE_MS));
+  }
+}
+
+// Meta edits (a filing, a request, an answer to one) read-modify-write the
+// same file; one at a time per game, or a request could vanish under a filing.
+const archiveLocks = new Map();
+function withArchiveLock(id, fn) {
+  const prev = archiveLocks.get(id) || Promise.resolve();
+  const next = prev.catch(() => {}).then(fn);
+  archiveLocks.set(id, next);
+  next.finally(() => { if (archiveLocks.get(id) === next) archiveLocks.delete(id); }).catch(() => {});
+  return next;
+}
+
+function writeArchive(room) {
+  const a = room.archive;
+  if (!a || !room.archiveQbj) return Promise.resolve();
+  return withArchiveLock(a.id, () => writeArchiveNow(room, a));
+}
+
+async function writeArchiveNow(room, a) {
+  const sheet = room.scoresheet;
+  const state = await modaqStateFor(room);
+  const prev = await artifacts.getArchivedMeta(a.id);
+  const tournament = room.tournamentCode ? store.getTournament(room.tournamentCode) : null;
+  // MODAQ's own copy of the game, so it can be reopened and re-scored — only
+  // while the shared game is still this one (the round is the check we have).
+  const json = state?.json && String(state.round ?? '') === a.round
+    ? state.json
+    : (await artifacts.getArchivedBody(a.id))?.json ?? null;
+  await artifacts.saveArchivedGame({
+    id: a.id,
+    room: room.code,
+    roomName: room.name,
+    tournament: tournament ? { code: tournament.code, name: tournament.name } : null,
+    round: a.round,
+    teams: sheet ? sheet.teams.map((t) => t.name) : [],
+    scores: sheet ? sheet.scores : [],
+    current: sheet ? sheet.current : 0,
+    total: sheet ? sheet.total : 0,
+    startedAt: a.startedAt,
+    updatedAt: Date.now(),
+    ended: !!room.ended,
+    hasQbj: true,
+    owners: {
+      tokens: [...new Set([...(prev?.owners?.tokens || []), ...roomTokenHashes(room)])],
+      accounts: [...new Set([...(prev?.owners?.accounts || []), ...a.accounts])]
+    },
+    players: [...new Set([...(prev?.players || []), ...(a.players || [])])],
+    requests: prev?.requests || []
+  }, { qbj: room.archiveQbj, json });
+}
+
+// Which archived games may this caller have? `tokens` are the staff tokens
+// the browser holds; an account adds the games it scored in; an admin, all.
+function archiveCaller(body) {
+  const account = accounts.accountForSession(body?.sessionToken);
+  const tokens = (Array.isArray(body?.tokens) ? body.tokens : []).slice(0, 500)
+    .filter((t) => typeof t === 'string' && t.length >= 16 && t.length <= 200);
+  return { account, admin: isAdmin(account), hashes: new Set(tokens.map(hashToken)) };
+}
+function archiveOwns(caller, meta) {
+  if (caller.admin) return true;
+  if (caller.account && (meta.owners?.accounts || []).includes(caller.account.id)) return true;
+  return (meta.owners?.tokens || []).some((h) => caller.hashes.has(h));
+}
+// A player's scoresheet request, answered: they get the results.
+const archiveGranted = (caller, meta) => !!caller.account &&
+  (meta.requests || []).some((r) => r.accountId === caller.account.id && r.status === 'approved');
+const archivePlayed = (caller, meta) => !!caller.account && (meta.players || []).includes(caller.account.id);
+
+// What the page may show. Owners see who asked for the scoresheet; a player
+// sees only where their own request stands.
+function publicArchiveMeta({ owners, players, requests, ...meta }, caller = null, owned = false) {
+  if (owned) {
+    meta.requests = (requests || []).map(({ accountId, ...r }) => ({ ...r, id: accountId }));
+  } else if (caller?.account) {
+    const mine = (requests || []).find((r) => r.accountId === caller.account.id);
+    if (mine) meta.myRequest = { status: mine.status, at: mine.at };
+  }
+  return meta;
+}
+
+// A match QBJ with only what a score needs: team and player names, who buzzed
+// where and for how much, bonus points. Built up from nothing rather than
+// stripped down, so a field MODAQ adds later can't carry question text through.
+function resultsOnlyQbj(qbj) {
+  if (!qbj || typeof qbj !== 'object') return null;
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : undefined);
+  const name = (x) => ({ name: String(x?.name ?? '') });
+  const qref = (q) => (q && typeof q === 'object'
+    ? { question_number: num(q.question_number), type: q.type === 'bonus' ? 'bonus' : 'tossup', parts: num(q.parts) }
+    : undefined);
+  const arr = (v) => (Array.isArray(v) ? v : []);
+  return {
+    tossups_read: num(qbj.tossups_read),
+    overtime_tossups_read: num(qbj.overtime_tossups_read),
+    match_teams: arr(qbj.match_teams).map((mt) => ({
+      team: name(mt?.team),
+      forfeit_loss: mt?.forfeit_loss === true,
+      bonus_points: num(mt?.bonus_points),
+      bonus_bounceback_points: num(mt?.bonus_bounceback_points),
+      match_players: arr(mt?.match_players).map((mp) => ({
+        player: name(mp?.player),
+        tossups_heard: num(mp?.tossups_heard),
+        answer_counts: arr(mp?.answer_counts).map((ac) => ({ answer: { value: num(ac?.answer?.value) }, number: num(ac?.number) }))
+      })),
+      lineups: arr(mt?.lineups).map((l) => ({ first_question: num(l?.first_question), players: arr(l?.players).map(name) }))
+    })),
+    match_questions: arr(qbj.match_questions).map((q) => ({
+      question_number: num(q?.question_number),
+      tossup_question: qref(q?.tossup_question),
+      replacement_tossup_question: qref(q?.replacement_tossup_question),
+      buzzes: arr(q?.buzzes).map((b) => ({
+        player: name(b?.player),
+        team: name(b?.team),
+        buzz_position: { word_index: num(b?.buzz_position?.word_index) },
+        result: { value: num(b?.result?.value) }
+      })),
+      bonus: q?.bonus ? {
+        question: qref(q.bonus.question),
+        parts: arr(q.bonus.parts).map((p) => ({ controlled_points: num(p?.controlled_points), bounceback_points: num(p?.bounceback_points) }))
+      } : undefined
+    }))
+  };
+}
+
 // Eject a player's live socket(s) from a room (after the reader removes them).
 function kickPlayer(room, playerId, reason) {
   for (const [sid, ctx] of sock) {
@@ -1666,7 +2005,11 @@ io.on('connection', (socket) => {
       roomCode: room.code,
       playerId: member.id,
       staffRole,
-      packetOk
+      packetOk,
+      // Whose account this is (if logged in): the games a moderator scores,
+      // and the games a player plays in, are found again from it (see the
+      // game archive).
+      accountId: accounts.accountForSession(payload?.sessionToken)?.id || null
     });
 
     // Staff learn whether a shared MODAQ game exists (and how current it is)
@@ -2017,6 +2360,7 @@ io.on('connection', (socket) => {
       // the player-safe scoresheet (see store.buildPlayerScoresheet) before
       // it goes anywhere near a player. `qbj: null` clears it.
       case 'modaq_game': {
+        try { trackArchive(room, payload.qbj ?? null, ctx.accountId || null); } catch (e) { console.error('game archive failed:', e); }
         store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false,
           payload.protests, payload.categories, payload.answers, payload.questions,
           // Which of a shootout's packets this game is, so the score can be
@@ -2385,6 +2729,13 @@ try {
 } catch (e) {
   console.error('rehydration failed (continuing with empty store):', e);
 }
+// Games scored before the archive existed are copied into it once, owned by
+// their room's tokens where the room is still on record.
+artifacts.importLegacyGames((code) => {
+  const room = store.getRoom(code);
+  return room ? roomTokenHashes(room) : [];
+}).then((n) => { if (n) console.log(`archived ${n} earlier game(s)`); })
+  .catch((e) => console.error('legacy game import failed:', e));
 store.setPersistence({
   tournament: (record) => artifacts.saveTournamentRecord(record).catch((e) => console.error('persist tournament failed:', e)),
   rooms: (records) => artifacts.saveRoomRecords(records).catch((e) => console.error('persist rooms failed:', e))

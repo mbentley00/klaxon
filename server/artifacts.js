@@ -753,3 +753,106 @@ export async function memberStatus(bucket, accountId) {
 }
 
 export const _internal = { bucketDir, safeName };
+
+// --- the game archive ----------------------------------------------------------
+// Every MODAQ game anyone scores, kept apart from its room so it outlives it:
+// a room ages out after 30 days (and its code can be dealt again), a game's
+// results shouldn't. Two files per game — a small meta for listing and the
+// body (the match QBJ and MODAQ's own serialized game) — so a listing never
+// reads the packets the bodies carry.
+//
+// Who may have one back is recorded on the meta as `owners`: hashes of the
+// room's staff tokens (a browser that created or co-read the room still holds
+// one) and the ids of accounts that scored in it. Admins see everything.
+const ARCHIVE_ID_RE = /^[A-Za-z0-9_-]{4,80}$/;
+const archiveDir = () => path.join(DATA_DIR, 'games');
+
+export async function saveArchivedGame(meta, body) {
+  if (!ARCHIVE_ID_RE.test(meta?.id || '')) throw new Error('bad_game_id');
+  // The body first: a meta that lists a game must always have one to hand out.
+  await writeAtomic(path.join(archiveDir(), `${meta.id}.json`), JSON.stringify(body));
+  await writeAtomic(path.join(archiveDir(), `${meta.id}.meta.json`), JSON.stringify(meta));
+}
+
+// The meta alone: requests and grants change it without touching the body.
+export async function saveArchivedMeta(meta) {
+  if (!ARCHIVE_ID_RE.test(meta?.id || '')) throw new Error('bad_game_id');
+  await writeAtomic(path.join(archiveDir(), `${meta.id}.meta.json`), JSON.stringify(meta));
+}
+
+export async function getArchivedMeta(id) {
+  if (!ARCHIVE_ID_RE.test(String(id || ''))) return null;
+  const text = await readTextOrNull(path.join(archiveDir(), `${id}.meta.json`));
+  if (text == null) return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+export async function getArchivedBody(id) {
+  if (!ARCHIVE_ID_RE.test(String(id || ''))) return null;
+  const text = await readTextOrNull(path.join(archiveDir(), `${id}.json`));
+  if (text == null) return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+// Every meta, newest first.
+export async function listArchivedGames() {
+  let files;
+  try { files = await fs.readdir(archiveDir()); }
+  catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+  const out = [];
+  for (const f of files) {
+    if (!f.endsWith('.meta.json')) continue;
+    const text = await readTextOrNull(path.join(archiveDir(), f));
+    if (text == null) continue;
+    try { out.push(JSON.parse(text)); } catch { /* skip a bad file */ }
+  }
+  out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return out;
+}
+
+// Games from before the archive existed: each room's filed "previous games"
+// and its last shared game, still on the volume under r/CODE but reachable
+// only through a room that may be long gone. Copied in once (an id that's
+// already archived is skipped), owned by the room's tokens when the room is
+// still on record.
+export async function importLegacyGames(tokenHashesFor) {
+  const rDir = path.join(DATA_DIR, 'r');
+  let codes;
+  try { codes = await fs.readdir(rDir); }
+  catch (e) { if (e.code === 'ENOENT') return 0; throw e; }
+  let imported = 0;
+  const have = new Set((await listArchivedGames()).map((m) => m.id));
+  for (const code of codes) {
+    if (!CODE_RE.test(code)) continue;
+    const owners = { tokens: tokenHashesFor(code), accounts: [] };
+    const candidates = [];
+    for (const g of await listGames(code).catch(() => [])) {
+      candidates.push({ id: `r-${code}-${safeName(g.id, 'game')}`, load: () => getGame(code, g.id) });
+    }
+    candidates.push({ id: `r-${code}-shared`, load: () => getModaqState(code) });
+    for (const c of candidates) {
+      if (have.has(c.id) || !ARCHIVE_ID_RE.test(c.id)) continue;
+      const rec = await c.load().catch(() => null);
+      if (!rec?.json) continue;
+      const at = rec.at || Date.now();
+      await saveArchivedGame({
+        id: c.id,
+        room: code,
+        roomName: null,
+        tournament: null,
+        round: rec.round ?? '',
+        teams: Array.isArray(rec.teams) ? rec.teams : [],
+        scores: Array.isArray(rec.scores) ? rec.scores : [],
+        current: rec.current || 0,
+        total: rec.total || 0,
+        startedAt: at,
+        updatedAt: at,
+        legacy: true,
+        hasQbj: false,
+        owners
+      }, { json: rec.json, qbj: null });
+      imported++;
+    }
+  }
+  return imported;
+}
