@@ -13,7 +13,7 @@ async function init() {
       account = r.account;
       const pill = $('#account-pill');
       pill.textContent = account.username;
-    } catch { localStorage.removeItem('bz_sessionToken'); }
+    } catch (e) { if (e.message === 'not_logged_in') localStorage.removeItem('bz_sessionToken'); }
   }
   await render();
 }

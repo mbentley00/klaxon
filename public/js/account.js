@@ -113,7 +113,7 @@ async function init() {
       applyPrefs(account);
       if (returnTo) return void location.assign(returnTo); // already signed in: head back
       return showSignedIn(account);
-    } catch { clearSession(); }
+    } catch (e) { if (e.message === 'not_logged_in') clearSession(); }
   }
   showSignedOut();
   setMode('login');
@@ -170,6 +170,10 @@ $('#save-email').onclick = async () => {
   }
 };
 
-$('#logout').onclick = () => { clearSession(); showSignedOut(); setMode('login'); say('Signed out.'); };
+$('#logout').onclick = () => {
+  const t = session();
+  if (t) api('POST', '/api/accounts/logout', { sessionToken: t }).catch(() => {});
+  clearSession(); showSignedOut(); setMode('login'); say('Signed out.');
+};
 
 init();

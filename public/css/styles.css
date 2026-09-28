@@ -45,9 +45,11 @@
   --ss-border: #000;
   --ss-line: #edebe9;
   --ss-current: #edebe9;
-  --display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
-  --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* The faces themselves are in fonts.css (self-hosted, with fallbacks
+     scaled to match so nothing moves when they arrive). */
+  --display: "Bricolage Grotesque", "Bricolage fallback", system-ui, sans-serif;
+  --sans: "Atkinson Hyperlegible Next", "Atkinson fallback", "Segoe UI", system-ui, sans-serif;
+  --mono: "Atkinson Hyperlegible Mono", "Atkinson Mono fallback", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --radius: 4px;
   --shadow: 5px 5px 0 var(--shadow-ink);
 }
@@ -108,8 +110,9 @@ body {
   background: var(--bg); color: var(--ink);
   -webkit-tap-highlight-color: transparent;
 }
-h1, h2, h3 { font-family: var(--display); font-weight: 700; margin: 0 0 .4em; letter-spacing: -.01em; }
-h2 { font-size: 1.15rem; text-transform: uppercase; letter-spacing: .04em; }
+h1, h2, h3 { font-family: var(--display); font-weight: 800; margin: 0 0 .4em; letter-spacing: -.01em; }
+/* Sentence case: Bricolage's shapes carry the voice the capitals used to. */
+h2 { font-size: 1.35rem; letter-spacing: -.01em; }
 h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
 
 button, .btnlink {
@@ -154,8 +157,8 @@ a { color: var(--accent); text-underline-offset: 2px; }
   box-shadow: var(--shadow); padding: 28px; width: 100%; max-width: 460px;
 }
 .wordmark {
-  font-size: 2.6rem; letter-spacing: -.03em; margin: 0; line-height: 1;
-  border-bottom: 4px solid var(--accent); display: inline-block; padding-bottom: 2px;
+  font-size: 3rem; letter-spacing: -.045em; margin: 0; line-height: 1;
+  border-bottom: 6px solid var(--accent); display: inline-block; padding-bottom: 2px;
 }
 .tag { color: var(--muted); margin: .6em 0 1.4em; font-size: 1.02rem; }
 .card section { margin: 20px 0; }
@@ -716,6 +719,15 @@ body.compact .scoresheet { display: none; }
 .archive-teams { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .archive-meta { white-space: normal; margin-top: 2px; }
 .archive-actions { margin-top: 6px; gap: 6px; flex-wrap: wrap; }
+.archive-details { margin-top: 6px; display: grid; gap: 3px; font-size: .88rem; }
+.archive-roster { display: flex; gap: 8px; min-width: 0; }
+.archive-roster > span:last-child { min-width: 0; overflow-wrap: anywhere; color: var(--muted); }
+.archive-roster-team { font-weight: 700; flex: 0 0 auto; max-width: 45%; overflow-wrap: anywhere; }
+.archive-tally { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 3px; }
+.archive-chip { font-size: .75rem; padding: 1px 7px; border-radius: 3px; border-left: 3px solid transparent; }
+.archive-chip.ss-neg { background: var(--bad-bg); border-left-color: var(--bad); color: var(--bad); }
+.archive-chip.ss-get { background: var(--ok-bg); border-left-color: var(--ok); color: var(--ok-deep); }
+.archive-chip.ss-power { background: var(--mine-fill); color: var(--on-mine); font-weight: 600; }
 .archive-requests { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--soft); }
 .archive-request { align-items: center; margin-top: 4px; }
 .archive-request > span:first-child { font-weight: 600; margin-right: auto; }

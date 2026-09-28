@@ -22,8 +22,30 @@ const say = (t, ok = true) => { msg.textContent = t; msg.className = 'msg ' + (o
 
 function describe(g) {
   return g.teams?.length
-    ? g.teams.map((name, i) => `${name} ${g.scores?.[i] ?? 0}`).join(' – ')
-    : '(teams not recorded)';
+    ? g.teams.map((name, i) => `${name} ${g.scores?.[i] ?? 0}`).join(' vs ')
+    : 'Teams not recorded';
+}
+const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+
+// Who played for each side, and how the tossups went. The server sends these
+// only for games the viewer may see the scoresheet of.
+function details(g) {
+  const box = el('div', { className: 'archive-details' });
+  for (const r of g.roster || []) {
+    if (!r.team) continue;
+    box.append(el('div', { className: 'archive-roster' },
+      el('span', { className: 'archive-roster-team' }, r.team),
+      el('span', {}, r.players?.length ? r.players.join(', ') : 'No players listed')));
+  }
+  const t = g.tally;
+  if (t && (t.powers || t.gets || t.negs)) {
+    const line = el('div', { className: 'archive-tally' });
+    for (const [n, one, cls] of [[t.powers, 'power', 'ss-power'], [t.gets, 'get', 'ss-get'], [t.negs, 'neg', 'ss-neg']]) {
+      if (n) line.append(el('span', { className: `archive-chip ${cls}` }, plural(n, one)));
+    }
+    box.append(line);
+  }
+  return box.childElementCount ? box : null;
 }
 function when(ts) {
   return ts ? new Date(ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
@@ -134,7 +156,7 @@ function row(g) {
   const bits = [
     g.tournament ? g.tournament.name || g.tournament.code : g.roomName,
     g.round && g.round !== 'lite' ? `Round ${g.round}` : '',
-    g.total ? `Q${Math.min(g.current, g.total)}/${g.total}` : '',
+    g.total ? `Q${Math.min(g.current, g.total)}/${g.total}` : g.current ? plural(g.current, 'tossup') + ' scored' : '',
     when(g.updatedAt),
     played ? 'you played' : '',
     g.legacy ? 'saved before the archive' : ''
@@ -142,7 +164,8 @@ function row(g) {
   const meta = el('div', { className: 'recent-meta archive-meta' }, bits.join(' · '));
   const actions = el('div', { className: 'row archive-actions' });
   const base = fileSafe(`${(g.teams || []).join(' vs ') || g.room}${g.round && g.round !== 'lite' ? ' R' + g.round : ''}`);
-  li.append(head, meta, actions);
+  const more = details(g);
+  li.append(head, meta, ...(more ? [more] : []), actions);
 
   // A player in the game: ask its moderator, or see where the ask stands.
   if (g.access === 'player') {

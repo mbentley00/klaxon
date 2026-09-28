@@ -1,0 +1,61 @@
+/* Klaxon's typefaces, served from here rather than Google Fonts: one fewer
+   origin to connect to before first paint, and nothing third-party.
+
+   Bricolage Grotesque 800 — the wordmark, headings, buttons and the buzzer.
+   Atkinson Hyperlegible Next — everything read, questions included: it keeps
+     I, l and 1 (and 0 and O) apart, which matters reading fast on a phone.
+   Atkinson Hyperlegible Mono — room codes, scores, anything tabular.
+
+   Latin subsets (the ones Google serves), font-display: swap so text shows in
+   the fallback at once. Each fallback is a local system font scaled to the
+   real one's width and line metrics, so the swap doesn't move anything — a
+   button must never jump from under a thumb. The numbers were measured from
+   these files with fontTools against Arial / Arial Bold / Courier New Bold. */
+
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url(/fonts/bricolage-800.woff2) format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  src: url(/fonts/atkinson-next.woff2) format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Mono";
+  src: url(/fonts/atkinson-mono-600.woff2) format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Bricolage fallback";
+  src: local("Arial Bold"), local("Arial-BoldMT"), local("Arial");
+  font-weight: 800;
+  size-adjust: 100.97%;
+  ascent-override: 92.1%;
+  descent-override: 26.74%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Atkinson fallback";
+  src: local("Arial"), local("ArialMT");
+  size-adjust: 99.15%;
+  ascent-override: 99.24%;
+  descent-override: 31.87%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Atkinson Mono fallback";
+  src: local("Courier New Bold"), local("CourierNewPS-BoldMT"), local("Courier New");
+  size-adjust: 105.32%;
+  ascent-override: 93.43%;
+  descent-override: 30%;
+  line-gap-override: 0%;
+}

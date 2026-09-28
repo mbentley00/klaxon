@@ -54,5 +54,5 @@ $('#open-form').addEventListener('submit', (e) => {
   try {
     const { account } = await api('GET', `/api/accounts/me?sessionToken=${encodeURIComponent(s)}`);
     link.textContent = `Account · ${account.username}`;
-  } catch { localStorage.removeItem('bz_sessionToken'); }
+  } catch (e) { if (e.message === 'not_logged_in') localStorage.removeItem('bz_sessionToken'); }
 })();

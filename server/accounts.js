@@ -3,8 +3,10 @@
 // once, then requests access to a tournament that requires approved accounts
 // (see artifacts.js memberships + the gate in index.js).
 //
-// Accounts persist to disk (they matter across restarts); sessions are
-// in-memory (readers just log in again after a restart).
+// Accounts and sessions both persist to disk: a deploy restarts the server,
+// and it mustn't sign everyone out. Sessions are stored by the hash of their
+// token (a copied sessions.json can't be replayed) and lapse after
+// SESSION_IDLE_MS without use.
 // ---------------------------------------------------------------------------
 
 import fs from 'node:fs';
@@ -17,7 +19,13 @@ const accountsFile = path.join(DATA_DIR, 'accounts.json');
 const accounts = new Map();       // id -> { id, username, usernameLower, email, salt, hash, createdAt }
 const byUsername = new Map();     // usernameLower -> id
 const byEmail = new Map();        // email (lowercased) -> id
-const sessions = new Map();       // sessionToken -> accountId
+const sessions = new Map();       // sha256(sessionToken) -> { accountId, createdAt, lastSeen }
+const sessionsFile = path.join(DATA_DIR, 'sessions.json');
+const SESSION_IDLE_MS = 180 * 24 * 60 * 60 * 1000;
+// lastSeen is only rewritten once a day per session, so ordinary use
+// doesn't turn into a disk write per request.
+const SEEN_GRANULARITY_MS = 24 * 60 * 60 * 1000;
+const tokenKey = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 
 function loadFromDisk() {
   try {
@@ -33,6 +41,31 @@ function loadFromDisk() {
   } catch { /* no accounts yet */ }
 }
 loadFromDisk();
+
+function loadSessions() {
+  try {
+    const obj = JSON.parse(fs.readFileSync(sessionsFile, 'utf8'));
+    const now = Date.now();
+    for (const [k, v] of Object.entries(obj || {})) {
+      if (v?.accountId && now - (v.lastSeen || 0) < SESSION_IDLE_MS) sessions.set(k, v);
+    }
+  } catch { /* none yet */ }
+}
+loadSessions();
+
+let sessionsTimer = null;
+function saveSessionsSoon() {
+  if (sessionsTimer) return;
+  sessionsTimer = setTimeout(() => {
+    sessionsTimer = null;
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      const tmp = `${sessionsFile}.tmp-${process.pid}`;
+      fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(sessions)));
+      fs.renameSync(tmp, sessionsFile);
+    } catch (e) { console.error('[accounts] session save failed', e.message); }
+  }, 1000);
+}
 
 function saveToDisk() {
   try {
@@ -154,13 +187,26 @@ export function login(username, password) {
 
 function startSession(accountId) {
   const t = token();
-  sessions.set(t, accountId);
+  const now = Date.now();
+  sessions.set(tokenKey(t), { accountId, createdAt: now, lastSeen: now });
+  saveSessionsSoon();
   return t;
 }
 
 export function accountForSession(sessionToken) {
-  const accountId = sessionToken && sessions.get(sessionToken);
-  return accountId ? accounts.get(accountId) || null : null;
+  if (!sessionToken || typeof sessionToken !== 'string') return null;
+  const key = tokenKey(sessionToken);
+  const s = sessions.get(key);
+  if (!s) return null;
+  const now = Date.now();
+  if (now - s.lastSeen > SESSION_IDLE_MS) { sessions.delete(key); saveSessionsSoon(); return null; }
+  if (now - s.lastSeen > SEEN_GRANULARITY_MS) { s.lastSeen = now; saveSessionsSoon(); }
+  return accounts.get(s.accountId) || null;
+}
+
+// Signing out ends the session on the server too, not just in the browser.
+export function endSession(sessionToken) {
+  if (sessions.delete(tokenKey(sessionToken))) saveSessionsSoon();
 }
 
 export function getAccount(accountId) {

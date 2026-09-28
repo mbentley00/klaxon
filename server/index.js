@@ -22,6 +22,7 @@ import { buildZip } from './zip.js';
 import * as accounts from './accounts.js';
 import { parseYellowFruit, planImport } from './yfimport.js';
 import { parseQbjRoster } from './qbjroster.js';
+import { summarizeQbj, summarizeModaq } from './gamesummary.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -324,6 +325,11 @@ app.post('/api/accounts/login', (req, res) => {
   const r = accounts.login(req.body?.username, req.body?.password);
   if (r.error) return res.status(401).json({ error: r.error });
   res.json({ sessionToken: r.sessionToken, account: accounts.publicAccount(r.account) });
+});
+
+app.post('/api/accounts/logout', (req, res) => {
+  accounts.endSession(req.body?.sessionToken);
+  res.json({ ok: true });
 });
 
 app.get('/api/accounts/me', (req, res) => {
@@ -1460,7 +1466,11 @@ app.post('/api/games/list', ah(async (req, res) => {
     loggedIn: !!caller.account,
     games: games.map((m) => {
       const a = access(m);
-      return { ...publicArchiveMeta(m, caller, a === 'owner' || a === 'admin'), access: a, owned: a === 'owner' };
+      const out = { ...publicArchiveMeta(m, caller, a === 'owner' || a === 'admin'), access: a, owned: a === 'owner' };
+      // Who played and how it went is part of the scoresheet: a player gets
+      // it once the moderator approves.
+      if (a === 'player') { delete out.roster; delete out.tally; }
+      return out;
     })
   });
 }));
@@ -1791,6 +1801,7 @@ async function writeArchiveNow(room, a) {
     updatedAt: Date.now(),
     ended: !!room.ended,
     hasQbj: true,
+    ...summarizeQbj(room.archiveQbj),
     owners: {
       tokens: [...new Set([...(prev?.owners?.tokens || []), ...roomTokenHashes(room)])],
       accounts: [...new Set([...(prev?.owners?.accounts || []), ...a.accounts])]
@@ -2735,7 +2746,32 @@ artifacts.importLegacyGames((code) => {
   const room = store.getRoom(code);
   return room ? roomTokenHashes(room) : [];
 }).then((n) => { if (n) console.log(`archived ${n} earlier game(s)`); })
+  .then(() => backfillArchiveSummaries())
   .catch((e) => console.error('legacy game import failed:', e));
+
+// Games filed before listings carried who played (and the earliest ones,
+// before they carried teams or a score at all): read it off the saved game
+// once, so every listing can say it.
+async function backfillArchiveSummaries() {
+  let n = 0;
+  for (const m of await artifacts.listArchivedGames()) {
+    if (m.roster) continue;
+    await withArchiveLock(m.id, async () => {
+      const meta = await artifacts.getArchivedMeta(m.id);
+      if (!meta || meta.roster) return;
+      const body = await artifacts.getArchivedBody(m.id);
+      const sum = (body?.qbj && summarizeQbj(body.qbj)) || (body?.json && summarizeModaq(body.json));
+      if (!sum) { meta.roster = []; await artifacts.saveArchivedMeta(meta); return; }
+      meta.roster = sum.roster;
+      meta.tally = sum.tally;
+      if (!meta.teams?.length && sum.teams) { meta.teams = sum.teams; meta.scores = sum.scores; }
+      if (!meta.current && sum.heard) meta.current = sum.heard;
+      await artifacts.saveArchivedMeta(meta);
+      n++;
+    });
+  }
+  if (n) console.log(`summarized ${n} archived game(s)`);
+}
 store.setPersistence({
   tournament: (record) => artifacts.saveTournamentRecord(record).catch((e) => console.error('persist tournament failed:', e)),
   rooms: (records) => artifacts.saveRoomRecords(records).catch((e) => console.error('persist rooms failed:', e))
