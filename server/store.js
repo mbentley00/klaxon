@@ -1,4 +1,7 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { DEFAULTS } from './config.js';
+import { DATA_DIR } from './artifacts.js';
 import { roomCode, secretToken, uuid } from './ids.js';
 import * as protests from './protests.js';
 import * as answers from './answers.js';
@@ -156,8 +159,11 @@ function freshCycle(cycleNo) {
 }
 
 export function createRoom({ name, tournamentCode = null, settings = {} }) {
+  // Never a code with files on disk: a room that aged out leaves its shared
+  // MODAQ game (the packet) and its filed games under r/CODE, and a new room
+  // dealt the same code would read them as its own.
   let code;
-  do { code = roomCode(); } while (rooms.has(code));
+  do { code = roomCode(); } while (rooms.has(code) || existsSync(path.join(DATA_DIR, 'r', code)));
 
   // A room created inside a tournament inherits that tournament's defaults;
   // anything passed explicitly to createRoom still wins over them.

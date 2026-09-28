@@ -1032,7 +1032,7 @@ app.get('/api/rooms/:code/fullbuzz', ah(async (req, res) => {
 app.get('/api/rooms/:code/games', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
   if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
-  res.json({ games: await artifacts.listGames(room.code) });
+  res.json({ games: (await artifacts.listGames(room.code)).filter((g) => ownGame(room, g)) });
 }));
 
 app.get('/api/rooms/:code/games/:id', ah(async (req, res) => {
@@ -1041,7 +1041,7 @@ app.get('/api/rooms/:code/games/:id', ah(async (req, res) => {
   // The archived game carries the packet: same account gate as packet reads.
   if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
   const game = await artifacts.getGame(room.code, req.params.id);
-  if (!game) return res.status(404).json({ error: 'not_found' });
+  if (!game || !ownGame(room, game)) return res.status(404).json({ error: 'not_found' });
   res.json({ game });
 }));
 
@@ -1703,9 +1703,19 @@ function emitToStaff(roomCode, event, payload, except = null) {
 // after a restart. STAFF ONLY — it contains the packet.
 async function modaqStateFor(room) {
   if (room.modaqState === undefined) {
-    room.modaqState = (await artifacts.getModaqState(room.code)) || null;
+    const st = (await artifacts.getModaqState(room.code)) || null;
+    room.modaqState = st && ownGame(room, st) ? st : null;
   }
   return room.modaqState;
+}
+
+// Is this saved game (shared state or a filed one) this room's, and not left
+// on disk by an earlier room that was dealt the same code? Codes are 4
+// characters and a room ages out after 30 days, so it has happened: anything
+// saved before this room existed belongs to someone else. (createRoom no
+// longer deals a code with files; this covers rooms already given one.)
+function ownGame(room, rec) {
+  return !room.createdAt || (Number(rec?.at) || 0) >= room.createdAt;
 }
 const MODAQ_STATE_MAX = 6 * 1024 * 1024;
 
@@ -2760,12 +2770,35 @@ try {
 }
 // Games scored before the archive existed are copied into it once, owned by
 // their room's tokens where the room is still on record.
-artifacts.importLegacyGames((code) => {
+artifacts.importLegacyGames((code, at) => {
   const room = store.getRoom(code);
-  return room ? roomTokenHashes(room) : [];
+  return room && ownGame(room, { at }) ? roomTokenHashes(room) : [];
 }).then((n) => { if (n) console.log(`archived ${n} earlier game(s)`); })
+  .then(() => disownReusedCodes())
   .then(() => backfillArchiveSummaries())
   .catch((e) => console.error('legacy game import failed:', e));
+
+// Games imported before that check: if the room now holding the code was
+// created after the game was saved, its links were credited with a game that
+// isn't its own. Take them back off (the admin still sees the game).
+async function disownReusedCodes() {
+  let n = 0;
+  for (const m of await artifacts.listArchivedGames()) {
+    if (!m.legacy || !m.owners?.tokens?.length) continue;
+    const room = store.getRoom(m.room);
+    if (!room || ownGame(room, { at: m.startedAt })) continue;
+    const wrong = new Set(roomTokenHashes(room));
+    if (!m.owners.tokens.some((h) => wrong.has(h))) continue;
+    await withArchiveLock(m.id, async () => {
+      const meta = await artifacts.getArchivedMeta(m.id);
+      if (!meta?.owners) return;
+      meta.owners.tokens = meta.owners.tokens.filter((h) => !wrong.has(h));
+      await artifacts.saveArchivedMeta(meta);
+      n++;
+    });
+  }
+  if (n) console.log(`took ${n} archived game(s) back from a room that reused their code`);
+}
 
 // Games filed before listings carried who played (and the earliest ones,
 // before they carried teams or a score at all): read it off the saved game

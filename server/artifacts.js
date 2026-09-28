@@ -826,7 +826,6 @@ export async function importLegacyGames(tokenHashesFor) {
   const have = new Set((await listArchivedGames()).map((m) => m.id));
   for (const code of codes) {
     if (!CODE_RE.test(code)) continue;
-    const owners = { tokens: tokenHashesFor(code), accounts: [] };
     const candidates = [];
     for (const g of await listGames(code).catch(() => [])) {
       candidates.push({ id: `r-${code}-${safeName(g.id, 'game')}`, load: () => getGame(code, g.id) });
@@ -837,6 +836,9 @@ export async function importLegacyGames(tokenHashesFor) {
       const rec = await c.load().catch(() => null);
       if (!rec?.json) continue;
       const at = rec.at || Date.now();
+      // The room holding this code now owns the game only if it was already
+      // there when the game was saved: codes get dealt again.
+      const owners = { tokens: tokenHashesFor(code, at), accounts: [] };
       await saveArchivedGame({
         id: c.id,
         room: code,
