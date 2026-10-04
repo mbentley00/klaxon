@@ -128,9 +128,17 @@
         <div id="queue-controls" class="row hidden">
           <button id="ctl-next" class="ghost hidden">Next buzzer →</button>
           <button id="ctl-clear" class="ghost">Clear queue</button>
+          <button id="ctl-undo" class="ghost undo hidden">↶ Undo clear</button>
         </div>
         <button id="ctl-withdraw" class="ghost hidden">Withdraw my buzz</button>
         <p id="queue-note" class="hint"></p>
+        <!-- Staff only: the buzzer's recent history, newest first (see
+             store.recentActivity). Filled from the server's 'recent' event. -->
+        <details id="recent-view" class="recent hidden" open>
+          <summary>Recent buzzes</summary>
+          <ol id="recent-list"></ol>
+          <p id="recent-note" class="hint"></p>
+        </details>
       </section>
     </div>
 

@@ -1679,6 +1679,21 @@ function afterMassingerChange(room) {
 
 function emitState(room) {
   io.to(room.code).emit('state', store.publicState(room));
+  // The moderator's recent-buzzes list rides along, to staff only: it names
+  // who cleared what. Every buzzer change ends in an emitState, so this is
+  // the one place that keeps it current.
+  emitToStaff(room.code, 'recent', store.recentActivity(room));
+}
+
+// For presses that change nothing but the list (a locked buzzer being
+// hammered): one update per room per quarter second, not one per press.
+const recentTimers = new Map();
+function emitRecentSoon(room) {
+  if (recentTimers.has(room.code)) return;
+  recentTimers.set(room.code, setTimeout(() => {
+    recentTimers.delete(room.code);
+    emitToStaff(room.code, 'recent', store.recentActivity(room));
+  }, 250));
 }
 
 // Deliver an event to a room's staff sockets only (reader/co-reader) — used
@@ -2115,7 +2130,12 @@ io.on('connection', (socket) => {
       : arrival;
 
     const result = store.recordBuzz(room, { playerId: ctx.playerId, clampedTime, arrival });
-    if (!result.accepted) return;
+    if (!result.accepted) {
+      // Nothing changes for the room, but the moderator's recent list should
+      // show the press that didn't get in.
+      emitRecentSoon(room);
+      return;
+    }
 
     // Measure an RTT on a buzz-triggered round-trip (distinct from the routine
     // probe). Folds into future clamps via the min above. If the routine probe
@@ -2206,6 +2226,14 @@ io.on('connection', (socket) => {
       case 'next_buzz':
         store.nextBuzz(room, { by: store.memberName(room, ctx.playerId) });
         break;
+      // Undo the last clear: the buzzes it dropped go back in the queue.
+      case 'restore_buzzes': {
+        const res = store.restoreCleared(room, payload?.id ?? null, { by: store.memberName(room, ctx.playerId) });
+        if (res.error) return ack?.(res);
+        emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));
+        emitState(room);
+        return ack?.(res);
+      }
       case 'set_options':
         store.setOptions(room, payload.options || {});
         break;

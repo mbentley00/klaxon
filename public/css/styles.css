@@ -1204,3 +1204,37 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
   .theme-toggle { width: 34px; height: 34px; }
   .bar .theme-toggle { margin-block: -5px; }
 }
+
+/* Recent buzzes (staff): the buzzer's last few dozen events, newest first, in a
+   box that scrolls on its own. Clears are what a moderator comes here for, so
+   they stand out; one made without scoring is tinted as the slip it may be. */
+.order .recent { margin-top: 10px; }
+.order .recent summary { cursor: pointer; font-weight: 700; font-size: .85rem; }
+.order .recent ol {
+  list-style: none; padding: 0; margin: 6px 0 0;
+  max-height: 14rem; overflow-y: auto;
+  border: 1px solid var(--soft); border-radius: 6px; font-size: .8rem;
+}
+.order .recent li {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 3px 6px; border-bottom: 1px solid var(--soft);
+  min-width: 0; overflow-wrap: anywhere;
+}
+.order .recent li:last-child { border-bottom: none; }
+.order .recent li.empty { margin-left: 0; }
+/* The queue column is narrow: the time gets its own line, or it squeezes the
+   clear (the row that matters) down to a word per line. */
+.order .recent li { flex-wrap: wrap; row-gap: 0; }
+.order .recent time { flex: 0 0 100%; color: var(--muted); font-variant-numeric: tabular-nums; font-size: .7rem; }
+.order .recent .kr-text { flex: 1; min-width: 0; }
+.order .recent .kr-q {
+  display: inline-block; margin-right: 5px; padding: 0 4px; border-radius: 3px;
+  background: var(--soft); color: var(--ink); font-size: .7rem; font-variant-numeric: tabular-nums;
+}
+.order .recent .kr-note { color: var(--muted); font-style: italic; }
+.order .recent .kr-miss, .order .recent .kr-room { color: var(--muted); }
+.order .recent .kr-clear, .order .recent .kr-clear-accidental, .order .recent .kr-restore { font-weight: 700; }
+.order .recent .kr-clear-accidental { background: var(--warn-bg); }
+.order .recent .kr-alert { color: var(--bad); }
+.order .recent li button { flex: none; padding: 1px 8px; font-size: .75rem; }
+#ctl-undo { border-color: var(--warn); background: var(--warn-bg); font-weight: 700; }

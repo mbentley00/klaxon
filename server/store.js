@@ -937,13 +937,76 @@ export const displayName = (member) => member?.rosterPlayer || member?.name || '
 // is what the activity log is read for (see activityLog).
 export function resetBuzzer(room, { by = null, judged = false } = {}) {
   const dropped = room.queue.map((q) => q.name);
+  // The queue itself, not just the names, so a clear made by mistake can be
+  // undone (see restoreCleared) — and the question it was on, because putting
+  // a buzz back is only right while that question is still being read.
+  const droppedQueue = room.queue.map((q) => ({ ...q }));
+  const question = room.scoresheet?.current ?? null;
   room.cycleNo += 1;
   room.cycle = freshCycle(room.cycleNo);
   room.queue = [];
   room.lastBuzzAt = null;
   room.phase = 'open';
-  pushLog(room, { type: 'reset_buzzer', cycleNo: room.cycleNo, by, judged, dropped });
+  pushLog(room, {
+    type: 'reset_buzzer', id: nextLogId(), cycleNo: room.cycleNo, by, judged, dropped, droppedQueue, question
+  });
   persistRooms();
+}
+
+// Names one clear, so an Undo pressed on a list that has since moved on can't
+// undo a different one. Random rather than counted: the log outlives restarts.
+const nextLogId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+// The clear that can still be undone, if there is one: the latest clear, only
+// if it dropped somebody, hasn't been undone already, and the room is still on
+// the question it was made on. Anything older has been overtaken — later
+// buzzes were ruled on against the queue as it stood after it.
+function restorableClear(room) {
+  for (let i = (room.log?.length || 0) - 1; i >= 0; i--) {
+    const e = room.log[i];
+    if (e.type !== 'reset_buzzer') continue;
+    if (e.restored || !e.droppedQueue?.length) return null;
+    if ((room.scoresheet?.current ?? null) !== (e.question ?? null)) return null;
+    return e;
+  }
+  return null;
+}
+
+/**
+ * Undo a clear: the buzzes it dropped go back in the queue, in the order they
+ * were pressed — ahead of anybody who buzzed after the clear, since they
+ * buzzed first. For the moderator who hit Accidental buzz or Clear queue on
+ * the wrong buzz, or whose MODAQ ruling cleared a queue it shouldn't have.
+ *
+ * Players who have since left the room don't come back. A buzz the clear had
+ * marked accidental is unmarked: the room has just said it wasn't.
+ */
+export function restoreCleared(room, id, { by = null } = {}) {
+  const e = restorableClear(room);
+  if (!e || (id != null && e.id !== id)) return { error: 'not_restorable' };
+  const queued = new Set(room.queue.map((q) => q.playerId));
+  const back = e.droppedQueue.filter((q) => !queued.has(q.playerId) && room.members.has(q.playerId));
+  if (!back.length) return { error: 'nobody_to_restore' };
+
+  room.queue = [...back, ...room.queue].sort((a, b) => a.t - b.t);
+  const head = room.queue[0].t;
+  for (const q of room.queue) q.marginMs = Math.round(q.t - head);
+  if (!room.settings.queueMode) room.phase = 'locked';
+  if (room.lastBuzzAt == null) room.lastBuzzAt = Date.now();
+
+  // Typed answers belong to the cycle the clear ended. If nobody has opened a
+  // window since, the old one comes back with them — what they had typed, and
+  // what was already said — rather than leaving them to start again.
+  if (room.answers?.cycleNo === e.cycleNo - 1) room.answers.cycleNo = room.cycleNo;
+
+  const ids = new Set(back.map((q) => q.playerId));
+  for (const b of room.buzzLog || []) {
+    if (b.cycleNo === e.cycleNo - 1 && ids.has(b.playerId)) delete b.accidental;
+  }
+  e.restored = true;
+  pushLog(room, { type: 'restore_buzzes', by, restored: back.map((q) => q.name), clearId: e.id });
+  persistRooms();
+  return { ok: true, restored: back.length };
 }
 
 // Queue mode: drop the current head so the next buzzer is "on the buzz".
@@ -1562,6 +1625,8 @@ function logLine(e, room) {
       const lost = dropped.length ? ` \u2014 dropped ${dropped.join(', ')}` : ' \u2014 nobody was on it';
       return ['CLEAR', `${who} ${what}${lost}`];
     }
+    case 'restore_buzzes':
+      return ['UNDO', `${who} undid the last clear — ${(e.restored || []).join(', ')} back in the queue`];
     case 'next_buzz':
       return ['NEXT', `${who} moved past ${e.done || 'the buzz'}${e.headName ? ` \u2014 now on ${e.headName}` : ' \u2014 queue empty'}`];
     case 'withdraw': {
@@ -1661,6 +1726,115 @@ export function activityLog(room) {
   const body = rows.map(([at, kind, text]) =>
     `[${stampOf(at)}]  ${String(kind).padEnd(8)} ${text}`);
   return head.concat(body).join('\n') + '\n';
+}
+
+/**
+ * The last few things that happened to the buzzer, newest first, for the
+ * moderator's screen: who buzzed and how far behind, who pressed and didn't get
+ * in, every clear (and whether it was scored first, and whom it dropped), next
+ * buzzer, withdrawals, undos, stuck alerts. The activity log, cut down to what
+ * a moderator needs mid-tossup — chiefly "did I just clear the wrong buzz?",
+ * which is why the one clear that can still be undone says so.
+ *
+ * Staff only (it names who cleared what). Worded here, once, so the MODAQ
+ * panel and the plain reader page say the same thing.
+ */
+const RECENT_LIMIT = 40;
+const RECENT_MISS = {
+  locked: 'too late — the buzzer was locked',
+  queued: 'already in the queue',
+  duplicate: 'out of tries this question',
+  not_open: 'the buzzer was not open'
+};
+export function recentActivity(room, limit = RECENT_LIMIT) {
+  const items = [];
+  const tail = (list) => (list || []).slice(-limit * 2);
+
+  const buzzes = tail(room.buzzLog);
+  // Margins against the buzz that won each question, as the activity log does.
+  const firstOf = new Map();
+  for (const b of room.buzzLog || []) {
+    if (!b.accepted) continue;
+    const best = firstOf.get(b.cycleNo);
+    if (best == null || b.t < best) firstOf.set(b.cycleNo, b.t);
+  }
+  const pressed = new Set();
+  for (const b of buzzes) {
+    if (b.accepted) {
+      const base = firstOf.get(b.cycleNo);
+      const ms = base == null ? 0 : Math.max(0, Math.round(b.t - base));
+      items.push({
+        at: b.at, kind: 'buzz', question: b.question ?? null,
+        text: `${b.name} buzzed${ms ? ` +${ms}ms` : ' first'}`,
+        note: b.accidental ? 'cleared as accidental' : null
+      });
+    } else if (b.reason !== 'not_player') {
+      // A locked buzzer gets hammered: one row per player per question says
+      // they tried, without burying the clear the moderator is looking for.
+      const key = `${b.cycleNo}:${b.playerId}`;
+      if (pressed.has(key)) continue;
+      pressed.add(key);
+      items.push({
+        at: b.at, kind: 'miss', question: b.question ?? null,
+        text: `${b.name} pressed — ${RECENT_MISS[b.reason] || 'did not get in'}`
+      });
+    }
+  }
+
+  const undo = restorableClear(room);
+  for (const e of tail(room.log)) {
+    const who = e.by || 'A moderator';
+    const names = (list) => (list || []).filter(Boolean).join(', ');
+    switch (e.type) {
+      case 'reset_buzzer': {
+        const dropped = names(e.dropped);
+        if (!dropped && e.by === 'Auto-clear') break; // nothing happened
+        const how = e.judged === true ? 'cleared after scoring' : 'cleared without scoring';
+        items.push({
+          at: e.at, kind: e.judged === true ? 'clear' : 'clear-accidental', question: e.question ?? null,
+          text: `${who} ${how}${dropped ? ` — dropped ${dropped}` : ' — nobody was on it'}`,
+          note: e.restored ? 'undone' : null,
+          undoId: undo && undo === e ? e.id : null
+        });
+        break;
+      }
+      case 'restore_buzzes':
+        items.push({ at: e.at, kind: 'restore', text: `${who} undid the clear — ${names(e.restored)} back in` });
+        break;
+      case 'next_buzz':
+        items.push({
+          at: e.at, kind: 'next',
+          text: `${who} moved past ${e.done || 'the buzz'}${e.headName ? ` — now ${e.headName}` : ''}`
+        });
+        break;
+      case 'withdraw': {
+        const name = e.name || e.playerId;
+        items.push({
+          at: e.at, kind: 'withdraw',
+          text: e.byPlayer ? `${name} withdrew` : `${who} withdrew ${name}`,
+          note: e.free === false ? 'not free' : null
+        });
+        break;
+      }
+      case 'stuck_alert':
+        items.push({ at: e.at, kind: 'alert', text: `${e.name || e.playerId} says the buzzer is stuck` });
+        break;
+      case 'remove_player':
+        items.push({ at: e.at, kind: 'room', text: `${who === 'A moderator' ? 'Removed' : `${who} removed`} ${e.name || e.playerId}` });
+        break;
+      case 'end_game':
+        items.push({ at: e.at, kind: 'room', text: `${who} ended the game` });
+        break;
+      case 'reopen_game':
+        items.push({ at: e.at, kind: 'room', text: `${who} reopened the game` });
+        break;
+      default:
+        break;
+    }
+  }
+
+  items.sort((a, b) => b.at - a.at);
+  return items.slice(0, limit);
 }
 
 // An answer the room heard, written into the chat so everyone sees it — not

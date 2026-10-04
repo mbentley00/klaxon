@@ -2540,6 +2540,7 @@ function renderQueue(s) {
   $('#ctl-next').disabled = !q.length;
   $('#ctl-clear').disabled = !q.length;
   $('#ctl-clear').textContent = queueMode ? 'Clear queue' : 'Clear buzz';
+  renderRecent();
 
   const pos = q.findIndex((x) => x.playerId === state.me?.id);
   // Not from the front of the queue: once you have the floor, letting the buzz
@@ -2570,6 +2571,59 @@ function renderQueue(s) {
       : '';
   }
 }
+// ---- recent buzzes (staff) ----
+// Who buzzed, who pressed too late, every clear and who made it, withdrawals —
+// newest first, worded by the server. The one clear that can still be undone
+// carries an Undo, and gets one beside the queue buttons as well when it was a
+// clear without scoring (the slip this is for).
+let recentEvents = [];
+const recentClock = (at) =>
+  new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+function undoClear(id) {
+  socket.emit('reader_action', { action: 'restore_buzzes', id }, (res) => {
+    if (!res?.error) return;
+    const note = $('#recent-note');
+    note.textContent = res.error === 'nobody_to_restore'
+      ? 'Everyone it cleared has left or is already back in the queue.'
+      : 'That clear can’t be undone any more — the room has moved on.';
+    setTimeout(() => { note.textContent = ''; }, 3000);
+  });
+}
+function renderRecent() {
+  const staff = isStaffRole(state.role);
+  $('#recent-view').classList.toggle('hidden', !staff);
+  const undoable = recentEvents.find((e) => e.undoId);
+  const undoBtn = $('#ctl-undo');
+  const showUndo = staff && undoable?.kind === 'clear-accidental';
+  undoBtn.classList.toggle('hidden', !showUndo);
+  if (showUndo) {
+    undoBtn.title = `Undo: ${undoable.text}`;
+    undoBtn.onclick = () => undoClear(undoable.undoId);
+  }
+  if (!staff) return;
+  const list = $('#recent-list');
+  list.innerHTML = '';
+  if (!recentEvents.length) list.append(el('li', { className: 'empty' }, 'Nothing yet.'));
+  for (const e of recentEvents) {
+    const text = el('span', { className: 'kr-text' });
+    if (e.question != null) text.append(el('span', { className: 'kr-q' }, `Q${e.question}`));
+    text.append(e.text);
+    if (e.note) text.append(el('span', { className: 'kr-note' }, ` · ${e.note}`));
+    const row = el('li', { className: `kr-${e.kind}` }, el('time', {}, recentClock(e.at)), text);
+    if (e.undoId) {
+      const b = el('button', { className: 'ghost', title: 'Put the cleared buzzes back in the queue' }, 'Undo');
+      b.onclick = () => undoClear(e.undoId);
+      row.append(b);
+    }
+    list.append(row);
+  }
+}
+socket.on('recent', (events) => {
+  if (!Array.isArray(events)) return;
+  recentEvents = events;
+  renderRecent();
+});
+
 $('#ctl-next').onclick = () => socket.emit('reader_action', { action: 'next_buzz' });
 $('#ctl-clear').onclick = () => socket.emit('reader_action', { action: 'clear_queue' });
 $('#ctl-withdraw').onclick = () => socket.emit('withdraw', {}, (res) => {
