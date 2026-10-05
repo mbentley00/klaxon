@@ -1238,3 +1238,7 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .order .recent .kr-alert { color: var(--bad); }
 .order .recent li button { flex: none; padding: 1px 8px; font-size: .75rem; }
 #ctl-undo { border-color: var(--warn); background: var(--warn-bg); font-weight: 700; }
+
+/* A shootout's join: first and last name side by side, each half the row. */
+.gate-fullname { display: flex; gap: 8px; }
+.gate-fullname input { flex: 1 1 0; min-width: 0; }

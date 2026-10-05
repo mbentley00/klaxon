@@ -682,6 +682,10 @@ export function removeAllPlayers(room) {
 // A room may only have a handful of teams at the buzzers; the cap keeps the
 // per-buzzer picker (and the state we broadcast) small.
 const MAX_ACTIVE_TEAMS = 8;
+// Except in a shootout, where every competitor is a one-player team: there a
+// cap of 8 left everyone after the eighth unlinked — their buzzes still named
+// them, but the panel showed them as not in MODAQ.
+const activeTeamCap = (room) => (room.settings?.shootout ? Infinity : MAX_ACTIVE_TEAMS);
 
 function normalizeRoster(roster) {
   const teams = (Array.isArray(roster?.teams) ? roster.teams : [])
@@ -726,7 +730,7 @@ function refreshQueueNames(room) {
 // for a whole-tournament roster file they pick the teams playing here first.
 export function setRoster(room, roster) {
   room.roster = normalizeRoster(roster);
-  room.rosterTeams = room.roster && room.roster.teams.length <= MAX_ACTIVE_TEAMS
+  room.rosterTeams = room.roster && room.roster.teams.length <= activeTeamCap(room)
     ? teamNames(room)
     : [];
   pruneAssignments(room);
@@ -882,7 +886,7 @@ export function setRosterTeams(room, names) {
   for (const n of Array.isArray(names) ? names : []) {
     const name = String(n ?? '');
     if (known.has(name) && !picked.includes(name)) picked.push(name);
-    if (picked.length >= MAX_ACTIVE_TEAMS) break;
+    if (picked.length >= activeTeamCap(room)) break;
   }
   room.rosterTeams = picked;
   pruneAssignments(room);
@@ -1424,7 +1428,10 @@ export function refreshShootoutRoster(room) {
   if (!room.settings.shootout) return false;
   const next = shootout.roster([...room.members.values()], displayName);
   const before = JSON.stringify(room.roster?.teams ?? null);
-  if (JSON.stringify(next?.teams ?? null) === before) return false;
+  // Same teams AND all of them playing. A room capped at 8 before shootouts
+  // were exempt has the right teams but not all of them active.
+  const allActive = (next?.teams.length ?? 0) === (room.rosterTeams?.length ?? 0);
+  if (JSON.stringify(next?.teams ?? null) === before && allActive) return false;
   room.roster = next;
   room.rosterTeams = next ? next.teams.map((t) => t.name) : [];
   persistRooms();

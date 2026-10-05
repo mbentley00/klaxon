@@ -47,6 +47,12 @@
         <select id="gate-roster-player"></select>
       </div>
       <input id="gate-name" placeholder="Your name" autofocus />
+      <!-- A shootout asks for a first and a last name instead (see
+           applyTeamRequirement): the leaderboard is read by name all evening. -->
+      <div id="gate-fullname" class="gate-fullname hidden">
+        <input id="gate-first" placeholder="First name" autocomplete="given-name" />
+        <input id="gate-last" placeholder="Last name" autocomplete="family-name" />
+      </div>
       <input id="gate-team" placeholder="Team (optional)" />
       <div class="row">
         <button id="gate-join">Join as player</button>

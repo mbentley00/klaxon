@@ -250,7 +250,11 @@ export function publicWindow(room) {
     appendOnly: now > a.deadline,
     committed: a.locked.size,
     activePlayerId: a.activePlayerId,
-    spoken: a.spoken.map((s) => s.text)
+    spoken: a.spoken.map((s) => s.text),
+    // The same answers with who gave them, for the moderator's reader to show
+    // under the question as each one arrives. Not news to anyone: the room
+    // already sees "Answer · name · text" in the chat.
+    said: a.spoken.map((s) => ({ playerId: s.playerId, text: s.text, at: s.at }))
   };
 }
 

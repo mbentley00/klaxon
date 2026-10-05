@@ -35,6 +35,18 @@ const CHAT_COOLDOWN_MS = 350;      // per player, so one person can't flood it
 
 const clean = (v, cap) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, cap);
 
+// A first and a last name, two letters or more each — what a new player must
+// join a shootout with (see index.js). Letters in any script count; "O'Brien"
+// and "Smith-Jones" are fine; an initial ("A.") is not a last name.
+const LETTER = /\p{L}/gu;
+export function fullName(name) {
+  const parts = clean(name, 40).split(' ');
+  if (parts.length < 2) return false;
+  const first = parts[0];
+  const last = parts[parts.length - 1];
+  return (first.match(LETTER) || []).length >= 2 && (last.match(LETTER) || []).length >= 2;
+}
+
 /**
  * The competitors, from whoever is in the room: one one-player team each,
  * named for the player. Rebuilt on every join and departure, so a late arrival
@@ -405,36 +417,17 @@ export function publicSession(session) {
 
 // --- export for buzzpoints ---------------------------------------------------
 // One download at the end of the evening, laid out the way JemCasey's
-// buzzpoint-migrator (the importer behind quizbowlbuzzpoints.com) reads a data
-// folder: a question set with one edition holding the packets, and a
-// tournament holding one QBJ per game.
+// quizbowlbuzzpoints.com takes the packets that were read and the games played
+// on them: a packet JSON and a QBJ per round, side by side in one flat folder.
 //
-// The migrator ties a game to its packet by NAME — the QBJ's `packets` field
-// has to equal a packet file's name — and to its round by the number after
-// `Round_` in the game's file name. Both are set here rather than trusted from
-// what the reader's screen sent, so a packet renamed mid-evening still lines up.
+// A game is tied to its packet by NAME — the QBJ's `packets` field equals the
+// packet file's name — and to its round by the number after `Round_` in the
+// game's file name. Both are set here rather than trusted from what the
+// reader's screen sent, so a packet renamed mid-evening still lines up.
 
-const METADATA_STYLE = { default: 1, noAuthor: 2, none: 7 };
-
-// "Author, Category - Subcategory" (the usual ACF-style line) or just a
-// category. The migrator needs telling which, per set.
-function metadataStyle(packets) {
-  const lines = packets.flatMap((p) => (p.tossups || []).map((t) => String(t?.metadata ?? '').trim())).filter(Boolean);
-  if (lines.length === 0) return METADATA_STYLE.none;
-  const withAuthor = lines.filter((m) => /^[^,]+,\s*\S/.test(m)).length;
-  return withAuthor * 2 >= lines.length ? METADATA_STYLE.default : METADATA_STYLE.noAuthor;
-}
-
-function setFormat(scheme, packets) {
-  if (scheme === '20/10/0') return 'pace';
-  if (scheme === '20/15/10/-5') return 'superpowers';
-  const powered = packets.some((p) => (p.tossups || []).some((t) => String(t?.question ?? '').includes('(*)')));
-  return powered ? 'powers' : 'acf';
-}
-
-// Safe as a file or folder name on every OS. (The migrator cleans a packet's
-// file name and a game's `packets` field the same way before comparing them,
-// so nothing else needs changing for the two to match.)
+// Safe as a file name on every OS. (The importer cleans a packet's file name
+// and a game's `packets` field the same way before comparing them, so nothing
+// else needs changing for the two to match.)
 function fileSafe(text) {
   return String(text ?? '')
     .replace(/[\\/:*?"<>|\p{Cc}]/gu, ' ')
@@ -445,80 +438,30 @@ function fileSafe(text) {
 }
 
 /**
- * The files of the export, as [{ name, data }] for zip.buildZip. `games` holds
- * the game played on each packet ({ packetId -> QBJ object }); `packets` the
- * packets themselves ({ packetId -> packet object }). Only packets that were
- * actually read go in: a packet nobody heard isn't part of the evening.
+ * The files of the export, as [{ name, data }] for zip.buildZip: for each
+ * packet that was read, the packet itself (`Packet-01 - Name.json`) and the
+ * game played on it with every buzz (`Round_1_Klaxon_CODE.qbj`). Nothing
+ * else, and no folders. `games` is { packetId -> QBJ object }, `packets` is
+ * { packetId -> packet object }. A packet nobody heard isn't part of the
+ * evening, so it is left out.
  */
-export function buzzpointsExport({ session, packets, games, code, date }) {
-  const day = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : new Date(session.createdAt || Date.now()).toISOString().slice(0, 10);
-  const setName = session.name;
-  const tournamentName = `${session.name} (Klaxon ${code}, ${day})`;
-  const setDir = `data/question_sets/${fileSafe(setName) || 'Shootout'}`;
-  const tournamentDir = `data/tournaments/${fileSafe(tournamentName) || code}`;
-
+export function buzzpointsExport({ session, packets, games, code }) {
   const read = session.packets
     .map((p, i) => ({ ...p, round: i + 1, packet: packets[p.id], game: games[p.id] }))
     .filter((p) => p.packet && p.game);
 
   const files = [];
-  const pad = String(read.length >= 100 ? 3 : 2);
+  const pad = read.length >= 100 ? 3 : 2;
   for (const p of read) {
-    const number = String(p.round).padStart(Number(pad), '0');
-    const packetName = `Packet-${number} - ${fileSafe(p.name) || 'Packet'}`;
-    files.push({ name: `${setDir}/editions/${day}/packet_files/${packetName}.json`, data: JSON.stringify(p.packet, null, 2) });
+    const packetName = `Packet-${String(p.round).padStart(pad, '0')} - ${fileSafe(p.name) || 'Packet'}`;
+    files.push({ name: `${packetName}.json`, data: JSON.stringify(p.packet, null, 2) });
 
     const qbj = {};
     for (const [key, value] of Object.entries(p.game)) {
       if (!key.startsWith('_')) qbj[key] = value;   // Klaxon's own bookkeeping stays home
     }
     qbj.packets = packetName;
-    files.push({ name: `${tournamentDir}/game_files/Round_${p.round}_Klaxon_${code}.qbj`, data: JSON.stringify(qbj, null, 2) });
+    files.push({ name: `Round_${p.round}_Klaxon_${code}.qbj`, data: JSON.stringify(qbj, null, 2) });
   }
-
-  const readPackets = read.map((p) => p.packet);
-  files.push({
-    name: `${setDir}/index.json`,
-    data: JSON.stringify({
-      name: setName,
-      difficulty: '',
-      metadataStyle: metadataStyle(readPackets),
-      format: setFormat(session.scoring?.scheme, readPackets),
-      bonuses: session.scoring?.bonuses === true && readPackets.some((p) => (p.bonuses || []).length > 0)
-    }, null, 2)
-  });
-  files.push({ name: `${setDir}/editions/${day}/index.json`, data: JSON.stringify({ name: day, date: day }, null, 2) });
-  files.push({
-    name: `${tournamentDir}/index.json`,
-    data: JSON.stringify({
-      name: tournamentName, set: setName, edition: day, location: 'Online (Klaxon)', level: '',
-      start_date: day, end_date: day
-    }, null, 2)
-  });
-
-  const oneSided = read.filter((p) => (p.game.match_teams || []).length < 2).map((p) => p.round);
-  files.push({
-    name: 'README.txt',
-    data: [
-      `${session.name} — ${read.length} packet${read.length === 1 ? '' : 's'} read in Klaxon room ${code} on ${day}.`,
-      '',
-      'This folder is laid out for buzzpoint-migrator (github.com/JemCasey/buzzpoint-migrator),',
-      'which builds the database behind quizbowlbuzzpoints.com:',
-      '',
-      '  data/question_sets/...   the packets that were read, one JSON each',
-      '  data/tournaments/...     one QBJ game file per packet, with every buzz',
-      '',
-      'To import it yourself: copy the data folder into a buzzpoint-migrator checkout, then run',
-      '`npm run createDB` (the first time only) and `npm run updateDB`. Or send this zip to',
-      'whoever runs the buzzpoints site.',
-      '',
-      'Each competitor is a team of one. A game lists everyone who played any of it; the',
-      "tossups each player heard count only the questions they were in the room for.",
-      ...(oneSided.length
-        ? ['', `Round ${oneSided.join(', ')} had a single competitor; the migrator skips games with fewer than two sides.`]
-        : []),
-      ''
-    ].join('\n')
-  });
-  return { files, rounds: read.length, tournamentName };
+  return { files, rounds: read.length };
 }

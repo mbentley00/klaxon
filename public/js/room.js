@@ -154,9 +154,20 @@ function applyTeamRequirement(required, shootout) {
   // there is nothing to type, so the box goes away rather than sitting there
   // optional and confusing.
   team.classList.toggle('hidden', !!shootout);
+  // ...and the name is two boxes, first and last: see joinNameError.
+  $('#gate-name').classList.toggle('hidden', !!shootout);
+  $('#gate-fullname').classList.toggle('hidden', !shootout);
   if (shootout) {
     team.value = '';
     team.required = false;
+    const saved = (recall('name') || '').trim().split(/\s+/);
+    if (!$('#gate-first').value && !$('#gate-last').value && saved.length > 1) {
+      $('#gate-first').value = saved.slice(0, -1).join(' ');
+      $('#gate-last').value = saved[saved.length - 1];
+    } else if (!$('#gate-first').value && saved[0]) {
+      $('#gate-first').value = saved[0];
+    }
+    ($('#gate-first').value ? $('#gate-last') : $('#gate-first')).focus();
     return;
   }
   team.placeholder = required ? 'Team name (required)' : 'Team (optional)';
@@ -308,7 +319,9 @@ function doJoin(role, name, team, roster) {
           ? 'This game is over — the host closed it. Ask them for a new room.'
           : resp?.error === 'team_required'
             ? 'This room requires a team name — enter yours to join.'
-            : 'Could not join — try again.';
+            : resp?.error === 'full_name_required'
+              ? 'Enter your first and last name — at least 2 letters each.'
+              : 'Could not join — try again.';
       if (resp?.error === 'team_required') $('#gate-team').focus();
       return;
     }
@@ -369,6 +382,23 @@ $('#gate-join').onclick = () => {
       doJoin('player', choice.rosterPlayer, choice.rosterTeam, choice);
       return;
     }
+    // A shootout: first and last name, two letters or more each (the server
+    // checks the same thing, in shootout.fullName).
+    if (roomInfo?.shootout) {
+      const first = $('#gate-first').value.trim().replace(/\s+/g, ' ');
+      const last = $('#gate-last').value.trim().replace(/\s+/g, ' ');
+      const letters = (v) => (v.match(/\p{L}/gu) || []).length;
+      const bad = letters(first) < 2 ? '#gate-first' : letters(last) < 2 ? '#gate-last' : null;
+      if (bad) {
+        $('#gate-msg').textContent = 'Enter your first and last name — at least 2 letters each.';
+        $(bad).focus();
+        return;
+      }
+      const full = `${first} ${last}`;
+      remember('name', full);
+      doJoin('player', full);
+      return;
+    }
     // Typed their own name: either the room has no roster, or they said they
     // aren't on it (which the server reports to the director).
     const team = choice?.offRoster ? choice.team : $('#gate-team').value.trim();
@@ -387,6 +417,8 @@ $('#gate-join').onclick = () => {
     doJoin('player', finalName, team);
   }
 };
+$('#gate-first').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#gate-last').focus(); });
+$('#gate-last').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#gate-join').click(); });
 $('#gate-spectate').onclick = () => doJoin('spectator', $('#gate-name').value.trim() || 'Spectator');
 
 // Request tournament access from the gate itself (shown after an unapproved
@@ -1378,7 +1410,8 @@ function sendChat() {
 const CHAT_ERRORS = {
   too_fast: 'One at a time.',
   empty: 'Nothing to say?',
-  disabled: 'This room has no chat.'
+  disabled: 'This room has no chat.',
+  buzzing: 'Not while you’re buzzed in — your answer goes in the answer box.'
 };
 
 // Typing @ offers the people in the room. Names get typed wrong and people
@@ -2543,6 +2576,16 @@ function renderQueue(s) {
   renderRecent();
 
   const pos = q.findIndex((x) => x.playerId === state.me?.id);
+  // Buzzed in, the chat is shut (the server refuses it too): a line from
+  // someone in the queue reads as their answer.
+  const chatBox = $('#chat-box');
+  if (chatBox) {
+    const shut = state.role === 'player' && pos >= 0;
+    if (chatBox.dataset.placeholder == null) chatBox.dataset.placeholder = chatBox.placeholder;
+    chatBox.disabled = shut;
+    $('#chat-send').disabled = shut;
+    chatBox.placeholder = shut ? 'Buzzed in — answer in the answer box' : chatBox.dataset.placeholder;
+  }
   // Not from the front of the queue: once you have the floor, letting the buzz
   // go is the moderator's call (see store.withdraw).
   const canWithdraw = state.role === 'player' && s.settings?.allowWithdraw && pos > 0;

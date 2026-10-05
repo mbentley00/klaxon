@@ -171,15 +171,19 @@ $('#create-modaq').addEventListener('click', () => afterAccountWarning(() => {
 // shootout always wants, so the host doesn't have to find them on /advanced —
 // a buzz queue (with several people racing, the order is the interesting part),
 // withdrawing allowed, because a reaction buzz in a shootout should cost
-// nothing, and MODAQ to read and keep score. The forced-answer mode is left
-// off: it changes the game, so it is the host's to switch on in the room.
+// nothing, and MODAQ to read and keep score. Typed answers too: over Discord
+// voice, twenty people saying answers out loud is noise, and a typed one is on
+// the record for everyone. The host can turn it off from the buzz panel. The
+// forced-answer mode is left off: it changes the game, so it is the host's to
+// switch on in the room.
 $('#create-shootout').addEventListener('click', () => afterAccountWarning(() => {
   createRoom({
     modaqMode: true,
     modaqLite: true,
     shootout: true,
     queueMode: true,
-    allowWithdraw: true
+    allowWithdraw: true,
+    typedAnswers: true
   }, (code) => {
     location.href = `/modaq?room=${code}`;
   });

@@ -1163,8 +1163,8 @@ app.get('/api/rooms/:code/exports/:filename', ah(async (req, res) => {
   res.type('application/json').send(text);
 }));
 
-// A shootout's evening in one download, laid out for buzzpoint-migrator (the
-// importer behind quizbowlbuzzpoints.com): every packet that was read, and the
+// A shootout's evening in one download for quizbowlbuzzpoints.com: a flat
+// folder of every packet that was read (JSON) and the
 // game played on it with every buzz. See shootout.buzzpointsExport.
 app.get('/api/rooms/:code/shootout/export.zip', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
@@ -2013,6 +2013,16 @@ io.on('connection', (socket) => {
       if (!String(payload?.team ?? known ?? '').trim()) return ack?.({ error: 'team_required' });
     }
 
+    // A shootout's leaderboard runs all evening and is read by name, so a new
+    // player gives a first and a last name, two letters or more each: "Ann"
+    // and "A" are three different people by the second packet. Only for
+    // someone new to the room — a player already in it reconnects under the
+    // name they have.
+    if (role === 'player' && room.settings.shootout && !room.members.has(payload?.playerId)
+        && !shootout.fullName(payload?.name)) {
+      return ack?.({ error: 'full_name_required' });
+    }
+
     // The host called the game over. Staff still get in — the scoresheet, the
     // exports and the log are wanted most right after the end, and reopening
     // the room has to be possible from inside it.
@@ -2621,6 +2631,12 @@ io.on('connection', (socket) => {
       name: store.memberName(room, ctx.playerId) || 'someone',
       staff: member ? member.role !== 'player' : false
     };
+    // Not while they're buzzed in: a line in the chat from someone in the
+    // queue reads as their answer, to the room and to the moderator. Their
+    // answer goes in the answer box.
+    if (!actor.staff && room.queue.some((q) => q.playerId === ctx.playerId)) {
+      return ack?.({ error: 'buzzing' });
+    }
     const res = store.chatSay(room, actor, payload?.text);
     if (res.error) return ack?.({ error: res.error });
     io.to(room.code).emit('chat_message', res.message);
