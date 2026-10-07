@@ -110,6 +110,9 @@
              you can finish a word, not take one back. -->
         <section id="answer-view" class="panel answer hidden">
           <h3>Your answer <span id="answer-clock" class="muted-count"></span></h3>
+          <!-- Every keystroke reaches the moderator's screen (answers.forStaff),
+               so the player is told, before they type, not after. -->
+          <p class="answer-live"><span class="live-dot" aria-hidden="true"></span>The moderator sees this box live, as you type.</p>
           <p class="hint" id="answer-hint"></p>
           <input id="answer-box" type="text" maxlength="120" autocomplete="off"
                  placeholder="Type your answer" />
@@ -179,6 +182,8 @@
           <!-- Who is about to say something. Its space is always reserved, so a
                line appearing doesn't shove the box you're typing in. -->
           <p id="chat-typing" class="chat-typing"></p>
+          <!-- Buzzed in: why the chat is shut, and when it opens again. -->
+          <p id="chat-locked" class="chat-locked-note hidden" role="status"></p>
           <ul id="chat-mentions" class="chat-mentions hidden"></ul>
           <div class="row">
             <!-- Grows with what you are writing (see autosizeChat): a long
@@ -206,7 +211,7 @@
     <!-- Discord shootout: the leaderboard across every packet of the session,
          and a chat that has nothing to do with answering. -->
     <section id="shootout-view" class="panel shootout hidden">
-      <h3>Leaderboard <span id="shootout-meta" class="muted-count"></span></h3>
+      <h3><span id="shootout-title">Leaderboard</span> <span id="shootout-meta" class="muted-count"></span></h3>
       <ol id="shootout-board" class="shootout-board"></ol>
       <div class="row hidden" id="shootout-controls">
         <button id="shootout-reset" class="ghost tiny">Reset scores</button>

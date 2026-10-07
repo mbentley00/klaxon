@@ -1526,6 +1526,11 @@ export function chatSay(room, actor, text) {
   // Everyone who could be addressed: players by the name they are known by,
   // and staff, so the room can get the reader's attention.
   const people = [...room.members.values()].map((m) => ({ id: m.id, name: displayName(m) }));
+  // "@moderator" reaches every member of staff: a player who wants the
+  // reader's attention shouldn't have to know what name they joined under.
+  for (const m of room.members.values()) {
+    if (m.role === 'reader' || m.role === 'co-reader') people.push({ id: m.id, name: 'moderator' });
+  }
   const res = shootout.say(room, actor, text, people);
   if (res.ok) persistRooms();
   return res;
@@ -1540,18 +1545,26 @@ export function chatSay(room, actor, text) {
  * room moving on — and a divider for every one of those is worse than none,
  * because then the dividers mean nothing.
  *
- * So: a high-water mark, per packet. Going back is silent, coming forward
+ * So: a high-water mark, per GAME. Going back is silent, coming forward
  * again is silent until the room passes where it had already got to.
+ *
+ * A game is a packet, when the shootout has a list of them — and otherwise
+ * there is no packet id at all, so a mark kept only per packet carried over
+ * from one game into the next: the second game was silent until it passed
+ * the question the first had ended on, which is to say all of it. A game on
+ * its first question with nothing scored is a new game, and starts over.
  */
-export function cycleDivider(room) {
+export function cycleDivider(room, match = null) {
   if (!room.settings.shootout) return null;
   const n = Number(room.scoresheet?.current);
   if (!Number.isFinite(n) || n < 1) return null;
   const packet = room.scoresheetPacket ?? null;
   const mark = room.chatCycleMark;
-  // A different packet starts its own count; the first question of a game
-  // needs no divider, there is nothing above it to divide from.
-  if (!mark || mark.packet !== packet) {
+  const scored = (match?.match_questions ?? []).some((q) => (q?.buzzes?.length ?? 0) > 0);
+  const freshGame = n === 1 && !scored;
+  // A different packet or a new game starts its own count; the first question
+  // of a game needs no divider, there is nothing above it to divide from.
+  if (!mark || mark.packet !== packet || freshGame) {
     room.chatCycleMark = { packet, n };
     return null;
   }

@@ -2175,6 +2175,9 @@ io.on('connection', (socket) => {
         // settled nobody knows who has the floor and who is behind them.
         if (room.settings.typedAnswers || room.settings.lockedAnswers) {
           const { window, started } = answers.open(room, queue[0]?.playerId);
+          // Staff watch the boxes fill in live; they start from this window's
+          // empty boxes, not the last question's.
+          emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));
           // Close it on the clock, not on a click: everyone committed before
           // the floor's answer was knowable, and the rule that makes a late
           // withdrawal cost something must not depend on the moderator's
@@ -2446,7 +2449,7 @@ io.on('connection', (socket) => {
           typeof payload.packet === 'string' ? payload.packet : null);
         // Reading on puts a line in the chat, so the talking can be read back
         // against the game. Only for real progress — see store.cycleDivider.
-        const divider = store.cycleDivider(room);
+        const divider = store.cycleDivider(room, payload.qbj ?? null);
         if (divider) {
           const said = store.chatAnnounce(room, 'cycle', { name: '', text: divider });
           if (said.ok) {
@@ -2633,8 +2636,11 @@ io.on('connection', (socket) => {
     };
     // Not while they're buzzed in: a line in the chat from someone in the
     // queue reads as their answer, to the room and to the moderator. Their
-    // answer goes in the answer box.
-    if (!actor.staff && room.queue.some((q) => q.playerId === ctx.playerId)) {
+    // answer goes in the answer box. Once that answer is on the record the
+    // chat is theirs again — it can't be mistaken for one any more, and it is
+    // how they tell a moderator who hasn't ruled that they're waiting.
+    const answered = answers.state(room)?.spoken.some((s) => s.playerId === ctx.playerId);
+    if (!actor.staff && !answered && room.queue.some((q) => q.playerId === ctx.playerId)) {
       return ack?.({ error: 'buzzing' });
     }
     const res = store.chatSay(room, actor, payload?.text);

@@ -986,7 +986,7 @@ function renderAnswers(s) {
   }
 
   $('#answer-hint').textContent = active
-    ? 'You have the buzzer. Type your answer and press Enter to give it. Nothing is shown until you do — or until the moderator asks for it.'
+    ? 'You have the buzzer. Type your answer and press Enter to give it. The room sees nothing until you do — or until the moderator asks for it.'
     : 'Commit an answer before the player with the buzzer gives theirs. Only the moderator sees it.';
 
   // The player with the FLOOR has no clock. They are the one being asked the
@@ -1141,6 +1141,21 @@ function renderShootout(s) {
   // and a column of "0 + n" would say so fifteen times over.
   const showSplit = (board.packets ?? 0) > 0;
 
+  // The board IS the room's players (everyone in it is on the board from the
+  // moment they join — see shootout.board), so for a player it is the players
+  // list as well: who's here, who has dropped, and the score, in one list
+  // rather than the same names twice. Staff keep their own list below, for
+  // removing people and the rest.
+  const players = (s.members || []).filter((m) => m.role === 'player');
+  const boardKey = (n) => String(n || '').replace(/\s+/g, ' ').trim().slice(0, 40).toLowerCase();
+  const byName = new Map(players.map((m) => [boardKey(m.displayName || m.name), m]));
+  const meMember = players.find((m) => m.id === state.me?.id);
+  const myKey = boardKey(meMember?.displayName || meMember?.name || state.me?.name);
+  const offline = players.filter((p) => !p.connected).length;
+  $('#shootout-title').textContent = isStaffRole(state.role)
+    ? 'Leaderboard'
+    : `Players (${players.length})${offline ? ` · ${offline} offline` : ''}`;
+
   const ol = $('#shootout-board');
   ol.replaceChildren();
   // Ranked, with ties sharing a place: "1, 2, 2, 4".
@@ -1150,9 +1165,18 @@ function renderShootout(s) {
     row.place = place;
   });
   for (const row of board.rows) {
-    const me = row.name === (state.me?.name || '');
-    ol.append(el('li', { className: 'sb-row' + (me ? ' sb-me' : '') },
-      el('span', { className: 'sb-rank', textContent: `${row.place}.` }),
+    const me = boardKey(row.name) === myKey;
+    const member = byName.get(boardKey(row.name));
+    // Greyed, never moved: a connection that flickers shouldn't reshuffle
+    // the board.
+    const gone = !member || !member.connected;
+    ol.append(el('li', {
+      className: 'sb-row' + (me ? ' sb-me' : '') + (gone ? ' sb-gone' : ''),
+      title: !member ? 'Left the room' : !member.connected ? 'Offline' : ''
+    },
+      // A place only once you've scored: a room tied on nothing is a column
+      // of "1." that says nothing.
+      el('span', { className: 'sb-rank', textContent: row.total !== 0 ? `${row.place}.` : '' }),
       el('span', { className: 'sb-name', textContent: me ? `${row.name} (you)` : row.name }),
       // The banked half is shown separately so nobody has to wonder whether the
       // number moved because of this packet or an earlier one. Shown on EVERY
@@ -1422,10 +1446,15 @@ let mentionAt = -1;
 
 function chatPeople() {
   const s = state.snapshot;
-  return (s?.members || [])
+  const members = s?.members || [];
+  const people = members
     .filter((m) => m.id !== state.me?.id)
     .map((m) => ({ id: m.id, name: m.displayName || m.name }))
     .filter((m) => m.name);
+  // "@moderator" reaches the staff, whatever names they joined under (the
+  // server resolves it — see store.chatSay). Offered first, when there is one.
+  const staffHere = members.some((m) => (m.role === 'reader' || m.role === 'co-reader') && m.id !== state.me?.id);
+  return staffHere ? [{ id: 'moderator', name: 'moderator' }, ...people] : people;
 }
 
 // What is being typed after the nearest unfinished "@", if the caret is in one.
@@ -2149,6 +2178,8 @@ function seatPicker(p, s) {
 // disconnect alert, the join times and the remove buttons.
 function renderPlayers(s) {
   const staff = isStaffRole(state.role);
+  // A shootout's leaderboard already lists every player (see renderShootout).
+  $('#players-panel').classList.toggle('hidden', !!s.shootout && !staff);
   const players = (s.members || []).filter((m) => m.role === 'player');
   const offline = players.filter((p) => !p.connected).length;
   // Alert sound on any player that flipped connected -> disconnected since the
@@ -2577,14 +2608,27 @@ function renderQueue(s) {
 
   const pos = q.findIndex((x) => x.playerId === state.me?.id);
   // Buzzed in, the chat is shut (the server refuses it too): a line from
-  // someone in the queue reads as their answer.
+  // someone in the queue reads as their answer. Shut so it can't be missed —
+  // the whole chat greys and says why — and open again the moment their
+  // answer is on the record, so they can tell a moderator who hasn't ruled
+  // yet that they're waiting.
   const chatBox = $('#chat-box');
   if (chatBox) {
-    const shut = state.role === 'player' && pos >= 0;
+    const answered = (s.answers?.said || []).some((x) => x.playerId === state.me?.id);
+    const shut = state.role === 'player' && pos >= 0 && !answered;
     if (chatBox.dataset.placeholder == null) chatBox.dataset.placeholder = chatBox.placeholder;
     chatBox.disabled = shut;
     $('#chat-send').disabled = shut;
-    chatBox.placeholder = shut ? 'Buzzed in — answer in the answer box' : chatBox.dataset.placeholder;
+    chatBox.placeholder = shut ? 'Buzzed in — chat is closed' : chatBox.dataset.placeholder;
+    $('#chat-view').classList.toggle('chat-locked', shut);
+    const lockNote = $('#chat-locked');
+    lockNote.classList.toggle('hidden', !shut);
+    if (shut) {
+      const typed = !!(s.settings?.typedAnswers || s.settings?.lockedAnswers);
+      lockNote.textContent = typed
+        ? 'You’re buzzed in. Chat opens again once you’ve sent your answer.'
+        : 'You’re buzzed in. Chat opens again when the moderator rules.';
+    }
   }
   // Not from the front of the queue: once you have the floor, letting the buzz
   // go is the moderator's call (see store.withdraw).

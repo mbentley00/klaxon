@@ -853,6 +853,17 @@ body.compact #protest-view { display: none; }
   margin: 4px 0 10px; text-align: left;
 }
 #answer-view h3 { color: var(--accent-deep); }
+/* Typing here is not private: the moderator watches the box fill in. */
+.answer-live {
+  display: flex; align-items: center; gap: .45em;
+  margin: 0 0 .4em; font-size: .85rem; font-weight: 700; color: var(--bad);
+}
+.live-dot {
+  flex: none; width: .6em; height: .6em; border-radius: 50%; background: var(--bad-fill);
+  animation: live-dot 1.6s ease-in-out infinite;
+}
+@keyframes live-dot { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
 #answer-view.answer-mine { border-color: var(--mine-fill); background: var(--ok-bg); }
 #answer-view.answer-mine h3 { color: var(--mine-fill); }
 #answer-view #answer-box {
@@ -938,6 +949,7 @@ body.compact #answer-view { display: none; }
 .sb-total { flex: none; font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
 .sb-rank { flex: none; min-width: 1.8em; font-family: var(--mono); font-size: .8rem; color: var(--muted); text-align: right; }
 .sb-row.sb-me { background: var(--accent-bg); }
+.sb-row.sb-gone .sb-name, .sb-row.sb-gone .sb-total { color: var(--muted); }
 #chat-box {
   flex: 1 1 auto; min-width: 0;
   /* Sized by the script, so no scrollbar reserved and nothing to drag. */
@@ -1158,6 +1170,17 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .chat-typing {
   margin: 0 0 2px; min-height: 1.1em; font-size: .75rem; color: var(--muted);
   font-style: italic; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+/* Buzzed in: the whole chat greys out, not just the box, and says why. A
+   disabled text box alone looked like nothing had changed. */
+#chat-view.chat-locked .chat-log { opacity: .35; filter: grayscale(1); }
+#chat-view.chat-locked #chat-box,
+#chat-view.chat-locked #chat-send {
+  background: var(--soft); border-color: var(--line-muted); color: var(--muted); cursor: not-allowed;
+}
+.chat-locked-note {
+  margin: 0 0 6px; padding: .4em .6em; border-radius: var(--radius);
+  background: var(--warn-bg); color: var(--warn); font-size: .85rem; font-weight: 700;
 }
 .chat-mentions {
   position: absolute; bottom: 100%; left: 0; right: 0; z-index: 5;
