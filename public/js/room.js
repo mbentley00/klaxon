@@ -684,11 +684,62 @@ function applyState(s) {
   renderShootout(s);
   renderChat(s);
   announceBuzz(s);
+  announceRuling(s);
   if (roomInfo) {
     roomInfo.requireTeam = !!s.settings?.requireTeam;
     roomInfo.shootout = !!s.settings?.shootout;
   }
   if (s.tournamentCode) loadTournament(s.tournamentCode);
+}
+
+// ---- the moderator's ruling, for the room ----
+// When the moderator marks a tossup buzz right or wrong, everyone sees it land:
+// a short pop over the buzzer, green for correct, red for wrong, with the
+// points. Worked out from the scoresheet the room already gets (a buzz that
+// wasn't on it a moment ago), so nothing new is sent. Only the question being
+// read and the one just finished: a moderator correcting question 3 at
+// question 10 is housekeeping, not news. Nothing on the first sheet a page
+// sees, or the room would replay the game to anyone who reconnects.
+let rulingKeys = null;
+let rulingTimer = null;
+function announceRuling(s) {
+  const sheet = s.scoresheet;
+  if (!sheet || !Array.isArray(sheet.rows)) { rulingKeys = null; return; }
+  const keyed = [];
+  for (const row of sheet.rows) {
+    (row.buzzes || []).forEach((b, i) => keyed.push({ key: `${row.n}|${i}|${b.player}|${b.points}`, row, b }));
+  }
+  const before = rulingKeys;
+  rulingKeys = new Set(keyed.map((k) => k.key));
+  if (before == null) return;
+  const recent = Number(sheet.current || sheet.through) || 0;
+  const fresh = keyed.filter((k) => !before.has(k.key) && k.row.n >= recent - 1);
+  if (!fresh.length) return;
+  showRuling(fresh[fresh.length - 1].b, sheet);
+}
+
+function showRuling(buzz, sheet) {
+  const box = $('#ruling-toast');
+  if (!box) return;
+  const correct = buzz.points > 0;
+  const me = state.snapshot?.members?.find((m) => m.id === state.me?.id);
+  const mine = me && (me.displayName || me.name) === buzz.player;
+  const who = mine ? 'You' : (buzz.player || sheet.teams?.[buzz.team]?.name || 'Someone');
+  const points = buzz.points > 0 ? `+${buzz.points}` : buzz.points < 0 ? `−${Math.abs(buzz.points)}` : '';
+  const mark = el('span', { className: 'rt-mark' }, correct ? '✓' : '✗');
+  mark.setAttribute('aria-hidden', 'true');
+  box.replaceChildren(
+    mark,
+    el('span', { className: 'rt-who' }, who),
+    points ? el('span', { className: 'rt-points' }, points) : ''
+  );
+  box.setAttribute('aria-label', `${who} ${correct ? 'correct' : 'wrong'}${points ? ', ' + points : ''}`);
+  box.className = `ruling-toast ${correct ? 'rt-correct' : 'rt-wrong'}`;
+  // Restart the animation even when the same kind of ruling lands twice running.
+  void box.offsetWidth;
+  box.classList.add('rt-show');
+  clearTimeout(rulingTimer);
+  rulingTimer = setTimeout(() => box.classList.remove('rt-show'), 2600);
 }
 
 // The scoresheet and the chat share one sticky rail. An empty rail would still
@@ -2479,6 +2530,17 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('keyup', (e) => {
   if (e.code === 'Space' || e.key === ' ') buzzer.classList.remove('pressed');
 });
+// W takes your buzz back: the same as the Withdraw button, and only while that
+// button is on offer (queued behind the floor, in a room that allows it). Never
+// while typing -- a W in the chat or an answer is a letter.
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyW' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+  if (isTyping(document.activeElement)) return;
+  const btn = $('#ctl-withdraw');
+  if (btn.classList.contains('hidden') || btn.disabled) return;
+  e.preventDefault();
+  btn.click();
+});
 
 // ---- "the buzzer isn't clear" ----
 // Players: a buzz that sits unjudged usually means the reader forgot to reset.
@@ -2654,8 +2716,8 @@ function renderQueue(s) {
     const question = Number(s.scoresheet?.current) || 0;
     const left = usedAt == null || question <= 0 ? 0 : Math.max(0, usedAt + wait - question);
     btn.textContent = left > 0
-      ? `Withdraw my buzz — costs you (free again in ${left})`
-      : 'Withdraw my buzz';
+      ? `Withdraw my buzz (W) — costs you (free again in ${left})`
+      : 'Withdraw my buzz (W)';
     btn.classList.toggle('costly', left > 0);
     btn.title = left > 0
       ? `You withdrew on question ${usedAt}. The next free one is question ${usedAt + wait}.`

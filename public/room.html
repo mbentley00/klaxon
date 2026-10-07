@@ -97,6 +97,10 @@
     <div class="buzz-row">
       <section id="buzz-area">
         <div id="phase-label" class="phase ready">Ready to Buzz</div>
+        <!-- The moderator's ruling on a tossup buzz, popped over the buzzer for
+             a moment (see announceRuling). Positioned over the area, so it
+             never moves the buzzer. -->
+        <div id="ruling-toast" class="ruling-toast" role="status"></div>
         <button id="buzzer" class="buzzer ready" disabled>
           <span id="buzzer-label" class="bz-label">BUZZ</span>
           <span id="buzzer-sub" class="bz-sub"></span>
@@ -139,7 +143,7 @@
           <button id="ctl-clear" class="ghost">Clear queue</button>
           <button id="ctl-undo" class="ghost undo hidden">↶ Undo clear</button>
         </div>
-        <button id="ctl-withdraw" class="ghost hidden">Withdraw my buzz</button>
+        <button id="ctl-withdraw" class="ghost hidden" title="Shortcut: W">Withdraw my buzz (W)</button>
         <p id="queue-note" class="hint"></p>
         <!-- Staff only: the buzzer's recent history, newest first (see
              store.recentActivity). Filled from the server's 'recent' event. -->

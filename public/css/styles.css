@@ -319,7 +319,35 @@ body.win-blur .bz-sub { color: var(--warn); opacity: 1; font-weight: 600; }
 /* Everything under the buzzer lines up with it. The stuck-buzzer alert and the
    pop-out button are inline-block, so they had been hanging off the left edge
    of a column whose every other item was centred. */
-#buzz-area { text-align: center; }
+#buzz-area { text-align: center; position: relative; }
+/* The moderator's ruling, popped over the top of the buzzer area: it covers,
+   never pushes, so nothing a player is about to press moves. */
+.ruling-toast {
+  position: absolute; top: 2.6em; left: 50%; z-index: 6;
+  display: inline-flex; align-items: center; gap: .5em;
+  padding: .45em 1em; border-radius: 999px; white-space: nowrap; max-width: calc(100% - 16px);
+  font-family: var(--display); font-weight: 800; font-size: 1.15rem;
+  border: 2px solid var(--line); box-shadow: 3px 3px 0 var(--shadow-ink);
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transform: translate(-50%, -6px) scale(.9);
+}
+.ruling-toast.rt-correct { background: var(--ok-bg); color: var(--ok-deep); border-color: var(--ok); }
+.ruling-toast.rt-wrong { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
+.ruling-toast .rt-who { overflow: hidden; text-overflow: ellipsis; }
+.ruling-toast .rt-mark { font-size: 1.25em; line-height: 1; }
+.ruling-toast .rt-points { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.ruling-toast.rt-show { visibility: visible; animation: rt-pop 2.6s ease-out forwards; }
+@keyframes rt-pop {
+  0% { opacity: 0; transform: translate(-50%, -6px) scale(.85); }
+  10% { opacity: 1; transform: translate(-50%, 0) scale(1.06); }
+  18% { transform: translate(-50%, 0) scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, 0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ruling-toast.rt-show { animation: rt-fade 2.6s linear forwards; transform: translate(-50%, 0); }
+  @keyframes rt-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+}
 #buzz-area > .hint { margin-left: auto; margin-right: auto; max-width: 34em; }
 /* `margin-inline: auto` centres the block-level ones (the stuck-buzzer alert is
    one); text-align does the rest for the inline-block ones. */
