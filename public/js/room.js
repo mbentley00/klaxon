@@ -9,14 +9,24 @@ const urlToken = params.get('token');   // staff invite token (optional)
 const STAFF = new Set(['reader', 'co-reader']);
 const isStaffRole = (r) => STAFF.has(r);
 
-// A staff invite link carries role (+ token, for joining from another device).
-// Capture it, then scrub the token from the address bar.
-if (isStaffRole(urlRole)) {
+// A staff invite link carries role + token (for joining from another device).
+// The role on its own proves nothing: it is in the moderator's own address bar,
+// and a moderator who copies that address to the room has sent a player link.
+// So it only counts with a token -- in the link, or already saved in this
+// browser for this room (whoever created it). Either way the address bar ends
+// up as the plain room link, which is what anyone copying it should share.
+// (A moderator signing in with an approved account still can, from the gate.)
+const roomToken = urlToken || recall('staffToken:' + code);
+if (isStaffRole(urlRole) && roomToken) {
   remember('staffRole:' + code, urlRole);
-  if (urlToken) {
-    remember('staffToken:' + code, urlToken);
-    history.replaceState(null, '', `/r/${code}`);
-  }
+  if (urlToken) remember('staffToken:' + code, urlToken);
+}
+if (urlRole || urlToken) {
+  const keep = new URLSearchParams(location.search);
+  keep.delete('role');
+  keep.delete('token');
+  const rest = keep.toString();
+  history.replaceState(null, '', `/r/${code}${rest ? '?' + rest : ''}`);
 }
 
 const state = { me: null, role: null, snapshot: null, tournament: null, offlineIds: null, soundedWave: null,
