@@ -152,11 +152,15 @@
           <button id="roster-alerts-clear" class="ghost tiny">Clear these</button>
         </div>
         <div class="sound-row">
-          <input type="file" id="roster-file" accept=".qbj,.json,application/json" />
-          <button id="roster-upload" class="primary tiny">Upload roster</button>
+          <button id="roster-edit" class="primary tiny">Edit roster</button>
+          <button id="roster-yf" class="ghost tiny" title="A QBJ file for YellowFruit: File &gt; QBJ Schema &gt; Import Teams and Rosters Only">Download for YellowFruit</button>
         </div>
-        <p class="hint">A registration QBJ (teams + players). MODAQ rooms in this
-          tournament use it to prefill teams.</p>
+        <div class="sound-row">
+          <input type="file" id="roster-file" accept=".qbj,.json,application/json" />
+          <button id="roster-upload" class="ghost tiny">Upload roster file</button>
+        </div>
+        <p class="hint">Paste teams straight from your registration spreadsheet in Edit roster,
+          or upload a registration QBJ. MODAQ rooms in this tournament use it to prefill teams.</p>
       </div>
 
       <div class="modaq-block">
@@ -327,6 +331,36 @@
       </div>
     </section>
   </main>
+
+  <!-- The roster, edited in place: pasted from a registration spreadsheet,
+       then fixed by hand. See openRosterEditor in tournament.js. -->
+  <dialog id="roster-dialog" class="sheet-dialog roster-dialog" aria-labelledby="roster-dialog-title">
+    <div class="sheet-head">
+      <h3 id="roster-dialog-title">Roster <span id="roster-dialog-count" class="muted-count"></span></h3>
+      <button id="roster-close" class="tiny ghost">Close</button>
+    </div>
+    <div class="roster-body">
+      <label class="roster-paste-label" for="roster-paste">Paste from your spreadsheet</label>
+      <textarea id="roster-paste" rows="2"
+        placeholder="Copy the rows, header row included (Team Name, Player 1, Player 2…), and paste here. Emails and other columns are left out."></textarea>
+      <p id="roster-paste-note" class="hint"></p>
+      <div class="roster-scroll">
+        <table id="roster-grid" class="roster-grid">
+          <thead><tr><th>Team</th><th>Players</th><th><span class="sr-only">Remove</span></th></tr></thead>
+          <tbody id="roster-rows"></tbody>
+        </table>
+      </div>
+      <div class="sound-row">
+        <button id="roster-add-team" class="ghost tiny">+ Add team</button>
+        <button id="roster-clear-all" class="ghost tiny">Clear all</button>
+      </div>
+      <p id="roster-check" class="msg"></p>
+    </div>
+    <div class="roster-foot">
+      <button id="roster-save" class="primary">Save roster</button>
+      <button id="roster-cancel" class="ghost">Cancel</button>
+    </div>
+  </dialog>
 
   <script type="module" src="/js/tournament.js"></script>
 </body>

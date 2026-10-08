@@ -1,4 +1,5 @@
 import { api, remember, recall, readFileText, $, el } from './util.js';
+import { parseSpreadsheet, teamsFromRoster, mergeTeams, checkTeams, toStoredRoster, toYellowFruitQbj } from './roster-parse.js';
 
 const code = location.pathname.split('/').pop().toUpperCase();
 $('#t-code').textContent = code;
@@ -646,9 +647,203 @@ function initModaq() {
 async function refreshRoster() {
   try {
     const { roster } = await api('GET', `/api/tournaments/${code}/roster?directorToken=${qt(directorToken)}`);
-    $('#roster-status').textContent = roster ? '· uploaded' : '· none yet';
+    const { teams } = teamsFromRoster(roster);
+    const players = teams.reduce((n, t) => n + t.players.length, 0);
+    $('#roster-status').textContent = teams.length
+      ? `· ${teams.length} team${teams.length === 1 ? '' : 's'}, ${players} player${players === 1 ? '' : 's'}`
+      : '· none yet';
   } catch { /* leave as-is */ }
 }
+
+// ---- the roster editor ----
+// Most directors have the roster in a registration spreadsheet. Copying its
+// rows (header included) and pasting them here makes the teams; the grid is
+// then the roster, edited in place -- names fixed, a player added, a team
+// dropped -- and saved as the registration QBJ every room in the tournament
+// reads. It can also go out as a QBJ YellowFruit imports, so the stats file
+// starts with the same teams.
+let rosterTeams = [];
+let rosterSaved = '';
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const rosterSnapshot = () =>
+  JSON.stringify(rosterTeams.map((t) => [t.name.trim(), t.players.map((p) => p.trim()).filter(Boolean)]));
+
+async function loadStoredRoster() {
+  const { roster } = await api('GET', `/api/tournaments/${code}/roster?directorToken=${qt(directorToken)}`);
+  return teamsFromRoster(roster);
+}
+
+async function openRosterEditor() {
+  try {
+    rosterTeams = (await loadStoredRoster()).teams;
+  } catch (e) { return msay('Could not load the roster: ' + e.message, false); }
+  rosterSaved = rosterSnapshot();
+  $('#roster-paste').value = '';
+  $('#roster-paste-note').textContent = rosterTeams.length
+    ? ''
+    : 'No roster yet: paste your teams above, or add them one at a time.';
+  $('#roster-check').textContent = '';
+  renderRosterGrid();
+  $('#roster-dialog').showModal();
+  $('#roster-paste').focus();
+}
+
+function rosterCount() {
+  const players = rosterTeams.reduce((n, t) => n + t.players.filter((p) => p.trim()).length, 0);
+  $('#roster-dialog-count').textContent = rosterTeams.length
+    ? `(${plural(rosterTeams.length, 'team')}, ${plural(players, 'player')})`
+    : '';
+}
+
+// One row per team: its name, then a box per player and one blank box at the
+// end -- typing in the blank one adds a player. Pasting several cells into any
+// box reads them like the paste area does.
+function renderRosterGrid(focus) {
+  const body = $('#roster-rows');
+  body.replaceChildren();
+  rosterTeams.forEach((team, ti) => {
+    const tr = el('tr', { className: 'roster-row' });
+    const name = el('input', {
+      className: 'rt-team' + (team.placeholder ? ' rt-placeholder' : ''),
+      value: team.name,
+      placeholder: 'Team name',
+      title: team.placeholder ? 'A placeholder: the sheet had no team name here' : ''
+    });
+    name.setAttribute('aria-label', `Team ${ti + 1} name`);
+    name.oninput = () => {
+      team.name = name.value;
+      team.placeholder = false;
+      name.classList.remove('rt-placeholder');
+      rosterCount();
+    };
+    name.onpaste = rosterPasteInto;
+    const players = el('td', { className: 'rt-players' });
+    const addBox = (value, pi) => {
+      const box = el('input', { className: 'rt-player', value, placeholder: pi === team.players.length ? 'Add player' : '' });
+      box.setAttribute('aria-label', `Team ${ti + 1}, player ${pi + 1}`);
+      box.oninput = () => {
+        const i = [...players.children].indexOf(box);
+        team.players[i] = box.value;
+        // The blank box at the end has been used: offer the next one.
+        if (i === players.children.length - 1 && box.value.trim()) {
+          box.placeholder = '';
+          players.append(addBox('', i + 1));
+        }
+        rosterCount();
+      };
+      box.onpaste = rosterPasteInto;
+      return box;
+    };
+    team.players.forEach((p, pi) => players.append(addBox(p, pi)));
+    players.append(addBox('', team.players.length));
+    const remove = el('button', { className: 'ghost tiny rt-remove', textContent: '×', title: `Remove ${team.name || 'this team'}` });
+    remove.setAttribute('aria-label', `Remove team ${team.name || ti + 1}`);
+    remove.onclick = () => { rosterTeams.splice(ti, 1); renderRosterGrid(); };
+    tr.append(el('td', {}, name), players, el('td', {}, remove));
+    body.append(tr);
+  });
+  rosterCount();
+  if (focus === 'last') body.querySelector('tr:last-child .rt-team')?.focus();
+}
+
+function rosterPaste(text) {
+  const { teams, skipped } = parseSpreadsheet(text);
+  if (!teams.length) {
+    $('#roster-paste-note').textContent =
+      "Couldn't find any teams there. Copy whole rows, with the header row (Team Name, Player 1, …).";
+    return false;
+  }
+  rosterTeams = mergeTeams(rosterTeams, teams);
+  renderRosterGrid();
+  const unnamed = teams.filter((t) => t.placeholder).length;
+  const players = teams.reduce((n, t) => n + t.players.length, 0);
+  $('#roster-paste-note').textContent =
+    `Added ${plural(teams.length, 'team')} (${plural(players, 'player')}).` +
+    (skipped ? ` Skipped ${plural(skipped, 'row')} with no players.` : '') +
+    (unnamed ? ` ${unnamed} had no team name and got a placeholder (highlighted): type the real names in.` : '');
+  return true;
+}
+
+// A paste of several cells into one grid box is a paste of rows, not a name.
+function rosterPasteInto(e) {
+  const text = e.clipboardData?.getData('text') ?? '';
+  if (!/[\t\n]/.test(text.trim())) return;
+  e.preventDefault();
+  rosterPaste(text);
+}
+
+$('#roster-paste').addEventListener('paste', (e) => {
+  const text = e.clipboardData?.getData('text') ?? '';
+  e.preventDefault();
+  if (rosterPaste(text)) $('#roster-paste').value = '';
+});
+$('#roster-edit').onclick = openRosterEditor;
+$('#roster-add-team').onclick = () => {
+  rosterTeams.push({ name: '', players: [], placeholder: false });
+  renderRosterGrid('last');
+};
+$('#roster-clear-all').onclick = () => {
+  if (rosterTeams.length && !confirm('Remove every team from the editor? Nothing is saved until you press Save roster.')) return;
+  rosterTeams = [];
+  renderRosterGrid();
+};
+const closeRosterEditor = () => {
+  if (rosterSnapshot() !== rosterSaved && !confirm('Close without saving your roster changes?')) return;
+  $('#roster-dialog').close();
+};
+$('#roster-close').onclick = closeRosterEditor;
+$('#roster-cancel').onclick = closeRosterEditor;
+// Escape asks first too, when there is something to lose.
+$('#roster-dialog').addEventListener('cancel', (e) => { e.preventDefault(); closeRosterEditor(); });
+$('#roster-save').onclick = async () => {
+  // Blank rows and blank player boxes are the editor's, not the roster's.
+  const rows = [...$('#roster-rows').children];
+  const used = rosterTeams
+    .map((t, i) => ({ team: { ...t, players: t.players.filter((p) => p.trim()) }, row: rows[i] }))
+    .filter(({ team }) => team.name.trim() || team.players.length);
+  const kept = used.map((u) => u.team);
+  rows.forEach((r) => r.classList.remove('rt-error'));
+  const { errors } = checkTeams(kept);
+  if (errors.length) {
+    const lines = errors.slice(0, 4).map((x) => `${kept[x.team].name.trim() || `Team ${x.team + 1}`} ${x.message}`);
+    $('#roster-check').textContent = 'Not saved: ' + lines.join('; ') +
+      (errors.length > 4 ? `; and ${errors.length - 4} more` : '') + '.';
+    $('#roster-check').className = 'msg bad';
+    errors.forEach((x) => used[x.team].row?.classList.add('rt-error'));
+    return;
+  }
+  try {
+    await api('PUT', `/api/tournaments/${code}/roster`, {
+      directorToken, roster: toStoredRoster($('#t-name').textContent, kept)
+    });
+    rosterTeams = kept;
+    rosterSaved = rosterSnapshot();
+    $('#roster-dialog').close();
+    msay(`Roster saved: ${plural(kept.length, 'team')}.`);
+    refreshRoster();
+  } catch (e) {
+    $('#roster-check').textContent = 'Could not save: ' + e.message;
+    $('#roster-check').className = 'msg bad';
+  }
+};
+
+// YellowFruit: File > QBJ Schema > Import Teams and Rosters Only.
+$('#roster-yf').onclick = async () => {
+  try {
+    const { teams } = await loadStoredRoster();
+    if (!teams.length) return msay('No roster yet: add one with Edit roster first.', false);
+    const name = $('#t-name').textContent;
+    const file = toYellowFruitQbj(name, teams);
+    const a = el('a', {
+      href: URL.createObjectURL(new Blob([file], { type: 'application/json' })),
+      download: `${(name || code).replace(/[\\/:*?"<>|]+/g, '').trim() || code} roster.qbj`
+    });
+    document.body.append(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    msay('Downloaded. In YellowFruit: File > QBJ Schema > Import Teams and Rosters Only.');
+  } catch (e) { msay('Could not build the YellowFruit file: ' + e.message, false); }
+};
 
 // Players who joined a roster room under a name the roster doesn't have —
 // a sub, a late addition, or a typo the director may want to fix.
