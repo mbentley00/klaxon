@@ -150,7 +150,7 @@ app.get('/api/rooms/:code', (req, res) => {
   });
 });
 
-app.post('/api/tournaments', (req, res) => {
+app.post('/api/tournaments', ah(async (req, res) => {
   const { name, schedule, defaults, format, requireReaderAccounts, date, listed } = req.body || {};
   const t = store.createTournament({
     name, schedule, defaults, format, requireReaderAccounts, date, listed,
@@ -161,8 +161,33 @@ app.post('/api/tournaments', (req, res) => {
     showQuestions: req.body?.showQuestions === true,
     questionLag: req.body?.questionLag
   });
+  // Whoever makes a tournament can read in it: a signed-in creator is approved.
+  const account = accounts.accountForSession(req.body?.sessionToken);
+  if (account) await approveDirector(t, account);
   res.json({ code: t.code, directorToken: t.directorToken, name: t.name, defaults: t.roomDefaults, format: t.format });
-});
+}));
+
+// The director's own account, approved as a member of their tournament, so
+// reading in it never asks them to request access from themselves.
+async function approveDirector(t, account) {
+  const bucket = { kind: 't', code: t.code };
+  await artifacts.requestMembership(bucket, account.id, account.username);
+  return artifacts.setMemberStatus(bucket, account.id, 'approved');
+}
+
+// The console calls this whenever a signed-in director opens it, which also
+// covers tournaments made before the creator was approved at creation.
+app.post('/api/tournaments/:code/members/director', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const account = accounts.accountForSession(req.body?.sessionToken);
+  if (!account) return res.status(401).json({ error: 'not_logged_in' });
+  if ((await artifacts.memberStatus({ kind: 't', code: t.code }, account.id)) === 'approved') {
+    return res.json({ approved: true, changed: false });
+  }
+  await approveDirector(t, account);
+  res.json({ approved: true, changed: true });
+}));
 
 // --- feedback / bug reports -------------------------------------------------
 // Mailed straight through; nothing is stored. Rate-limited per IP so the form
@@ -302,6 +327,8 @@ app.get('/api/tournaments/:code', (req, res) => {
   if (!t) return res.status(404).json({ error: 'not_found' });
   res.json({
     code: t.code, name: t.name, date: t.date || '', schedule: t.schedule, rooms: [...t.roomCodes],
+    // code -> friendly name ("Room 1"), for pages that list the rooms
+    roomNames: Object.fromEntries([...t.roomCodes].map((c) => [c, store.describeRoom(c)?.name || ''])),
     defaults: t.roomDefaults, format: t.format, requireReaderAccounts: !!t.requireReaderAccounts,
     links: t.links || { schedule: '', discord: '' },
     autoRelease: t.autoRelease === true,
@@ -1230,7 +1257,7 @@ async function statsFor(code) {
   try { matches = await artifacts.readAllExports(bucket); } catch { matches = []; }
   if (!t && matches.length === 0) return null;
   const structure = await artifacts.getStructure(bucket).catch(() => null);
-  return { t: t || { code: upper, name: upper }, stats: computeStats(matches, structure), matchCount: matches.length };
+  return { t: t || { code: upper, name: upper }, stats: computeStats(matches, structure, store.describeRoom), matchCount: matches.length };
 }
 
 // Director sets/gets the tournament structure (phases + divisions). The GET also
@@ -1265,7 +1292,7 @@ app.get('/api/tournaments/:code/live', ah(async (req, res) => {
   try { matches = await artifacts.readAllExports(bucket); } catch { matches = []; }
   if (!t && matches.length === 0) return res.status(404).json({ error: 'not_found' });
   const live = matches.filter((m) => m?.qbj?._inProgress === true);
-  res.json({ games: liveGameRows(live), now: Date.now() });
+  res.json({ games: liveGameRows(live, store.describeRoom), now: Date.now() });
 }));
 
 // Links between the served report pages (relative to /t/CODE/stats/).
@@ -1581,6 +1608,8 @@ app.get('/yapp', (_req, res) => res.sendFile(path.join(publicDir, 'yapp.html')))
 
 // tournament director console
 app.get('/t/:code', (_req, res) => res.sendFile(path.join(publicDir, 'tournament.html')));
+// A moderator's invite: sign in, ask to join, and once approved, pick a room.
+app.get('/t/:code/join', (_req, res) => res.sendFile(path.join(publicDir, 'join.html')));
 
 // Player landing page for a whole tournament (content is key-gated by the API).
 app.get('/tp/:code', (_req, res) => res.sendFile(path.join(publicDir, 'player-tournament.html')));

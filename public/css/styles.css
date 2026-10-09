@@ -125,8 +125,9 @@ button, .btnlink {
 button:hover, .btnlink:hover { background: var(--surface-hover); }
 button:active, .btnlink:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--shadow-ink); }
 button:disabled { opacity: .45; cursor: not-allowed; box-shadow: 3px 3px 0 var(--soft); border-color: var(--soft); }
-button.primary { background: var(--accent-fill); color: var(--on-accent); border-color: var(--line); }
-button.primary:hover { background: var(--accent-fill-hover); }
+button.primary, .btnlink.primary { background: var(--accent-fill); color: var(--on-accent); border-color: var(--line); }
+button.primary:hover, .btnlink.primary:hover { background: var(--accent-fill-hover); }
+.join-title { margin: .2em 0 0; font-family: var(--display); }
 button.modaq { background: var(--modaq-fill); color: var(--on-accent); }
 button.modaq:hover { background: var(--modaq-fill-hover); }
 button.shootout { background: var(--shootout-fill); color: var(--on-accent); }
@@ -537,6 +538,11 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
 .copy-field { display: flex; gap: 6px; }
 .copy-field input { font-family: var(--mono); font-size: .8rem; }
 .copy-btn { flex: 0 0 auto; }
+/* Copy is a button and Open is a link; side by side they must read as a pair. */
+.copy-field > button, .copy-field > .btnlink {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  min-width: 4.6em; line-height: 1.2; background: var(--surface);
+}
 
 .modaq-block { border-top: 1px solid var(--soft); padding-top: 12px; margin-top: 12px; }
 .modaq-block:first-of-type { border-top: 0; padding-top: 0; margin-top: 8px; }

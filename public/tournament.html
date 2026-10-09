@@ -277,8 +277,17 @@
     <section class="panel" id="accounts-panel" data-tab="settings">
       <h3>Reader accounts <span id="members-count" class="muted-count"></span>
         <button id="members-refresh" class="tiny ghost">Refresh</button></h3>
-      <p class="hint">Readers who requested access. Approve to let them read this tournament's centralized
-        packets (only enforced if the tournament requires reader accounts).</p>
+      <label class="share-row">
+        <span>Moderator invite link</span>
+        <span class="copy-field">
+          <input id="mod-invite-link" readonly />
+          <button id="mod-invite-copy" class="copy-btn tiny">Copy</button>
+          <a id="mod-invite-open" class="btnlink tiny" target="_blank" rel="noopener">Open</a>
+        </span>
+      </label>
+      <p class="hint">Send this to your moderators. They sign in or create an account and ask to join;
+        their requests show up below for you to approve. Once approved they can read in any room
+        of this tournament without a reader link.</p>
       <div class="sound-row">
         <input id="member-add-id" placeholder="Email or username of a registered account" />
         <button id="member-add" class="primary tiny">Add moderator</button>
@@ -301,7 +310,7 @@
         <span>Public stats link</span>
         <span class="copy-field">
           <input id="stats-link" readonly />
-          <button id="stats-copy" class="copy-btn ghost tiny">Copy</button>
+          <button id="stats-copy" class="copy-btn tiny">Copy</button>
           <a id="stats-open" class="btnlink tiny" target="_blank" rel="noopener">Open</a>
         </span>
       </label>

@@ -40,6 +40,16 @@ function initTabs() {
 }
 initTabs();
 
+// A signed-in director is approved to read in their own tournament, so the
+// account gate never asks them to request access from themselves.
+(async () => {
+  const sessionToken = localStorage.getItem('bz_sessionToken');
+  if (!directorToken || !sessionToken) return;
+  try {
+    await api('POST', `/api/tournaments/${code}/members/director`, { directorToken, sessionToken });
+  } catch { /* not signed in any more, or not the director: nothing to do */ }
+})();
+
 // Remember every tournament this browser opens (director or not) so the
 // landing page and directory can list "your tournaments" without an account.
 function rememberVisit(name, date) {
@@ -492,6 +502,22 @@ async function saveStructure() {
 }
 
 // Public stats link + YellowFruit download — no director token required to view.
+// The link a director hands to moderators: it takes them through signing in
+// to a request the director approves below.
+function initModInvite() {
+  const link = `${location.origin}/t/${code}/join`;
+  const input = $('#mod-invite-link');
+  if (!input) return;
+  input.value = link;
+  $('#mod-invite-open').href = link;
+  const copy = $('#mod-invite-copy');
+  copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(link); } catch { input.select(); document.execCommand('copy'); }
+    const o = copy.textContent; copy.textContent = 'Copied!'; setTimeout(() => { copy.textContent = o; }, 1200);
+  };
+}
+initModInvite();
+
 function initPublicStats() {
   const link = `${location.origin}/t/${code}/stats`;
   const input = $('#stats-link');
@@ -529,11 +555,12 @@ async function refreshLive() {
       const li = el('li', {});
       const col = el('span', { className: 'pcol' });
       const score = [...g.teams].sort((a, b) => b.total - a.total).map((t) => `${t.name} ${t.total}`).join(', ');
-      col.append(el('span', { className: 'pname' }, `Round ${g.round} · ${score}`));
+      col.append(el('span', { className: 'pname' }, `${g.roomName || `Room ${g.room}`} · Round ${g.round} · ${score}`));
       const bits = [];
+      if (g.readers?.length) bits.push(`read by ${g.readers.join(', ')}`);
       if (g.currentQuestion) bits.push(`on question ${g.currentQuestion}${g.tuh ? ` of ${g.tuh}` : ''}`);
       if (g.startedAt) bits.push(`running ${Math.max(0, Math.round((now - g.startedAt) / 60000))} min`);
-      if (g.room) bits.push(`room ${g.room}`);
+      if (g.room && g.roomName) bits.push(`code ${g.room}`);
       col.append(el('span', { className: 'pjoined' }, bits.join(' · ')));
       li.append(col);
       ul.append(li);
@@ -630,7 +657,7 @@ function initModaq() {
       refreshMembers();
     } catch (e) {
       msay(e.message === 'account_not_found'
-        ? 'No registered account with that email or username — ask them to create one at /account first.'
+        ? `No account with that email or username. Ask them to create one at ${location.origin}/account, then add them here.`
         : 'Could not add moderator: ' + e.message, false);
     }
   };
@@ -1405,7 +1432,7 @@ $('#add-rooms').onclick = async () => {
 function linkRow(label, url) {
   const row = el('div', { className: 'copy-field link-row' });
   const input = el('input', { readOnly: true, value: url });
-  const copy = el('button', { className: 'ghost tiny' }, 'Copy');
+  const copy = el('button', { className: 'tiny' }, 'Copy');
   copy.onclick = async () => {
     try { await navigator.clipboard.writeText(url); } catch { input.select(); document.execCommand('copy'); }
     const o = copy.textContent; copy.textContent = 'Copied!'; setTimeout(() => { copy.textContent = o; }, 1200);

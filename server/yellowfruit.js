@@ -532,8 +532,9 @@ No games in progress.
   } else {
     const header = `<tr>
 ${th('Round', { width: '8%' })}
-${th('Room', { width: '10%' })}
-${th('Score', { width: '40%' })}
+${th('Room', { width: '12%' })}
+${th('Reader', { width: '14%' })}
+${th('Score', { width: '30%' })}
 ${th('On question', { align: true, width: '14%' })}
 ${th('Running for', { align: true, width: '14%', abbr: 'Time since this game started syncing' })}
 ${th('Last update', { align: true, width: '14%' })}
@@ -544,7 +545,8 @@ ${th('Last update', { align: true, width: '14%' })}
       const progress = g.currentQuestion ? `${g.currentQuestion}${g.tuh ? ` of ${g.tuh}` : ''}` : '—';
       return `<tr>
 ${td(esc(g.round))}
-${td(esc(g.room))}
+${td(esc(g.roomName || g.room))}
+${td(esc((g.readers || []).join(', ')) || '—')}
 ${td(score)}
 ${td(progress, { align: true })}
 ${td(g.startedAt ? `${mins(now - g.startedAt)} min` : '—', { align: true })}

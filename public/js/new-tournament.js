@@ -64,7 +64,9 @@ $('#create-tournament').addEventListener('click', async () => {
       buzzPoints: $('#fmt-buzz-points').checked,
       playtest: $('#fmt-playtest').checked,
       showQuestions: $('#fmt-show-questions').checked,
-      questionLag: Number($('#fmt-question-lag').value)
+      questionLag: Number($('#fmt-question-lag').value),
+      // Signed in, the creator is approved to read in their own tournament.
+      sessionToken: localStorage.getItem('bz_sessionToken') || undefined
     });
     remember('directorToken:' + r.code, r.directorToken);
 

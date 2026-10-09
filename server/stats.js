@@ -190,7 +190,10 @@ function groupTeams(teamStats, phaseName, structure) {
 
 // Rows for the Live Games view: current score, question progress, elapsed time.
 // Kept out of aggregate() so half-played games never touch the real stats.
-export function liveGameRows(liveMatches) {
+// `describeRoom(code)` -> { name, readers } fills in what the export doesn't
+// carry: the room's friendly name and who is reading in it. Optional, so the
+// stats stay computable from the exports alone.
+export function liveGameRows(liveMatches, describeRoom = () => null) {
   return liveMatches.map((m) => {
     const qbj = m?.qbj || m;
     const teams = (Array.isArray(qbj.match_teams) ? qbj.match_teams : []).map((mt) => {
@@ -201,9 +204,13 @@ export function liveGameRows(liveMatches) {
       const name = mt?.team?.name || '?';
       return { name, total: tossupPoints + num(mt?.bonus_points) + rulingAdjustment(qbj, name) };
     });
+    const room = String(qbj._room ?? '');
+    const about = (room && describeRoom(room)) || {};
     return {
       round: String(qbj._round ?? ''),
-      room: String(qbj._room ?? ''),
+      room,
+      roomName: about.name || '',
+      readers: Array.isArray(about.readers) ? about.readers : [],
       currentQuestion: num(qbj._currentQuestion) || 0,
       tuh: num(qbj.tossups_read),
       startedAt: num(qbj._startedAt) || 0,
@@ -316,7 +323,7 @@ export function protestRows(allMatches) {
   });
 }
 
-export function computeStats(allMatches, structure) {
+export function computeStats(allMatches, structure, describeRoom) {
   // Half-played games (live syncs) get their own view; every regular report —
   // the YellowFruit-style set — sees only final games.
   const matches = [];
@@ -374,7 +381,7 @@ export function computeStats(allMatches, structure) {
   return {
     answerValues, getValue, isPower, anyTies,
     phases, rounds, scoreboard,
-    liveGames: liveGameRows(liveMatches),
+    liveGames: liveGameRows(liveMatches, describeRoom),
     teamsGlobal: [...global.teams.values()],
     playersGlobal: [...global.players.values()],
     roundToPhase: (r) => roundToPhase.get(String(r)),

@@ -925,6 +925,17 @@ export function assignRosterPlayer(room, playerId, team, player) {
 // roster player once assigned, otherwise whatever they typed on the join gate.
 export const displayName = (member) => member?.rosterPlayer || member?.name || '?';
 
+// A room as the stats pages name it: its friendly name and the people reading
+// in it (connected ones first; if nobody is connected, whoever last was).
+export function describeRoom(code) {
+  const room = rooms.get(String(code || '').toUpperCase());
+  if (!room) return null;
+  const staff = [...room.members.values()].filter((m) => m.role === 'reader' || m.role === 'co-reader');
+  const live = staff.filter((m) => m.connected);
+  const readers = [...new Set((live.length ? live : staff).map((m) => m.name).filter(Boolean))];
+  return { name: room.name || '', readers };
+}
+
 // --- buzz cycle state machine --------------------------------------------
 // A room holds an ordered `queue` of who has buzzed.
 //  - Default mode: the first wave of buzzes fills the queue, then phase locks
