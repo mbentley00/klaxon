@@ -18,6 +18,7 @@ import * as shootout from './shootout.js';
 import { renderReport, PAGES } from './yellowfruit.js';
 import { computeBuzzpoints, renderBuzzpointsCsv, renderBuzzpointsHtml } from './buzzpoints.js';
 import { sendEmail, emailEnabled, feedbackBody, FEEDBACK_TO } from './email.js';
+import { startWatchdog } from './watchdog.js';
 import { buildZip } from './zip.js';
 import * as accounts from './accounts.js';
 import { parseYellowFruit, planImport } from './yfimport.js';
@@ -172,7 +173,34 @@ app.post('/api/tournaments', ah(async (req, res) => {
 async function approveDirector(t, account) {
   const bucket = { kind: 't', code: t.code };
   await artifacts.requestMembership(bucket, account.id, account.username);
-  return artifacts.setMemberStatus(bucket, account.id, 'approved');
+  const m = await artifacts.setMemberStatus(bucket, account.id, 'approved');
+  await artifacts.markDirector(bucket, account.id);
+  return m;
+}
+
+// A moderator asked to join: tell the tournament's directors, by the email on
+// their accounts (a director without an account, or without an email on it,
+// only finds out from the console).
+async function notifyDirectorsOfRequest(t, requester, origin) {
+  if (!emailEnabled()) return;
+  const members = await artifacts.getMembers({ kind: 't', code: t.code });
+  const to = [...new Set(members.filter((m) => m.director)
+    .map((m) => accounts.getAccount(m.accountId)?.email).filter(Boolean))];
+  if (!to.length) return;
+  const esc = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+  const who = requester.displayName ? `${requester.displayName} (${requester.username})` : requester.username;
+  const url = `${origin}/t/${t.code}`;
+  const tname = t.name || t.code;
+  await sendEmail({
+    to,
+    subject: `${who} asked to moderate ${tname}`,
+    text: `${who}${requester.email ? ` <${requester.email}>` : ''} asked to moderate ${tname}.\n\nApprove them in the director console: ${url} (Settings > Reader accounts).`,
+    html: `<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;color:#17130d;line-height:1.5;max-width:520px">` +
+      `<p><strong>${esc(who)}</strong>${requester.email ? ` (${esc(requester.email)})` : ''} asked to moderate <strong>${esc(tname)}</strong>.</p>` +
+      `<p>Approve them in the <a href="${esc(url)}">director console</a>, under Settings &rsaquo; Reader accounts.</p>` +
+      `<hr style="border:none;border-top:1px solid #eee;margin:20px 0"><p style="font-size:12px;color:#888">Klaxon</p></div>`,
+    replyTo: requester.email || undefined
+  });
 }
 
 // The console calls this whenever a signed-in director opens it, which also
@@ -428,8 +456,16 @@ app.post('/api/tournaments/:code/access', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   const account = accounts.accountForSession(req.body?.sessionToken);
   if (!account) return res.status(401).json({ error: 'not_logged_in' });
-  const m = await artifacts.requestMembership({ kind: 't', code: t.code }, account.id, account.username);
+  const bucket = { kind: 't', code: t.code };
+  const before = await artifacts.memberStatus(bucket, account.id);
+  const m = await artifacts.requestMembership(bucket, account.id, account.username);
   res.json({ status: m.status });
+  // Only a NEW request: asking again while pending shouldn't email again.
+  if (before == null && m.status === 'pending') {
+    const origin = process.env.KLAXON_CANONICAL_HOST ? `https://${process.env.KLAXON_CANONICAL_HOST}` : `${req.protocol}://${req.get('host')}`;
+    notifyDirectorsOfRequest(t, account, origin)
+      .catch((e) => console.warn('[email] access request notice failed:', e.message));
+  }
 }));
 
 // A reader checks their own access status for a tournament. `status` answers
@@ -2916,3 +2952,13 @@ store.setPersistence({
 httpServer.listen(PORT, () => {
   console.log(`buzz-online listening on http://localhost:${PORT}`);
 });
+
+// Stalls and crashes email the operator (see watchdog.js). Off without email
+// configured, and off in a test run unless asked for.
+if (emailEnabled() || process.env.KLAXON_WATCHDOG === '1') {
+  startWatchdog({
+    io, dataDir: artifacts.DATA_DIR, to: process.env.KLAXON_ALERT_EMAIL || FEEDBACK_TO,
+    send: (msg) => (emailEnabled() ? sendEmail(msg) : Promise.resolve(console.warn('[watchdog] (no email configured)', msg.subject))),
+    describe: () => store.activity()
+  });
+}

@@ -222,6 +222,8 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 .crumb-mark { font-family: var(--display); font-weight: 700; color: var(--ink) !important; font-size: 1rem; letter-spacing: -.01em; }
 .crumb-sep { color: var(--soft); }
 .room-code { font-family: var(--mono); font-weight: 600; letter-spacing: .12em; color: var(--accent); }
+a.room-code { text-decoration: none; }
+a.room-code:hover { text-decoration: underline; }
 .room-name { color: var(--muted); font-size: .9rem; }
 .bar-right { display: flex; gap: 8px; align-items: center; }
 /* On a phone the right-hand chips (copy link, connection, latency, the theme

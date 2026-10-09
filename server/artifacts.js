@@ -785,6 +785,15 @@ export async function setMemberStatus(bucket, accountId, status) {
   return m;
 }
 
+// The director's own account, flagged so they hear about access requests.
+export async function markDirector(bucket, accountId) {
+  const members = await getMembers(bucket);
+  const m = members.find((x) => x.accountId === accountId);
+  if (!m || m.director) return;
+  m.director = true;
+  await saveMembers(bucket, members);
+}
+
 export async function memberStatus(bucket, accountId) {
   const members = await getMembers(bucket);
   return members.find((x) => x.accountId === accountId)?.status || null;

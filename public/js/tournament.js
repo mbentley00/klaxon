@@ -3,6 +3,7 @@ import { parseSpreadsheet, teamsFromRoster, mergeTeams, checkTeams, toStoredRost
 
 const code = location.pathname.split('/').pop().toUpperCase();
 $('#t-code').textContent = code;
+$('#t-code').href = `/t/${code}`;
 
 // The director token is minted once at tournament creation and kept locally.
 // It's required for every MODAQ management call below.

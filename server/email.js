@@ -7,6 +7,7 @@
 // set of mail credentials serves both.
 // ---------------------------------------------------------------------------
 
+import fs from 'node:fs';
 import nodemailer from 'nodemailer';
 
 const SMTP_HOST = process.env.SMTP_HOST || '';
@@ -22,7 +23,10 @@ const EMAIL_FROM = process.env.EMAIL_FROM || 'Klaxon <klaxon@doc-ent.com>';
 export const FEEDBACK_TO = process.env.FEEDBACK_EMAIL || 'bentley.michael.j@gmail.com';
 
 const smtpConfigured = () => !!(SMTP_HOST && SMTP_USER && SMTP_PASS);
-export const emailEnabled = () => smtpConfigured() || !!RESEND_API_KEY;
+// Tests: KLAXON_EMAIL_OUTBOX=<file> appends each message there as a JSON line
+// instead of sending it.
+const OUTBOX = process.env.KLAXON_EMAIL_OUTBOX || '';
+export const emailEnabled = () => !!OUTBOX || smtpConfigured() || !!RESEND_API_KEY;
 
 // One transport per process; feedback is low volume, so no pooling needed.
 let tx = null;
@@ -35,6 +39,10 @@ const transport = () =>
   }));
 
 export async function sendEmail({ to, subject, html, text, replyTo }) {
+  if (OUTBOX) {
+    fs.appendFileSync(OUTBOX, JSON.stringify({ to, subject, html, text, replyTo }) + '\n');
+    return true;
+  }
   if (smtpConfigured()) {
     try {
       await transport().sendMail({ from: EMAIL_FROM, to, subject, html, text, ...(replyTo ? { replyTo } : {}) });

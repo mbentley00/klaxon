@@ -927,6 +927,17 @@ export const displayName = (member) => member?.rosterPlayer || member?.name || '
 
 // A room as the stats pages name it: its friendly name and the people reading
 // in it (connected ones first; if nobody is connected, whoever last was).
+// For the watchdog's report: how much is going on.
+export function activity() {
+  let live = 0, members = 0;
+  for (const room of rooms.values()) {
+    const connected = [...room.members.values()].filter((m) => m.connected).length;
+    if (connected) live++;
+    members += connected;
+  }
+  return { rooms: rooms.size, roomsWithSomeoneIn: live, connectedMembers: members };
+}
+
 export function describeRoom(code) {
   const room = rooms.get(String(code || '').toUpperCase());
   if (!room) return null;
