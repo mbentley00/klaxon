@@ -170,7 +170,17 @@ export async function savePacket(bucket, round, jsonText, opts = {}) {
   return { round: name, visible: meta[name].visible, tiebreaker: meta[name].tiebreaker, tossups: meta[name].tossups };
 }
 
-// Returns [{ round, visible, tiebreaker }] for every stored round.
+// Rounds the director has placed come first, in that order; the rest follow by
+// name, with numbers compared as numbers so "2" sorts before "10".
+const naturalCompare = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true });
+function packetOrderCompare(a, b) {
+  const oa = Number.isFinite(a.order) ? a.order : Infinity;
+  const ob = Number.isFinite(b.order) ? b.order : Infinity;
+  return oa !== ob ? oa - ob : naturalCompare(a.round, b.round);
+}
+
+// Returns [{ round, visible, tiebreaker, tossups, order }] for every stored
+// round, in the order the director set (see setPacketOrder).
 export async function listPackets(bucket) {
   const dir = path.join(bucketDir(bucket), 'packets');
   try {
@@ -179,14 +189,15 @@ export async function listPackets(bucket) {
     return files
       .filter((f) => f.endsWith('.json') && f !== '_meta.json')
       .map((f) => f.replace(/\.json$/, ''))
-      .sort()
       .map((round) => ({
         round,
         visible: !!meta[round]?.visible,
         tiebreaker: !!meta[round]?.tiebreaker,
         // undefined for a round saved before the count was recorded
-        tossups: meta[round]?.tossups
-      }));
+        tossups: meta[round]?.tossups,
+        order: meta[round]?.order
+      }))
+      .sort(packetOrderCompare);
   } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
 }
 
@@ -199,6 +210,31 @@ async function setPacketFlag(bucket, round, flag, value) {
 }
 export const setPacketVisibility = (bucket, round, visible) => setPacketFlag(bucket, round, 'visible', visible);
 export const setPacketTiebreaker = (bucket, round, tiebreaker) => setPacketFlag(bucket, round, 'tiebreaker', tiebreaker);
+
+// The director's drag-to-reorder: `rounds` is the whole list, top to bottom.
+// Names that aren't stored rounds are ignored; stored rounds missing from it
+// lose their place and fall to the end, sorted by name.
+export async function setPacketOrder(bucket, rounds) {
+  const meta = await getPacketMeta(bucket);
+  const stored = new Set((await listPackets(bucket)).map((p) => p.round));
+  for (const name of Object.keys(meta)) delete meta[name].order;
+  let i = 0;
+  for (const r of rounds) {
+    const name = safeName(r, 'round');
+    if (!stored.has(name) || Number.isFinite(meta[name]?.order)) continue;
+    meta[name] = { ...(meta[name] || {}), order: i++ };
+  }
+  await setPacketMeta(bucket, meta);
+  return listPackets(bucket);
+}
+
+export async function deletePacket(bucket, round) {
+  const name = safeName(round, 'round');
+  await fs.rm(path.join(bucketDir(bucket), 'packets', `${name}.json`), { force: true });
+  const meta = await getPacketMeta(bucket);
+  delete meta[name];
+  await setPacketMeta(bucket, meta);
+}
 
 export async function isPacketVisible(bucket, round) {
   const meta = await getPacketMeta(bucket);
@@ -263,12 +299,9 @@ export async function getPacket(bucket, round) {
 // one file is released all at once or not at all; split up, a director can hold
 // the whole pool back and release the single question a room needs.
 //
-// The source round is left on disk and hidden, which takes it out of the pool
-// (only VISIBLE tiebreaker rounds feed it) so its questions can't also arrive
-// the old way. It keeps its tiebreaker flag: dropping that would leave it
-// looking like an ordinary unreleased round, and it would turn up in the
-// "release the next round" rotation. Nothing is deleted — hiding the new rounds
-// and making the old one visible again puts everything back.
+// The source round is then deleted: left behind, it is a second copy of every
+// question in the list, and a director has to work out which one is real.
+// Usage already recorded against it stays in tiebreakers-usage.json.
 export async function splitPacketIntoTiebreakers(bucket, round) {
   const text = await getPacket(bucket, round);
   if (text == null) throw new Error('no_packet');
@@ -288,7 +321,12 @@ export async function splitPacketIntoTiebreakers(bucket, round) {
   }
   // Only once every new round is safely on disk: if a write had failed halfway,
   // the source is still the pool it was.
-  await setPacketFlag(bucket, round, 'visible', false);
+  // The new rounds take the source's place in the director's order.
+  const order = (await listPackets(bucket)).map((p) => p.round)
+    .filter((r) => !created.includes(r))
+    .flatMap((r) => (r === label ? created : [r]));
+  await deletePacket(bucket, round);
+  await setPacketOrder(bucket, order);
   return { round: label, created };
 }
 

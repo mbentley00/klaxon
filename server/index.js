@@ -695,6 +695,16 @@ app.get('/api/tournaments/:code/packets', ah(async (req, res) => {
   res.json({ packets: await artifacts.listPackets({ kind: 't', code: t.code }) });
 }));
 
+// Director drags the rounds into order. It's the order moderators see them in
+// and the order "release next" walks.
+app.put('/api/tournaments/:code/packets-order', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const rounds = req.body?.rounds;
+  if (!Array.isArray(rounds)) return res.status(400).json({ error: 'rounds must be a list' });
+  res.json({ packets: await artifacts.setPacketOrder({ kind: 't', code: t.code }, rounds.map(String)) });
+}));
+
 // Director releases (or re-hides) a round to moderators.
 app.put('/api/tournaments/:code/packets/:round/visibility', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
@@ -1137,13 +1147,9 @@ async function maybeAutoRelease(room, round) {
   }
   if (!expected.every((rc) => played.has(rc))) return;
 
+  // listPackets is already in the director's order.
   const packets = await artifacts.listPackets(bucket);
-  const next = packets
-    .filter((p) => !p.visible && !p.tiebreaker)
-    .sort((a, b) => {
-      const na = Number(a.round), nb = Number(b.round);
-      return Number.isFinite(na) && Number.isFinite(nb) ? na - nb : String(a.round).localeCompare(String(b.round));
-    })[0];
+  const next = packets.find((p) => !p.visible && !p.tiebreaker);
   if (!next) return;
   await artifacts.setPacketVisibility(bucket, next.round, true);
   console.log(`auto-released packet "${next.round}" for tournament ${t.code} (round ${round} complete)`);

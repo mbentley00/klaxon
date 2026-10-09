@@ -259,6 +259,8 @@ function initPlaytest(t) {
   };
 
   async function refresh() {
+    // Off, the feedback controls are for a feature nobody is running.
+    $('#playtest-row').classList.toggle('hidden', !cb.checked);
     if (!cb.checked) { list.replaceChildren(); note.textContent = ''; return; }
     try {
       const { feedback } = await api('GET', `/api/tournaments/${code}/playtest-feedback?directorToken=${qt(directorToken)}`);
@@ -565,9 +567,12 @@ function initModaq() {
   refreshProtests();
   $('#protests-refresh').onclick = refreshProtests;
 
-  $('#roster-upload').onclick = async () => {
+  // One button: it opens the file picker, and choosing a file uploads it.
+  $('#roster-upload').onclick = () => $('#roster-file').click();
+  $('#roster-file').onchange = async () => {
     const text = await readFileText($('#roster-file'));
-    if (!text) return msay('Choose a roster file first.', false);
+    $('#roster-file').value = '';
+    if (!text) return;
     try {
       JSON.parse(text);
       await api('PUT', `/api/tournaments/${code}/roster`, { directorToken, roster: text });
@@ -878,10 +883,12 @@ async function refreshPackets() {
     ul.innerHTML = '';
     if (!packets.length) { ul.append(el('li', { className: 'empty' }, 'No round packets yet')); return; }
     for (const p of packets) {
-      const li = el('li', {});
+      const li = el('li', { className: 'packet-row' });
+      li.dataset.round = p.round;
+      if (packets.length > 1) li.append(dragHandle(li, p));
       const nameWrap = el('span', { className: 'pname' });
       nameWrap.append(document.createTextNode(`Round ${p.round}`));
-      if (p.tiebreaker) nameWrap.append(el('span', { className: 'offline-badge' }, 'TB'));
+      if (p.tiebreaker) nameWrap.append(el('span', { className: 'tag-badge' }, 'TB'));
       // Rounds uploaded before the count was recorded don't have one.
       if (p.tossups > 0) {
         nameWrap.append(el('span', { className: 'muted-count' },
@@ -908,12 +915,9 @@ async function refreshPackets() {
 function updateReleaseNext(packets) {
   const btn = $('#release-next');
   if (!btn) return;
-  const unreleased = packets.filter((p) => !p.visible && !p.tiebreaker);
-  unreleased.sort((a, b) => {
-    const na = Number(a.round), nb = Number(b.round);
-    return Number.isFinite(na) && Number.isFinite(nb) ? na - nb : String(a.round).localeCompare(String(b.round));
-  });
-  const next = unreleased[0];
+  // The list arrives in the director's order, so the next round is the first
+  // unreleased one in it.
+  const next = packets.find((p) => !p.visible && !p.tiebreaker);
   if (!next) {
     btn.disabled = true;
     btn.textContent = packets.some((p) => !p.tiebreaker) ? 'All packets released' : 'Release next packet';
@@ -935,6 +939,76 @@ function updateReleaseNext(packets) {
   };
 }
 
+// Drag a round by its handle to move it; with the handle focused, the arrow
+// keys move it one place. Pointer events rather than HTML5 drag-and-drop, which
+// does nothing on a phone or tablet. The new order is saved on drop.
+function dragHandle(li, p) {
+  const h = el('button', {
+    className: 'drag-handle', type: 'button', textContent: '⠿',
+    title: 'Drag to reorder (or focus and use the arrow keys)'
+  });
+  h.setAttribute('aria-label', `Move Round ${p.round}`);
+
+  h.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    // Listening on the document, not the handle: moving the row in the DOM
+    // releases any pointer capture the handle holds, ending the drag a row in.
+    const ul = li.parentElement;
+    const before = rowOrder(ul);
+    li.classList.add('dragging');
+    const move = (ev) => {
+      // Whichever row the pointer is over, put this one on that side of it.
+      const over = [...ul.children].find((r) => {
+        const b = r.getBoundingClientRect();
+        return r !== li && ev.clientY >= b.top && ev.clientY <= b.bottom;
+      });
+      if (!over) return;
+      const b = over.getBoundingClientRect();
+      ul.insertBefore(li, ev.clientY < b.top + b.height / 2 ? over : over.nextSibling);
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', up);
+      li.classList.remove('dragging');
+      if (rowOrder(ul).join('\n') !== before.join('\n')) saveOrder(ul);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', up);
+  });
+
+  h.addEventListener('keydown', (e) => {
+    const ul = li.parentElement;
+    if (e.key === 'ArrowUp' && li.previousElementSibling) ul.insertBefore(li, li.previousElementSibling);
+    else if (e.key === 'ArrowDown' && li.nextElementSibling) ul.insertBefore(li.nextElementSibling, li);
+    else return;
+    e.preventDefault();
+    h.focus();
+    saveOrder(ul);
+  });
+  return h;
+}
+
+const rowOrder = (ul) => [...ul.children].map((r) => r.dataset.round).filter(Boolean);
+
+// Saved per move; a quick run of arrow presses collapses into one save.
+let orderTimer = null;
+function saveOrder(ul) {
+  clearTimeout(orderTimer);
+  orderTimer = setTimeout(async () => {
+    try {
+      const { packets } = await api('PUT', `/api/tournaments/${code}/packets-order`,
+        { directorToken, rounds: rowOrder(ul) });
+      updateReleaseNext(packets);
+    } catch (e) {
+      msay('Could not save the round order: ' + e.message, false);
+      refreshPackets();
+    }
+  }, 300);
+}
+
 // Breaks a tiebreaker round into one round per question, so each can be
 // released on its own. Confirmed first: it makes twenty rounds out of one, and
 // that's a lot of list to undo by hand.
@@ -946,7 +1020,7 @@ function splitButton(p) {
     if (!confirm(`Split "Round ${p.round}" into ${count}hidden tiebreaker rounds, one per tossup?
 
 `
-      + "The round itself stays, but is hidden so its questions don't reach the pool twice.")) return;
+      + 'The original round is replaced by them.')) return;
     btn.disabled = true;
     try {
       const { created } = await api('POST', `/api/tournaments/${code}/packets/${qt(p.round)}/split-tiebreakers`,
