@@ -602,6 +602,11 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
   flex-wrap: wrap;
 }
 .export-chips .chip { font-size: .78rem; padding: .2em .55em; }
+/* One game: its room chip, the matchup, and Remove/Restore. */
+.export-game { display: inline-flex; align-items: center; gap: 6px; }
+.export-teams { font-size: .78rem; color: var(--muted); }
+.export-game .export-remove { font-size: .7rem; padding: .15em .45em; box-shadow: none; }
+.export-game.removed .chip, .export-game.removed .export-teams { opacity: .45; text-decoration: line-through; }
 
 /* ---- MASSINGER pick/ban board (room page, read-only mirror) ---- */
 .massinger .ms-status { font-weight: 700; margin: .2em 0 .6em; }

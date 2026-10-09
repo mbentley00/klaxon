@@ -601,9 +601,38 @@ export async function setProtestRuling(bucket, { room, round, type, question, pa
   return rulings[key] ?? { cleared: true };
 }
 
+// --- games the director took out of the stats ------------------------------
+// exports/_removed.json: filename -> { teams, at }. Kept, not deleted, so it is
+// reversible, and so a reader still syncing the game can't put it back. Keyed
+// by the matchup too: a NEW game in the same room and round (other teams)
+// isn't the one that was removed, and counts.
+async function getRemoved(bucket) {
+  const text = await readTextOrNull(path.join(bucketDir(bucket), 'exports', '_removed.json'));
+  if (!text) return {};
+  try { const m = JSON.parse(text); return m && typeof m === 'object' ? m : {}; } catch { return {}; }
+}
+const isRemoved = (removed, filename, qbj) =>
+  !!removed[filename] && removed[filename].teams === matchTeamNames(qbj);
+
+export async function setExportRemoved(bucket, filename, remove) {
+  const safe = safeName(String(filename || ''), '').replace(/\.qbj$/, '');
+  if (!safe) throw new Error('no_export');
+  const f = `${safe}.qbj`;
+  const text = await readTextOrNull(path.join(bucketDir(bucket), 'exports', f));
+  if (text == null) throw new Error('no_export');
+  const removed = await getRemoved(bucket);
+  if (remove) removed[f] = { teams: matchTeamNames(parseJsonOrThrow(text)), at: Date.now() };
+  else delete removed[f];
+  await ensureDir(path.join(bucketDir(bucket), 'exports'));
+  await writeAtomic(path.join(bucketDir(bucket), 'exports', '_removed.json'), JSON.stringify(removed, null, 2));
+  return { filename: f, removed: !!remove };
+}
+
 // Read and parse every exported match in a bucket — used to hand the TD all the
-// stats in one download.
-export async function readAllExports(bucket) {
+// stats in one download. Games the director removed are left out unless
+// asked for.
+export async function readAllExports(bucket, { includeRemoved = false } = {}) {
+  const removed = includeRemoved ? {} : await getRemoved(bucket);
   const dir = path.join(bucketDir(bucket), 'exports');
   try {
     const files = await fs.readdir(dir);
@@ -614,6 +643,7 @@ export async function readAllExports(bucket) {
       if (text == null) continue;
       let qbj;
       try { qbj = JSON.parse(text); } catch { continue; }
+      if (isRemoved(removed, f, qbj)) continue;
       const stat = await fs.stat(path.join(dir, f));
       out.push({ filename: f, savedAt: stat.mtimeMs, qbj });
     }
@@ -621,15 +651,24 @@ export async function readAllExports(bucket) {
   } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
 }
 
+// Every match file, removed ones flagged (the director's list shows them, to
+// restore), with the teams so a row can say which game it is.
 export async function listExports(bucket) {
   const dir = path.join(bucketDir(bucket), 'exports');
   try {
     const files = await fs.readdir(dir);
+    const removed = await getRemoved(bucket);
     const out = [];
     for (const f of files) {
       if (!f.endsWith('.qbj')) continue;
       const stat = await fs.stat(path.join(dir, f));
-      out.push({ filename: f, size: stat.size, savedAt: stat.mtimeMs });
+      let qbj = null;
+      try { qbj = JSON.parse(await readTextOrNull(path.join(dir, f))); } catch { /* listed anyway */ }
+      out.push({
+        filename: f, size: stat.size, savedAt: stat.mtimeMs,
+        teams: qbj ? (qbj.match_teams || []).map((mt) => mt?.team?.name).filter(Boolean) : [],
+        removed: qbj ? isRemoved(removed, f, qbj) : false
+      });
     }
     out.sort((a, b) => b.savedAt - a.savedAt);
     return out;

@@ -816,6 +816,18 @@ app.get('/api/tournaments/:code/exports', ah(async (req, res) => {
   res.json({ exports: await artifacts.listExports({ kind: 't', code: t.code }) });
 }));
 
+// Director takes a game out of the stats (or puts it back). See setExportRemoved.
+app.put('/api/tournaments/:code/exports/:filename/removed', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  try {
+    res.json(await artifacts.setExportRemoved({ kind: 't', code: t.code }, req.params.filename, req.body?.removed === true));
+  } catch (e) {
+    if (e.message === 'no_export') return res.status(404).json({ error: 'No such game.' });
+    throw e;
+  }
+}));
+
 app.get('/api/tournaments/:code/exports/:filename', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });

@@ -1174,15 +1174,41 @@ async function refreshExports() {
       const chips = el('span', { className: 'export-chips' });
       for (const { room, x } of games) {
         const url = `/api/tournaments/${code}/exports/${qt(x.filename)}?directorToken=${qt(directorToken)}`;
-        chips.append(el('a', {
+        const teams = x.teams?.length ? x.teams.join(' vs ') : '';
+        const game = el('span', { className: `export-game${x.removed ? ' removed' : ''}` });
+        game.append(el('a', {
           className: 'chip', href: url, download: x.filename,
-          title: `${x.filename} · ${(x.size / 1024).toFixed(1)} KB · ${new Date(x.savedAt).toLocaleString()}`,
+          title: `${teams ? teams + ' · ' : ''}${x.filename} · ${(x.size / 1024).toFixed(1)} KB · ${new Date(x.savedAt).toLocaleString()}`,
         }, room));
+        if (teams) game.append(el('span', { className: 'export-teams' }, teams));
+        game.append(removeGameButton(x, round, room, teams));
+        chips.append(game);
       }
       li.append(chips);
       ul.append(li);
     }
   } catch { /* ignore */ }
+}
+
+// Take a game out of the stats, or put it back. Reversible, so it asks once
+// and doesn't make a ceremony of it.
+function removeGameButton(x, round, room, teams) {
+  const btn = el('button', { className: 'ghost tiny export-remove' }, x.removed ? 'Restore' : 'Remove');
+  btn.title = x.removed ? 'Count this game in the stats again' : 'Leave this game out of standings, box scores and downloads';
+  btn.onclick = async () => {
+    const what = `Round ${round}, room ${room}${teams ? ` (${teams})` : ''}`;
+    if (!x.removed && !confirm(`Remove ${what} from the stats?\n\nIt stays saved here, and Restore puts it back.`)) return;
+    btn.disabled = true;
+    try {
+      await api('PUT', `/api/tournaments/${code}/exports/${qt(x.filename)}/removed`, { directorToken, removed: !x.removed });
+      msay(x.removed ? `${what} counts in the stats again.` : `${what} is out of the stats. Restore it from this list.`);
+      refreshExports();
+    } catch (e) {
+      msay('Could not change that game: ' + e.message, false);
+      btn.disabled = false;
+    }
+  };
+  return btn;
 }
 
 async function refreshErrata() {
