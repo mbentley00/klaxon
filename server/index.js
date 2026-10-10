@@ -213,11 +213,11 @@ async function notifyDirectorsOfProtest(room, protest) {
     to,
     subject: `Protest in ${where}: question ${protest.cycle}`,
     text: `${who} protested question ${protest.cycle} in ${where} of ${t.name || t.code}.` +
-      `${reasonText ? `\n\n${reasonText}` : ''}\n\nRule on it in the director console: ${url} (Results > Protests).`,
+      `${reasonText ? `\n\n${reasonText}` : ''}\n\nOnce the moderator records it in MODAQ it appears in the director console, under Results > Protests, to rule on: ${url}`,
     html: `<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;color:#17130d;line-height:1.5;max-width:520px">` +
       `<p><strong>${escHtml(who)}</strong> protested <strong>question ${escHtml(protest.cycle)}</strong> in ${escHtml(where)} of ${escHtml(t.name || t.code)}.</p>` +
       (reasonText ? `<blockquote style="margin:0;padding:10px 14px;border-left:3px solid #ddd5c5;color:#333">${escHtml(reasonText)}</blockquote>` : '') +
-      `<p>Rule on it in the <a href="${escHtml(url)}">director console</a>, under Results &rsaquo; Protests.</p>` +
+      `<p>Once the moderator records it in MODAQ it appears in the <a href="${escHtml(url)}">director console</a>, under Results &rsaquo; Protests, to rule on.</p>` +
       `<hr style="border:none;border-top:1px solid #eee;margin:20px 0"><p style="font-size:12px;color:#888">Klaxon</p></div>`
   });
 }
@@ -924,6 +924,27 @@ app.get('/api/tournaments/:code/protests', ah(async (req, res) => {
   const matches = await artifacts.readAllExports({ kind: 't', code: t.code });
   res.json({ protests: protestRows(matches) });
 }));
+
+// Protests players have just lodged in this tournament's rooms — before any
+// moderator records them in MODAQ (which is when they reach the list above).
+// The console polls this to notify the director.
+app.get('/api/tournaments/:code/room-protests', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const since = Number(req.query.since) || 0;
+  const out = [];
+  for (const rc of t.roomCodes) {
+    const room = store.getRoom(rc);
+    for (const p of room?.protests || []) {
+      if (p.at <= since || p.status === 'dismissed') continue;
+      const ground = protests.PROTEST_REASONS.find((r) => r.id === p.reason);
+      out.push({ id: p.id, room: room.code, roomName: room.name || '', round: p.round, cycle: p.cycle,
+        byTeam: p.byTeam, byName: p.byName, reason: ground ? `${ground.label} (ACF ${ground.rule})` : '', at: p.at });
+    }
+  }
+  out.sort((a, b) => a.at - b.at);
+  res.json({ protests: out, now: Date.now() });
+});
 
 // The director rules on a protest: upheld (with per-team point adjustments
 // that correct the game score in stats), denied, or cleared (status null).
@@ -2499,6 +2520,10 @@ io.on('connection', (socket) => {
       // should not cost the host the room.
       case 'end_game': {
         const end = payload?.end !== false;
+        // A tournament room is read in round after round: ending it would turn
+        // the next round's players away at the door. (Reopening is still
+        // allowed, for a room ended before this rule.)
+        if (end && room.tournamentCode) return ack?.({ error: 'tournament_room' });
         const ended = store.endGame(room, end, store.memberName(room, ctx.playerId));
         if (end) {
           for (const m of [...room.members.values()]) {

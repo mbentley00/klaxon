@@ -1244,6 +1244,80 @@ async function refreshErrata() {
   } catch { /* ignore */ }
 }
 
+// Protests players lodge in the rooms, as they happen. They reach the list
+// below only once a moderator records them in MODAQ, so this is the early
+// word: a short "just lodged" list, and (when the director turns it on) a
+// browser notification for each new one, so a protest isn't missed while the
+// director is on another tab.
+const NOTIFY_KEY = 'protestNotify:' + code;
+const SEEN_KEY = 'protestSeen:' + code;
+const roomProtestsSince = Date.now() - 6 * 60 * 60 * 1000;   // the last few hours
+let seenProtests = new Set();
+try { seenProtests = new Set(JSON.parse(recall(SEEN_KEY) || '[]')); } catch { /* fresh */ }
+let firstProtestPoll = true;
+
+function protestNotifyOn() {
+  return recall(NOTIFY_KEY) === '1' && 'Notification' in window && Notification.permission === 'granted';
+}
+function renderNotifyButton() {
+  const btn = $('#protests-notify');
+  if (!btn) return;
+  const note = $('#protests-notify-note');
+  const supported = 'Notification' in window;
+  const on = protestNotifyOn();
+  btn.textContent = on ? 'Notifications on' : 'Notify me';
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  btn.disabled = !supported;
+  const blocked = supported && Notification.permission === 'denied';
+  note.classList.toggle('hidden', !(blocked || !supported || on));
+  note.textContent = !supported ? "This browser can't show notifications."
+    : blocked ? 'Notifications are blocked for this site — allow them in the browser\'s site settings.'
+      : 'A notification pops up for each new protest while this page is open (in any tab).';
+}
+$('#protests-notify').onclick = async () => {
+  if (protestNotifyOn()) { remember(NOTIFY_KEY, '0'); renderNotifyButton(); return; }
+  if (!('Notification' in window)) return;
+  let perm = Notification.permission;
+  if (perm === 'default') perm = await Notification.requestPermission();
+  remember(NOTIFY_KEY, perm === 'granted' ? '1' : '0');
+  renderNotifyButton();
+};
+renderNotifyButton();
+
+async function pollRoomProtests() {
+  try {
+    const { protests } = await api('GET', `/api/tournaments/${code}/room-protests?since=${roomProtestsSince}&directorToken=${qt(directorToken)}`);
+    const ul = $('#room-protests-list');
+    ul.classList.toggle('hidden', protests.length === 0);
+    ul.replaceChildren(...protests.slice(-8).reverse().map((p) => {
+      const when = new Date(p.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const li = el('li', {});
+      const col = el('span', { className: 'pcol' });
+      col.append(el('span', { className: 'pname' }, `Just lodged — ${p.roomName || `Room ${p.room}`}${p.round ? `, round ${p.round}` : ''}, question ${p.cycle}`));
+      col.append(el('span', { className: 'pjoined' }, `${p.byName}${p.byTeam ? ` (${p.byTeam})` : ''} · ${when}${p.reason ? ` · ${p.reason}` : ''}`));
+      li.append(col);
+      return li;
+    }));
+    const fresh = protests.filter((p) => !seenProtests.has(p.id));
+    // The first look only learns what is already there: opening the console
+    // shouldn't fire a notification for every protest of the afternoon.
+    if (!firstProtestPoll && protestNotifyOn()) {
+      for (const p of fresh) {
+        const n = new Notification(`Protest: ${p.roomName || `Room ${p.room}`}, question ${p.cycle}`, {
+          body: `${p.byName}${p.byTeam ? ` (${p.byTeam})` : ''}${p.reason ? ` — ${p.reason}` : ''}`,
+          tag: `protest-${p.id}`
+        });
+        n.onclick = () => { window.focus(); document.querySelector(".tab[data-tab='results']")?.click(); n.close(); };
+      }
+    }
+    for (const p of fresh) seenProtests.add(p.id);
+    if (fresh.length) remember(SEEN_KEY, JSON.stringify([...seenProtests].slice(-200)));
+    firstProtestPoll = false;
+  } catch { /* try again next time */ }
+}
+pollRoomProtests();
+setInterval(pollRoomProtests, 15000);
+
 async function refreshProtests() {
   try {
     const { protests } = await api('GET', `/api/tournaments/${code}/protests?directorToken=${qt(directorToken)}`);

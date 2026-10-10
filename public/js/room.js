@@ -2887,7 +2887,8 @@ function renderEnded(s) {
     const when = new Date(ended.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     banner.textContent = `This game ended at ${when}${ended.by ? ` — ${ended.by} closed it` : ''}.`;
   }
-  $('#end-game').classList.toggle('hidden', !!ended);
+  // Never in a tournament room: the next round's players would be turned away.
+  $('#end-game').classList.toggle('hidden', !!ended || !!s.tournamentCode);
   $('#reopen-game').classList.toggle('hidden', !ended);
   // The buzzer is the biggest thing on the page and it would still say READY.
   // renderPhase/renderBuzzer ran first and will put it back when the game

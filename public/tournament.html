@@ -226,7 +226,10 @@
 
       <div class="modaq-block">
         <h4>Protests <span id="protests-count" class="muted-count"></span>
-          <button id="protests-refresh" class="tiny ghost">Refresh</button></h4>
+          <button id="protests-refresh" class="tiny ghost">Refresh</button>
+          <button id="protests-notify" class="tiny ghost" aria-pressed="false">Notify me</button></h4>
+        <p id="protests-notify-note" class="hint hidden"></p>
+        <ul id="room-protests-list" class="players room-protests hidden"></ul>
         <p class="hint">Protests moderators recorded in MODAQ. While the game is live a protest is
           pending; once it's final, a protest either could still change the result or is moot.</p>
         <ul id="protests-list" class="players"></ul>
