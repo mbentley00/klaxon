@@ -7,7 +7,24 @@ $('#t-code').href = `/t/${code}`;
 
 // The director token is minted once at tournament creation and kept locally.
 // It's required for every MODAQ management call below.
-const directorToken = recall('directorToken:' + code);
+// On another device the director's signed-in account brings it (the account
+// is flagged director once the console has been opened signed in with it).
+const directorToken = recall('directorToken:' + code) || await directorTokenFromAccount();
+async function directorTokenFromAccount() {
+  const s = localStorage.getItem('bz_sessionToken');
+  if (!s) return null;
+  try {
+    const { tournaments } = await api('GET', `/api/accounts/me/tournaments?sessionToken=${encodeURIComponent(s)}`);
+    const mine = tournaments.find((x) => x.code === code && x.directorToken);
+    if (!mine) return null;
+    remember('directorToken:' + code, mine.directorToken);
+    return mine.directorToken;
+  } catch { return null; }
+}
+
+// A signed-in moderator the director approved, here without the director
+// token: they get each room's "Read here" (joining as reader on the account).
+let moderatorView = false;
 
 // Reader/co-reader tokens are only ever returned at room-creation time, so the
 // director console keeps the rooms it created (with their tokens) in local
@@ -62,6 +79,8 @@ function rememberVisit(name, date) {
 }
 
 async function init() {
+  // Making rooms is the director's job; everyone else just sees the rooms.
+  if (!directorToken) $('#add-rooms')?.closest('section')?.classList.add('hidden');
   try {
     const t = await api('GET', `/api/tournaments/${code}`);
     $('#t-name').textContent = t.name || '';
@@ -72,7 +91,26 @@ async function init() {
     const known = loadRooms();
     const knownCodes = new Set(known.map((r) => r.code));
     for (const rc of t.rooms || []) {
-      if (!knownCodes.has(rc)) known.push({ code: rc, name: '', readerToken: null, coReaderToken: null });
+      if (!knownCodes.has(rc)) known.push({ code: rc, name: t.roomNames?.[rc] || '', readerToken: null, coReaderToken: null });
+    }
+    // The director gets every room's reader links, whichever device made it.
+    if (directorToken) {
+      try {
+        const { rooms } = await api('GET', `/api/tournaments/${code}/staff-rooms?directorToken=${qt(directorToken)}`);
+        const byCode = new Map(rooms.map((r) => [r.code, r]));
+        for (const r of known) {
+          const s = byCode.get(r.code);
+          if (s) Object.assign(r, { name: r.name || s.name, readerToken: s.readerToken, coReaderToken: s.coReaderToken });
+        }
+      } catch { /* keep what this browser had */ }
+    } else {
+      const s = localStorage.getItem('bz_sessionToken');
+      if (s) {
+        try {
+          const { memberStatus } = await api('GET', `/api/tournaments/${code}/access?sessionToken=${encodeURIComponent(s)}`);
+          moderatorView = memberStatus === 'approved';
+        } catch { /* not a moderator here */ }
+      }
     }
     saveRooms(known);
     initLinks(t);
@@ -1600,7 +1638,8 @@ $('#copy-readers').onclick = (e) => copyText(tsvColumn('reader'), e.currentTarge
 $('#copy-coreaders').onclick = (e) => copyText(tsvColumn('coreader'), e.currentTarget);
 $('#tsv-header').onchange = renderBulk;
 function renderBulk() {
-  const has = loadRooms().length > 0;
+  // Reader links are the point of the sheet: director only.
+  const has = !!directorToken && loadRooms().length > 0;
   $('#bulk-panel').classList.toggle('hidden', !has);
   if (has) $('#tsv-preview').value = tsvTable();
 }
@@ -1619,6 +1658,13 @@ function render() {
       el('span', { className: 'room-code' }, r.code),
       el('span', { className: 'room-name' }, r.name || '')));
     card.append(linkRow('Players', `${origin}/r/${r.code}`));
+    if (moderatorView && !r.readerToken) {
+      const read = el('a', { className: 'btnlink tiny primary', href: `/r/${r.code}` }, 'Read here');
+      read.title = 'Moderate this room with your approved account';
+      // The room page joins as reader on an approved account when it finds this.
+      read.onclick = () => remember('staffRole:' + r.code, 'reader');
+      card.append(el('div', { className: 'sound-row' }, read));
+    }
     if (r.readerToken) card.append(linkRow('Reader', `${origin}/r/${r.code}?role=reader&token=${r.readerToken}`));
     if (r.coReaderToken) card.append(linkRow('Co-reader', `${origin}/r/${r.code}?role=co-reader&token=${r.coReaderToken}`));
     wrap.append(card);

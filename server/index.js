@@ -410,6 +410,20 @@ app.get('/api/accounts/me/tournaments', ah(async (req, res) => {
   res.json({ tournaments: out });
 }));
 
+// Every room of the tournament with its staff tokens, for the director's
+// console on any device (the tokens used to live only in the browser that
+// made the room).
+app.get('/api/tournaments/:code/staff-rooms', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const rooms = [];
+  for (const rc of t.roomCodes) {
+    const r = store.getRoom(rc);
+    if (r) rooms.push({ code: r.code, name: r.name || '', readerToken: r.readerToken, coReaderToken: r.coReaderToken });
+  }
+  res.json({ rooms });
+});
+
 app.get('/api/tournaments', (_req, res) => {
   res.json({ tournaments: store.listTournaments() });
 });
