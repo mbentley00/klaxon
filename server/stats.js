@@ -150,12 +150,40 @@ function sortRoundLabels(labels) {
 
 // Build the ordered list of phases (each with its round set + color) from the
 // director's structure, plus a catch-all for any rounds it doesn't cover.
+// A round as the director writes it under Phases ("3") against the round's
+// real name, which is usually its packet's ("PARAGONE Round 3"): the exact
+// name, or a bare number standing for the round called "Round N" (or a name
+// whose only number it is). Matching names exactly had every PARAGONE game
+// land in "Other Rounds" under "Prelims: 1, 2, 3...".
+function roundNumberOf(label) {
+  const named = /\bround\s*(\d+)\b/i.exec(label);
+  if (named) return named[1].replace(/^0+(?=\d)/, '');
+  const nums = String(label).match(/\d+/g);
+  return nums && nums.length === 1 ? nums[0].replace(/^0+(?=\d)/, '') : null;
+}
+function resolvePhaseRounds(entries, allRounds) {
+  const all = [...allRounds];
+  const out = new Set();
+  for (const raw of entries) {
+    const entry = String(raw).trim();
+    if (!entry) continue;
+    if (all.includes(entry)) { out.add(entry); continue; }
+    if (/^\d+$/.test(entry)) {
+      const n = entry.replace(/^0+(?=\d)/, '');
+      const hits = all.filter((r) => roundNumberOf(r) === n);
+      if (hits.length) { hits.forEach((r) => out.add(r)); continue; }
+    }
+    out.add(entry);   // a round with no games yet keeps its place
+  }
+  return out;
+}
+
 function buildPhaseList(structure, allRounds) {
   const configured = Array.isArray(structure?.phases) ? structure.phases : [];
   const phases = [];
   const assigned = new Set();
   configured.forEach((p, i) => {
-    const roundSet = new Set((p.rounds || []).map(String));
+    const roundSet = resolvePhaseRounds(p.rounds || [], allRounds);
     phases.push({ name: p.name || `Phase ${i + 1}`, color: p.color || PHASE_COLORS[i % PHASE_COLORS.length], roundSet });
     for (const r of roundSet) assigned.add(r);
   });
