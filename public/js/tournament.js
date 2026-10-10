@@ -575,6 +575,7 @@ function initPublicStats() {
   const bq = `?directorToken=${encodeURIComponent(directorToken)}`;
   $('#buzzpoints-open').href = `/t/${code}/buzzpoints${bq}`;
   $('#buzzpoints-csv').href = `/t/${code}/buzzpoints.csv${bq}`;
+  $('#buzzpoints-zip').href = `/t/${code}/buzzpoints.zip${bq}`;
   initShareLinks();
 
   // Games in progress: which rooms are still playing, the score, where they are

@@ -17,6 +17,7 @@ import * as resolution from './resolution.js';
 import * as shootout from './shootout.js';
 import { renderReport, PAGES } from './yellowfruit.js';
 import { computeBuzzpoints, renderBuzzpointsCsv, renderBuzzpointsHtml } from './buzzpoints.js';
+import { tournamentBuzzpointsExport } from './buzzpointsZip.js';
 import { sendEmail, emailEnabled, feedbackBody, FEEDBACK_TO } from './email.js';
 import { startWatchdog } from './watchdog.js';
 import { buildZip } from './zip.js';
@@ -1560,6 +1561,25 @@ app.get('/t/:code/buzzpoints.csv', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.query.directorToken)) return res.status(403).send('Director link required (or use a share link).');
   await serveBuzzpoints(res, t.code, 'csv');
+}));
+
+// Every finished game and the packet it was read on, laid out as the data/
+// folder quizbowlbuzzpoints.com is built from (see buzzpointsZip.js).
+app.get('/t/:code/buzzpoints.zip', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).send('Director link required.');
+  const bucket = { kind: 't', code: t.code };
+  const rounds = [];
+  for (const p of await artifacts.listPackets(bucket)) {
+    let packet = null;
+    try { packet = JSON.parse(await artifacts.getPacket(bucket, p.round)); } catch { /* a damaged packet is left out */ }
+    rounds.push({ round: p.round, tiebreaker: p.tiebreaker, packet });
+  }
+  const { files, games } = tournamentBuzzpointsExport(t, rounds, await artifacts.readAllExports(bucket));
+  if (games === 0) return res.status(404).send('No finished games with a packet yet.');
+  const base = (t.name || t.code).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || t.code;
+  res.setHeader('Content-Disposition', `attachment; filename="${base}_quizbowlbuzzpoints.zip"`);
+  res.type('application/zip').send(buildZip(files));
 }));
 
 // --- Temporary share links ---------------------------------------------------
