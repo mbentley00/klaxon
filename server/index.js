@@ -766,6 +766,7 @@ app.put('/api/tournaments/:code/packets-order', ah(async (req, res) => {
   const rounds = req.body?.rounds;
   if (!Array.isArray(rounds)) return res.status(400).json({ error: 'rounds must be a list' });
   res.json({ packets: await artifacts.setPacketOrder({ kind: 't', code: t.code }, rounds.map(String)) });
+  notifyPacketsChanged(t);
 }));
 
 // Director releases (or re-hides) a round to moderators.
@@ -774,6 +775,7 @@ app.put('/api/tournaments/:code/packets/:round/visibility', ah(async (req, res) 
   if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
   const saved = await artifacts.setPacketVisibility({ kind: 't', code: t.code }, req.params.round, !!req.body?.visible);
   res.json(saved);
+  notifyPacketsChanged(t);
 }));
 
 // Director marks (or unmarks) a round as a tiebreaker-question pool.
@@ -782,6 +784,7 @@ app.put('/api/tournaments/:code/packets/:round/tiebreaker', ah(async (req, res) 
   if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
   const saved = await artifacts.setPacketTiebreaker({ kind: 't', code: t.code }, req.params.round, !!req.body?.tiebreaker);
   res.json(saved);
+  notifyPacketsChanged(t);
 }));
 
 // Director breaks one round into a tiebreaker per tossup. The rounds it makes
@@ -793,6 +796,7 @@ app.post('/api/tournaments/:code/packets/:round/split-tiebreakers', ah(async (re
   try {
     const out = await artifacts.splitPacketIntoTiebreakers({ kind: 't', code: t.code }, req.params.round);
     res.json(out);
+    notifyPacketsChanged(t);
   } catch (e) {
     if (e.message === 'no_packet') return res.status(404).json({ error: 'No such round.' });
     if (e.message === 'no_tossups') return res.status(400).json({ error: 'That round has no tossups to split.' });
@@ -1227,6 +1231,7 @@ async function maybeAutoRelease(room, round) {
   const next = packets.find((p) => !p.visible && !p.tiebreaker);
   if (!next) return;
   await artifacts.setPacketVisibility(bucket, next.round, true);
+  notifyPacketsChanged(t);
   console.log(`auto-released packet "${next.round}" for tournament ${t.code} (round ${round} complete)`);
 }
 
@@ -1782,6 +1787,13 @@ function emitRecentSoon(room) {
 // Deliver an event to a room's staff sockets only (reader/co-reader) — used
 // for director messages, which players must never receive. `except` skips one
 // socket (the sender of a change that the others need to hear about).
+// The director changed what is released (a round, a tiebreaker, the order):
+// every moderator page in the tournament re-reads what it can use, so a
+// tiebreaker released mid-game is there when the tie comes.
+function notifyPacketsChanged(t) {
+  for (const rc of t.roomCodes) emitToStaff(rc, 'packets_changed', { at: Date.now() });
+}
+
 function emitToStaff(roomCode, event, payload, except = null) {
   let delivered = 0;
   for (const [sid, ctx] of sock) {
