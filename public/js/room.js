@@ -894,8 +894,19 @@ function renderScoresheet(s) {
     if (n === sheet.current) currentRow = tr;
   }
   table.append(thead, tbody);
-  // Keep the question being read in view, as MODAQ does for the reader.
-  if (currentRow) currentRow.scrollIntoView({ block: 'nearest' });
+  // Keep the question being read in view, as MODAQ does for the reader — by
+  // scrolling the scoresheet's own box only. scrollIntoView also scrolls the
+  // PAGE, and on a phone (scoresheet under the buzzer) every update dragged
+  // the player down to it, away from the buzzer.
+  if (currentRow) keepRowInView(table.closest('.ss-scroll'), currentRow);
+}
+
+function keepRowInView(box, row) {
+  if (!box || box.scrollHeight <= box.clientHeight) return;   // nothing to scroll
+  const b = box.getBoundingClientRect();
+  const r = row.getBoundingClientRect();
+  if (r.top < b.top) box.scrollTop -= b.top - r.top;
+  else if (r.bottom > b.bottom) box.scrollTop += Math.min(r.bottom - b.bottom, r.top - b.top);
 }
 
 // ---- the full scoresheet, in a dialog ----
