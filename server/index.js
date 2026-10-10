@@ -135,9 +135,11 @@ app.get('/api/public-rooms', (_req, res) => {
   res.json({ rooms: store.listPublicRooms() });
 });
 
-app.get('/api/rooms/:code', (req, res) => {
+app.get('/api/rooms/:code', ah(async (req, res) => {
   const room = store.getRoom(req.params.code);
   if (!room) return res.status(404).json({ error: 'not_found' });
+  // The gate lists the tournament's other teams too (see store.joinRoster).
+  await tournamentTeamsFor(room);
   res.json({
     code: room.code, name: room.name, tournamentCode: room.tournamentCode,
     // The join gate needs these before joining: whether a team is required,
@@ -149,7 +151,7 @@ app.get('/api/rooms/:code', (req, res) => {
     shootout: !!room.settings.shootout,
     roster: store.joinRoster(room)
   });
-});
+}));
 
 app.post('/api/tournaments', ah(async (req, res) => {
   const { name, schedule, defaults, format, requireReaderAccounts, date, listed } = req.body || {};
@@ -1794,6 +1796,22 @@ function notifyPacketsChanged(t) {
   for (const rc of t.roomCodes) emitToStaff(rc, 'packets_changed', { at: Date.now() });
 }
 
+// The tournament's registered teams, for the waiting-for-next-game state and
+// the join gate. Read from the tournament roster at most every 30 s per room.
+async function tournamentTeamsFor(room) {
+  if (!room.tournamentCode || room.settings.shootout) return [];
+  const now = Date.now();
+  if (room._ttAt && now - room._ttAt < 30_000) return room.tournamentTeams || [];
+  let teams = [];
+  try {
+    const text = await artifacts.getRoster(store.bucketForRoom(room));
+    if (text) teams = parseQbjRoster(text).teams || [];
+  } catch { /* no roster, or not one we can read: nobody is "waiting" */ }
+  room._ttAt = now;
+  store.setTournamentTeams(room, teams);
+  return teams;
+}
+
 function emitToStaff(roomCode, event, payload, except = null) {
   let delivered = 0;
   for (const [sid, ctx] of sock) {
@@ -2123,14 +2141,31 @@ io.on('connection', (socket) => {
     // the room has to be possible from inside it.
     if (!staffRole && room.ended) return ack?.({ error: 'game_ended' });
 
+    // Someone picking a tournament team that isn't playing here yet joins as
+    // that team's player and waits (store.refreshWaiting) rather than failing
+    // the roster link and being reported as off the roster.
+    let joinName = payload?.name, joinTeam = payload?.team;
+    let rosterTeam = payload?.rosterTeam, rosterPlayer = payload?.rosterPlayer;
+    if (role === 'player' && room.tournamentCode && !room.settings.shootout) {
+      await tournamentTeamsFor(room);
+      const playing = new Set(room.rosterTeams || []);
+      if (rosterTeam && !playing.has(rosterTeam) &&
+          (room.tournamentTeams || []).some((t) => t.name === rosterTeam)) {
+        joinName = rosterPlayer || joinName;
+        joinTeam = rosterTeam;
+        rosterTeam = undefined;
+        rosterPlayer = undefined;
+      }
+    }
     const member = store.joinRoom(room, {
       playerId: payload?.playerId,
-      name: payload?.name,
+      name: joinName,
       role,
-      team: payload?.team,
-      rosterTeam: payload?.rosterTeam,
-      rosterPlayer: payload?.rosterPlayer
+      team: joinTeam,
+      rosterTeam,
+      rosterPlayer
     });
+    if (role === 'player') store.refreshWaiting(room);
 
     // Someone joined a roster room under a name the roster doesn't have: the
     // director wants to know (a sub, a late addition, or a typo to fix).
@@ -2207,6 +2242,8 @@ io.on('connection', (socket) => {
     const room = ctx && store.getRoom(ctx.roomCode);
     if (!room || !ctx.playerId) return;
     if (room.ended) return;   // the host called it: the buzzer is off
+    // Here for the next game: this one isn't theirs to buzz in.
+    if (store.waitingForNextGame(room, room.members.get(ctx.playerId))) return;
 
     const arrival = Date.now();
     // Client tells us, in *server time*, when it thinks the press happened
@@ -2527,6 +2564,7 @@ io.on('connection', (socket) => {
       // The teams a moderator entered in MODAQ's New Game dialog become this
       // room's roster, so every buzz can be reported as a real MODAQ player.
       case 'set_modaq_teams': {
+        await tournamentTeamsFor(room);
         const r = store.setRosterFromGameTeams(room, payload.teams);
         if (r.error) return ack?.(r);
         break;

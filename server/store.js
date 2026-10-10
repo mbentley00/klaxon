@@ -712,6 +712,9 @@ function pruneAssignments(room) {
   for (const m of room.members.values()) {
     if (!m.rosterTeam) continue;
     if (!active.get(m.rosterTeam)?.has(m.rosterPlayer)) {
+      // Kept, so a player whose game just ended is known to be on that team
+      // (see refreshWaiting): they wait for their next game like anyone else.
+      m.lastRosterTeam = m.rosterTeam;
       m.rosterTeam = null;
       m.rosterPlayer = null;
     }
@@ -765,8 +768,60 @@ export function setRosterFromGameTeams(room, teams) {
   if (clean.length === 0) return { error: 'no_teams' };
   setRoster(room, { name: 'MODAQ game', teams: clean });
   setRosterTeams(room, clean.map((t) => t.name));
+  // From here the room knows which teams are playing, so anyone on another
+  // team is waiting for their own game (see waitingForNextGame).
+  room.gameTeamsSet = true;
   const linked = autoLinkRosterPlayers(room);
+  refreshWaiting(room);
   return { ok: true, teams: clean.length, linked };
+}
+
+// --- waiting for the next game ----------------------------------------------
+// In a tournament room players arrive for the NEXT game while this one is
+// still being read. Someone positively on another team of the tournament (they
+// picked it, typed it, or played for it in the last game) is "waiting": their
+// buzzer is off and their screen says why, until a New Game brings their team
+// in. Only a positive match counts — a player of THIS game who typed their
+// team a little differently is never locked out.
+const normTeam = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+// The tournament's teams, as index.js last read them (see tournamentTeamsFor).
+export function setTournamentTeams(room, teams) {
+  room.tournamentTeams = Array.isArray(teams) ? teams : [];
+}
+
+function playingTeamKeys(room) {
+  return new Set((room.rosterTeams || []).map(normTeam));
+}
+
+// Which tournament team this member says they are on, if it isn't one of the
+// teams playing now. Recomputed on join and whenever the game's teams change.
+function nextTeamOf(room, m) {
+  if (m.role !== 'player' || m.rosterTeam) return null;
+  const known = room.tournamentTeams || [];
+  const playing = playingTeamKeys(room);
+  for (const claim of [m.assignedTeam, m.team, m.lastRosterTeam]) {
+    const key = normTeam(claim);
+    if (!key) continue;
+    const hit = known.find((t) => normTeam(t.name) === key);
+    if (hit) return playing.has(key) ? null : hit.name;
+  }
+  return null;
+}
+
+export function refreshWaiting(room) {
+  for (const m of room.members.values()) {
+    m.nextTeam = nextTeamOf(room, m);
+    // On the tournament roster, just not playing yet: not news for the director.
+    if (m.nextTeam) m.offRoster = false;
+  }
+}
+
+export function waitingForNextGame(room, m) {
+  if (!m || m.role !== 'player' || !m.nextTeam || m.rosterTeam) return false;
+  if (!room.tournamentCode || room.settings.shootout || !room.gameTeamsSet) return false;
+  const playing = playingTeamKeys(room);
+  return playing.size > 0 && !playing.has(normTeam(m.nextTeam));
 }
 
 // Attach every unassigned buzzer to the roster player whose name matches what
@@ -1334,16 +1389,22 @@ export function joinRoster(room) {
   for (const m of room.members.values()) {
     if (m.rosterTeam && m.rosterPlayer) taken.add(`${m.rosterTeam}\u0000${m.rosterPlayer}`);
   }
-  return {
-    teams: room.roster.teams
-      .filter((t) => active.includes(t.name))
-      .map((t) => ({
-        name: t.name,
-        // Mark who is already on a buzzer so two people don't pick the same
-        // player (the server would unseat the first one).
-        players: t.players.map((name) => ({ name, taken: taken.has(`${t.name}\u0000${name}`) }))
-      }))
-  };
+  const playing = room.roster.teams
+    .filter((t) => active.includes(t.name))
+    .map((t) => ({
+      name: t.name,
+      // Mark who is already on a buzzer so two people don't pick the same
+      // player (the server would unseat the first one).
+      players: t.players.map((name) => ({ name, taken: taken.has(`${t.name}\u0000${name}`) }))
+    }));
+  // Everyone else in the tournament, so a player here for the next game can
+  // find their own team (and isn't reported as off the roster for it).
+  const keys = new Set(playing.map((t) => normTeam(t.name)));
+  const later = room.gameTeamsSet && !room.settings.shootout
+    ? (room.tournamentTeams || []).filter((t) => !keys.has(normTeam(t.name)))
+      .map((t) => ({ name: t.name, later: true, players: t.players.map((name) => ({ name, taken: false })) }))
+    : [];
+  return { teams: [...playing, ...later] };
 }
 
 // What the packet being read has scored so far. A sheet belonging to another
@@ -1426,6 +1487,8 @@ export function publicState(room) {
       rosterTeam: m.rosterTeam || null, rosterPlayer: m.rosterPlayer || null,
       assignedTeam: m.assignedTeam || null, isCaptain: m.isCaptain === true,
       offRoster: m.offRoster === true,
+      waiting: waitingForNextGame(room, m),
+      nextTeam: m.nextTeam || null,
       effectiveTeam: effectiveTeam(m) || null,
       displayName: displayName(m)
     }))

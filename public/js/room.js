@@ -199,9 +199,17 @@ function renderRosterGate(info) {
   if (!on) return false;
 
   const teamSel = $('#gate-roster-team');
+  // The teams in the game being read come first; the rest of the tournament
+  // follows, for a player who is here before their own game starts.
+  const now = roster.teams.filter((t) => !t.later);
+  const later = roster.teams.filter((t) => t.later);
+  const opt = (t) => el('option', { value: t.name, textContent: t.name });
   teamSel.replaceChildren(
     el('option', { value: '', textContent: 'Choose your team…' }),
-    ...roster.teams.map((t) => el('option', { value: t.name, textContent: t.name })),
+    ...(later.length
+      ? [el('optgroup', { label: 'Playing now' }, ...now.map(opt)),
+        el('optgroup', { label: 'Playing later' }, ...later.map(opt))]
+      : now.map(opt)),
     el('option', { value: NOT_ON_ROSTER, textContent: "My team isn't listed" })
   );
   const remembered = recall('team');
@@ -2352,6 +2360,11 @@ const buzzer = $('#buzzer');
 function renderPhase(s) {
   const q = s.queue || [];
   const label = $('#phase-label');
+  // Someone else's game: what the room's buzzer is doing isn't this player's business yet.
+  if (state.role === 'player' && waitingMember(s)) {
+    label.textContent = "Your game hasn't started"; label.className = 'phase ready';
+    return;
+  }
   if (!q.length) { label.textContent = 'Ready to Buzz'; label.className = 'phase ready'; }
   else {
     // Your own buzz says so in words. Reading your own name off the screen and
@@ -2392,6 +2405,14 @@ function renderBuzzer(s) {
     buzzer.disabled = !has;
     tone = has ? 'buzzed' : 'ready';        // red = there's a buzz to judge and reset
     setBuzzer(has ? 'RESET' : 'READY', has ? 'or press Space' : '');
+  } else if (state.role === 'player' && waitingMember(s)) {
+    // Here for the next game: the buzzer is off until a New Game brings this
+    // player's team in (the server ignores a press anyway).
+    const me = waitingMember(s);
+    buzzer.disabled = true;
+    tone = 'ready';   // greyed out: not theirs yet, and nothing for them to fix
+    setBuzzer('NEXT GAME', `${me.nextTeam} isn't in this game yet`);
+    $('#buzz-feedback').textContent = '';
   } else if (state.role === 'player') {
     const pos = q.findIndex((x) => x.playerId === state.me?.id);
     // Nothing reaches the server while the socket is down, so the buzzer says
@@ -2435,6 +2456,12 @@ function renderBuzzer(s) {
   BUZZ_TONES.forEach((t) => buzzer.classList.toggle(t, t === tone));
   renderPip();
   renderPipButton();
+}
+
+// This player, if they are waiting for their own game (see store.waitingForNextGame).
+function waitingMember(s) {
+  const me = (s.members || []).find((m) => m.id === state.me?.id);
+  return me?.waiting ? me : null;
 }
 
 function buzzerAction() {
