@@ -2445,6 +2445,8 @@ io.on('connection', (socket) => {
     if (room.ended) return;   // the host called it: the buzzer is off
     // Here for the next game: this one isn't theirs to buzz in.
     if (store.waitingForNextGame(room, room.members.get(ctx.playerId))) return;
+    // Their team has had its answer to this tossup (see store.teamLockedOut).
+    if (store.teamLockedOut(room, room.members.get(ctx.playerId))) return;
 
     const arrival = Date.now();
     // Client tells us, in *server time*, when it thinks the press happened
@@ -2564,6 +2566,10 @@ io.on('connection', (socket) => {
         // buzz point) and it is the one thing the ACF rules single out as never
         // protestable (H.6).
         store.markAccidentalBuzz(room, payload?.judged === true);
+        // A wrong answer: the team is done with this tossup.
+        if (payload?.judged === true && payload?.wrong === true && room.queue[0]) {
+          store.lockTeamNow(room, room.queue[0].playerId);
+        }
         // Named in the log, because "who cleared that?" is the whole question
         // when two people have buzzer control (see store.activityLog).
         store.resetBuzzer(room, { by: store.memberName(room, ctx.playerId), judged: payload?.judged === true });
@@ -2813,6 +2819,7 @@ io.on('connection', (socket) => {
           room.packetLists = { categories: payload.categories, answers: payload.answers, questions: payload.questions };
         }
         const lists = room.packetLists || {};
+        store.teamLockoutFromGame(room, payload.qbj ?? null, payload.currentQuestion);
         store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false,
           payload.protests, lists.categories, lists.answers, lists.questions,
           // Which of a shootout's packets this game is, so the score can be

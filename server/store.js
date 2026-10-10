@@ -1432,6 +1432,50 @@ function shootoutCurrentScores(room) {
   return shootout.currentScores(room.scoresheet);
 }
 
+// --- one answer per team per tossup -------------------------------------------
+// In a team game a team gets one answer to a tossup: once one of its players
+// has answered wrong, their teammates can't buzz on it again. MODAQ knows the
+// game, so the room follows it: every update says which teams have a wrong
+// buzz on the question being read (an undo there lifts the lock, the next
+// question has none), and a wrong ruling locks the team at once, as it clears
+// the buzzer, so nobody slips in during the moment before that update lands.
+// Never in a shootout, where every player is a team of their own and the
+// buzzer queue already says who has answered.
+const teamKey = (name) => String(name ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+export function teamLockoutFromGame(room, match, currentQuestion) {
+  const question = Math.floor(Number(currentQuestion)) || 0;
+  room.modaqQuestion = question;
+  const teams = new Set();
+  const q = Array.isArray(match?.match_questions)
+    ? match.match_questions.find((x) => Number(x?.question_number) === question)
+    : null;
+  for (const b of Array.isArray(q?.buzzes) ? q.buzzes : []) {
+    if (Number(b?.result?.value) <= 0 && b?.team?.name) teams.add(teamKey(b.team.name));
+  }
+  room.teamLockout = { question, teams: [...teams] };
+}
+
+// The moderator just ruled the buzz at the head of the queue wrong.
+export function lockTeamNow(room, playerId) {
+  const team = teamKey(room.members.get(playerId)?.rosterTeam);
+  if (!team || room.settings.shootout) return;
+  const question = room.modaqQuestion || 0;
+  if (room.teamLockout?.question !== question) room.teamLockout = { question, teams: [] };
+  if (!room.teamLockout.teams.includes(team)) room.teamLockout.teams.push(team);
+}
+
+export function lockedTeams(room) {
+  if (room.settings.shootout || !room.teamLockout) return [];
+  if (room.teamLockout.question !== (room.modaqQuestion || 0)) return [];
+  return room.teamLockout.teams;
+}
+
+export function teamLockedOut(room, member) {
+  const team = teamKey(member?.rosterTeam);
+  return !!team && lockedTeams(room).includes(team);
+}
+
 export function publicState(room) {
   return {
     code: room.code,
@@ -1443,6 +1487,9 @@ export function publicState(room) {
     // Server time of the buzz the room is waiting on (null when clear) — the
     // player's "buzzer isn't clear" button counts down from it.
     lastBuzzAt: room.lastBuzzAt ?? null,
+    // Teams that have already answered this tossup wrong (lower-cased names;
+    // see teamLockedOut). Not a secret: the room heard the answer.
+    lockedTeams: lockedTeams(room),
     // MASSINGER pick/ban board (null outside the pick/ban phase). Fully
     // public: players watch the same board the moderator drives.
     massinger: room.massinger || null,

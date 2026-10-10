@@ -266,6 +266,9 @@ a.room-code:hover { text-decoration: underline; }
 .phase.ready { color: var(--muted); }
 .phase.buzzed { color: var(--accent); }
 .phase.mine { color: var(--ok); }
+.phase.locked { color: var(--accent); }
+/* A team game's "Jane Doe (Alpha) has the buzz": the line to read, so it is big. */
+.phase.big { font-size: 1.35rem; letter-spacing: .03em; text-transform: none; line-height: 1.25; }
 
 /* The buzzer: gray/paper when "Ready to Buzz", red when someone has buzzed. */
 .buzzer {
@@ -404,6 +407,11 @@ body.compact .queue-how { display: none; }
 /* Placeholder row when nobody has buzzed — no list number, no emphasis. */
 .order li.empty { list-style: none; margin-left: -1.4em; color: var(--muted); }
 #queue-list .head { font-weight: 700; color: var(--accent); }
+/* Team game: everyone after the first, folded into one quiet line. */
+#queue-list .also-row { list-style: none; margin-left: -1.4em; }
+.also-buzzed { opacity: .55; font-size: .8rem; }
+.also-buzzed summary { cursor: pointer; }
+.also-buzzed ul { margin: 2px 0 0; padding-left: 1.2em; }
 /* A withdrawal that is going to cost something says so on the button. */
 #ctl-withdraw.costly { border-color: var(--warn); color: var(--warn); font-weight: 600; }
 /* Your own row in the queue, so "who is #2" never needs counting. */

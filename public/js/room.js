@@ -2410,6 +2410,21 @@ $('#remove-all').onclick = () => {
 // Players press it to buzz; staff press it (or Space) to reset.
 const buzzer = $('#buzzer');
 
+// A team game, where the first buzz is the only one that gets to answer: not a
+// shootout, and not a room keeping a queue.
+function teamGame(s) {
+  return !s.settings?.shootout && !s.settings?.queueMode;
+}
+function memberTeam(s, playerId) {
+  const m = (s.members || []).find((x) => x.id === playerId);
+  return m?.rosterTeam || m?.team || '';
+}
+// This player's team has answered this tossup wrong (see store.teamLockedOut).
+function myTeamLocked(s) {
+  const team = String(memberTeam(s, state.me?.id) || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  return !!team && (s.lockedTeams || []).includes(team);
+}
+
 function renderPhase(s) {
   const q = s.queue || [];
   const label = $('#phase-label');
@@ -2418,8 +2433,19 @@ function renderPhase(s) {
     label.textContent = "Your game hasn't started"; label.className = 'phase ready';
     return;
   }
-  if (!q.length) { label.textContent = 'Ready to Buzz'; label.className = 'phase ready'; }
-  else {
+  // Said up here, not only under the buzzer: phones hide the line in the button.
+  if (!q.length && state.role === 'player' && myTeamLocked(s)) {
+    label.textContent = 'Your team has answered this tossup'; label.className = 'phase locked';
+  } else if (!q.length) { label.textContent = 'Ready to Buzz'; label.className = 'phase ready'; }
+  else if (teamGame(s)) {
+    // A team game: one sentence, big, saying who is answering and for which
+    // team. Players who buzzed a moment later saw their own name in the queue
+    // and took it for being recognized; this line is the one to read.
+    const mine = q[0].playerId === state.me?.id;
+    const team = memberTeam(s, q[0].playerId);
+    label.textContent = mine ? 'You have the buzz' : `${q[0].name}${team ? ` (${team})` : ''} has the buzz`;
+    label.className = 'phase big ' + (mine ? 'mine' : 'buzzed');
+  } else {
     // Your own buzz says so in words. Reading your own name off the screen and
     // working out whether that means you is the thing to avoid here.
     const mine = q[0].playerId === state.me?.id;
@@ -2470,7 +2496,8 @@ function renderBuzzer(s) {
     const pos = q.findIndex((x) => x.playerId === state.me?.id);
     // Nothing reaches the server while the socket is down, so the buzzer says
     // so rather than taking a press that will never arrive.
-    const canBuzz = state.connected !== false && s.phase === 'open' && pos < 0;
+    const teamDone = pos < 0 && myTeamLocked(s);
+    const canBuzz = state.connected !== false && s.phase === 'open' && pos < 0 && !teamDone;
     // "Buzzed!" is written the moment the button is pressed and cleared when
     // the moderator resets the buzzer — but withdrawing takes you out of the
     // queue without any reset, so it sat there under a buzzer that was ready
@@ -2500,7 +2527,8 @@ function renderBuzzer(s) {
         : pos === 0 ? 'you have the floor'
           : pos > 0 ? 'wait your turn'
             : canBuzz ? 'or press Space'
-              : has ? `${q[0].name} buzzed` : 'not open');
+              : has ? `${q[0].name} buzzed`
+                : teamDone ? 'your team already answered' : 'not open');
   } else {
     buzzer.disabled = true;
     tone = has ? 'locked' : 'ready';
@@ -2740,7 +2768,12 @@ function renderQueue(s) {
   const list = $('#queue-list');
   list.innerHTML = '';
   if (!q.length) list.append(el('li', { className: 'empty' }, 'No one has buzzed'));
-  q.forEach((o, i) => {
+  // A team game, for players: only the buzz that won is a row. The rest buzzed
+  // too late to answer, and a name of your own in that list read as being
+  // recognized -- so they fold into one faint line, opened with a tap for
+  // anyone who wants the timing.
+  const fold = teamGame(s) && !staff && q.length > 1;
+  (fold ? q.slice(0, 1) : q).forEach((o, i) => {
     const mine = o.playerId === state.me?.id;
     const row = el('li', {
       className: `${i === 0 ? 'head' : ''}${mine ? ' me' : ''}`.trim(),
@@ -2750,6 +2783,15 @@ function renderQueue(s) {
     if (mine) row.append(el('span', { className: 'you' }, ' (you)'));
     list.append(row);
   });
+  if (fold) {
+    const others = q.slice(1);
+    const late = el('details', { className: 'also-buzzed' },
+      el('summary', {},
+        `also buzzed, too late: ${others.map((o) => o.playerId === state.me?.id ? 'you' : o.name).join(', ')}`),
+      el('ul', {}, ...others.map((o) => el('li', {},
+        `${o.playerId === state.me?.id ? 'You' : o.name} — ${marginText(o.marginMs)} after ${q[0].name}`))));
+    list.append(el('li', { className: 'also-row' }, late));
+  }
 
   $('#queue-controls').classList.toggle('hidden', !staff);
   $('#ctl-next').classList.toggle('hidden', !queueMode); // "next" only meaningful in queue mode
