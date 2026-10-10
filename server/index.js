@@ -1288,15 +1288,25 @@ app.post('/api/rooms/:code/export', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
   if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   if (req.body?.qbj == null) return res.status(400).json({ error: 'missing_qbj' });
+  res.json(await syncRoomExport(room, {
+    round: req.body?.round, qbj: req.body.qbj, inProgress: req.body?.inProgress === true,
+    currentQuestion: req.body?.currentQuestion
+  }));
+}));
+
+// A room's game, filed as its stats. Reached two ways: the explicit Export
+// (POST /export) and every live change, which now rides on the reader's
+// modaq_game update instead of a request of its own (the same QBJ was being
+// sent twice per change).
+async function syncRoomExport(room, { round, qbj, inProgress, currentQuestion }) {
   const saved = await artifacts.saveExport(store.bucketForRoom(room), {
-    room: room.code, round: req.body?.round, qbj: req.body.qbj,
-    inProgress: req.body?.inProgress === true,
-    currentQuestion: Number(req.body?.currentQuestion) || undefined,
+    room: room.code, round, qbj, inProgress: inProgress === true,
+    currentQuestion: Number(currentQuestion) || undefined,
     at: Date.now()
   });
   // Anyone the moderator added mid-game joins the shared roster (best-effort).
   try {
-    const match = typeof req.body.qbj === 'string' ? JSON.parse(req.body.qbj) : req.body.qbj;
+    const match = typeof qbj === 'string' ? JSON.parse(qbj) : qbj;
     await artifacts.addMatchPlayersToRoster(store.bucketForRoom(room), match);
   } catch { /* roster sync must never fail the export */ }
   // The room's buzz log goes up with the game, so a room that is closed or
@@ -1304,11 +1314,11 @@ app.post('/api/rooms/:code/export', ah(async (req, res) => {
   await flushBuzzPoints(room).catch(() => { /* never fail the export */ });
   // A final sync may complete its round; auto-release the next packet if the
   // director opted in (best-effort).
-  if (req.body?.inProgress !== true) {
-    try { await maybeAutoRelease(room, String(req.body?.round ?? '')); } catch { /* ignore */ }
+  if (inProgress !== true) {
+    try { await maybeAutoRelease(room, String(round ?? '')); } catch { /* ignore */ }
   }
-  res.json(saved);
-}));
+  return saved;
+}
 
 // If every expected room's game in `round` is final, make the next hidden
 // (non-tiebreaker) packet visible to moderators. "Expected" comes from the
@@ -1914,6 +1924,10 @@ async function tournamentTeamsFor(room) {
   return teams;
 }
 
+// Where the packet goes in a compact shared game (see modaq_state): the JSON
+// string MODAQ's client puts in place of game.packet.
+const packetMarker = (ref) => `"__KLAXON_PACKET_${ref}__"`;
+
 function emitToStaff(roomCode, event, payload, except = null) {
   let delivered = 0;
   for (const [sid, ctx] of sock) {
@@ -2321,7 +2335,12 @@ io.on('connection', (socket) => {
       // Whose account this is (if logged in): the games a moderator scores,
       // and the games a player plays in, are found again from it (see the
       // game archive).
-      accountId: accounts.accountForSession(payload?.sessionToken)?.id || null
+      accountId: accounts.accountForSession(payload?.sessionToken)?.id || null,
+      // What this page's client understands. `packetRef`: it can fill a
+      // compact shared game's packet in itself (see modaq_state). A page joins
+      // knowing no packet; it learns one from the first whole game it gets.
+      caps: { packetRef: Array.isArray(payload?.caps) && payload.caps.includes('packetRef') },
+      knownPacket: null
     });
 
     // Staff learn whether a shared MODAQ game exists (and how current it is)
@@ -2697,8 +2716,18 @@ io.on('connection', (socket) => {
       case 'modaq_game': {
         try { trackArchive(room, payload.qbj ?? null, ctx.accountId || null); } catch (e) { console.error('game archive failed:', e); }
         if (room.correctionOf && payload.qbj) saveCorrection(room, payload.qbj);
+        // The packet's categories, answers and questions don't change during a
+        // game, so a reader sends them once and then `lists: 'same'`. A server
+        // that doesn't have them (a restart) says so, and they come again.
+        let needLists = false;
+        if (payload.lists === 'same') {
+          if (!room.packetLists) needLists = true;
+        } else {
+          room.packetLists = { categories: payload.categories, answers: payload.answers, questions: payload.questions };
+        }
+        const lists = room.packetLists || {};
         store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false,
-          payload.protests, payload.categories, payload.answers, payload.questions,
+          payload.protests, lists.categories, lists.answers, lists.questions,
           // Which of a shootout's packets this game is, so the score can be
           // filed under the right one when the room moves on (see
           // setShootoutCurrent). Absent in every other mode.
@@ -2713,7 +2742,16 @@ io.on('connection', (socket) => {
             emitToStaff(room.code, 'chat_message', said.message);
           }
         }
-        break;
+        // The live stats file, when the reader asks for it here rather than
+        // with a separate POST /export (see syncRoomExport).
+        if (payload.qbj && payload.export && typeof payload.export === 'object' && !room.correctionOf) {
+          syncRoomExport(room, {
+            round: payload.export.round, qbj: payload.qbj, inProgress: payload.export.inProgress === true,
+            currentQuestion: payload.currentQuestion
+          }).catch((e) => console.error('live export failed:', e));
+        }
+        emitState(room);
+        return ack?.(needLists ? { ok: true, needLists: true } : { ok: true });
       }
       // MODAQ's serialized game from one moderator, fanned out to the others
       // and kept for whoever (re)opens the page next. `json: null` means the
@@ -2741,7 +2779,25 @@ io.on('connection', (socket) => {
         return ack?.({ ok: true, id });
       }
       case 'modaq_state': {
-        const json = typeof payload.json === 'string' ? payload.json : null;
+        let json = typeof payload.json === 'string' ? payload.json : null;
+        // The packet is ~95% of a game and never changes during it, so a
+        // current reader sends it once (`packet`, with its hash `packetRef`)
+        // and from then on only a placeholder where it goes. It is put back
+        // here with a plain string replacement — nothing is parsed — so what
+        // is stored, archived and handed to a reconnecting page is the whole
+        // game, exactly as before.
+        const ref = typeof payload.packetRef === 'string' && /^[0-9a-f]{1,16}$/.test(payload.packetRef) ? payload.packetRef : null;
+        if (json && ref) {
+          if (typeof payload.packet === 'string') {
+            if (payload.packet.length > MODAQ_STATE_MAX) return ack?.({ error: 'too_large' });
+            room.modaqPacket = { hash: ref, text: payload.packet };
+          }
+          if (room.modaqPacket?.hash !== ref) return ack?.({ error: 'need_packet' });
+          const marker = packetMarker(ref);
+          if (!json.includes(marker)) return ack?.({ error: 'bad_state' });
+          const text = room.modaqPacket.text;
+          json = json.replace(marker, () => text);
+        }
         if (json && json.length > MODAQ_STATE_MAX) return ack?.({ error: 'too_large' });
         const prev = await modaqStateFor(room);
         const next = {
@@ -2749,14 +2805,27 @@ io.on('connection', (socket) => {
           round: String(payload.round ?? '').slice(0, 80),
           json,
           by: ctx.playerId,
-          at: Date.now()
+          at: Date.now(),
+          ...(json && ref ? { packetRef: ref } : {})
         };
         room.modaqState = next;
         artifacts.saveModaqState(room.code, next).catch((e) => console.error('modaq state save failed:', e));
-        // Only staff sockets cleared for packets hear the game itself.
+        // The pusher already holds this packet.
+        if (ref) ctx.knownPacket = ref;
+        // Only staff sockets cleared for packets hear the game itself. A
+        // current page that already holds this packet gets the placeholder
+        // form and fills it in itself; anyone else gets the whole game.
+        const compact = json && ref ? payload.json : null;
         for (const [sid, c] of sock) {
           if (sid === socket.id || c.roomCode !== room.code || !c.staffRole || !c.packetOk) continue;
-          io.sockets.sockets.get(sid)?.emit('modaq_state', next);
+          const sk = io.sockets.sockets.get(sid);
+          if (!sk) continue;
+          if (compact && c.caps?.packetRef && c.knownPacket === ref) {
+            sk.emit('modaq_state', { ...next, json: compact, compact: true });
+          } else {
+            sk.emit('modaq_state', next);
+            if (ref && c.caps?.packetRef) c.knownPacket = ref;
+          }
         }
         return ack?.({ ok: true, seq: next.seq });
       }
