@@ -859,6 +859,50 @@ app.get('/api/tournaments/:code/exports', ah(async (req, res) => {
   res.json({ exports: await artifacts.listExports({ kind: 't', code: t.code }) });
 }));
 
+// The director corrects a finished game: it opens in MODAQ in a private
+// correction room seeded with the game's own MODAQ copy (from the game
+// archive), and every change made there is written back over that game's
+// stats file (see the modaq_game handler). Nothing else about the room is
+// public: it isn't one of the tournament's rooms, so no player is sent there.
+app.post('/api/tournaments/:code/exports/:filename/correct', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const bucket = { kind: 't', code: t.code };
+  const text = await artifacts.getExport(bucket, req.params.filename);
+  if (text == null) return res.status(404).json({ error: 'No such game.' });
+  let match;
+  try { match = JSON.parse(text); } catch { return res.status(409).json({ error: 'That game file is unreadable.' }); }
+  const gameRoom = String(match._room ?? '').toUpperCase();
+  const gameRound = String(match._round ?? '');
+  const teamsKey = (match.match_teams || []).map((mt) => String(mt?.team?.name ?? '')).sort().join('|');
+  // The archive entry of this very game: same tournament, room, round and teams.
+  const candidates = (await artifacts.listArchivedGames()).filter((m) =>
+    m.tournament?.code === t.code && String(m.room ?? '').toUpperCase() === gameRoom &&
+    String(m.round ?? '') === gameRound && [...(m.teams || [])].sort().join('|') === teamsKey);
+  candidates.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  let meta = null, body = null;
+  for (const m of candidates) {
+    const b = await artifacts.getArchivedBody(m.id);
+    if (b?.json) { meta = m; body = b; break; }
+  }
+  if (!meta) {
+    return res.status(409).json({ error: "This game has no MODAQ copy to open — it was imported from YellowFruit, or played before games were kept. Fix it in YellowFruit and import it again." });
+  }
+  const room = store.createRoom({
+    name: `Correction: ${(meta.teams || []).join(' vs ') || gameRoom} (round ${gameRound})`.slice(0, 60),
+    settings: { modaqMode: true, modaqLite: true }
+  });
+  room.modaqState = { seq: 1, round: 'lite', json: body.json, by: null, at: Date.now() };
+  await artifacts.saveModaqState(room.code, room.modaqState);
+  // Scoring here edits the archived game in place (as /reopen does)...
+  room.archive = { id: meta.id, round: 'lite', teamsKey: [...(meta.teams || [])].sort().join('|'),
+    startedAt: meta.startedAt, accounts: [], events: 1, continues: true };
+  // ...and the tournament's stats file for it.
+  room.correctionOf = { tournament: t.code, room: gameRoom, round: gameRound, filename: req.params.filename };
+  store.persistNow();
+  res.json({ code: room.code, readerToken: room.readerToken });
+}));
+
 // Director takes a game out of the stats (or puts it back). See setExportRemoved.
 app.put('/api/tournaments/:code/exports/:filename/removed', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
@@ -1934,6 +1978,22 @@ function countBuzzes(match) {
 
 // A new QBJ from the reader's page: decide which archive entry it belongs to
 // and queue the write. `accountId` is whoever sent it, if logged in.
+// A correction room's game goes back over the tournament game it came from,
+// as a finished game, a second after the director stops changing it.
+const correctionTimers = new Map();
+function saveCorrection(room, qbj) {
+  clearTimeout(correctionTimers.get(room.code));
+  correctionTimers.set(room.code, setTimeout(async () => {
+    correctionTimers.delete(room.code);
+    const c = room.correctionOf;
+    try {
+      await artifacts.saveExport({ kind: 't', code: c.tournament }, {
+        room: c.room, round: c.round, qbj: { ...qbj, _correctedAt: Date.now() }, inProgress: false, at: Date.now()
+      });
+    } catch (e) { console.error('correction write-back failed:', e); }
+  }, 1000));
+}
+
 function trackArchive(room, match, accountId) {
   if (!match || typeof match !== 'object') { room.archive = null; return; }
   const events = countBuzzes(match);
@@ -2636,6 +2696,7 @@ io.on('connection', (socket) => {
       // it goes anywhere near a player. `qbj: null` clears it.
       case 'modaq_game': {
         try { trackArchive(room, payload.qbj ?? null, ctx.accountId || null); } catch (e) { console.error('game archive failed:', e); }
+        if (room.correctionOf && payload.qbj) saveCorrection(room, payload.qbj);
         store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false,
           payload.protests, payload.categories, payload.answers, payload.questions,
           // Which of a shootout's packets this game is, so the score can be

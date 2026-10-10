@@ -54,6 +54,8 @@ const serializeRoom = (r) => ({
   // Which game-archive entry the game on screen is filed under, so a restart
   // mid-game keeps filing into the same one.
   archive: r.archive || null,
+  // A director's correction room: the tournament game it writes back to.
+  correctionOf: r.correctionOf || null,
   // Every buzz attempt, for the full-buzz export (buzz-point tracking).
   buzzLog: r.buzzLog || [],
   // What the room DID: clears, withdrawals, who joined, options changed. The
@@ -1451,6 +1453,10 @@ export function publicState(room) {
     // the room's business, not a secret: the page says so on every screen.
     listed: room.settings.listed === true,
     ended: room.ended ? { at: room.ended.at, by: room.ended.by || null } : null,
+    // A director's correction room: which tournament game it writes back to.
+    correction: room.correctionOf
+      ? { room: room.correctionOf.room, round: room.correctionOf.round, roomName: rooms.get(room.correctionOf.room)?.name || '' }
+      : null,
     shootout: room.settings.shootout
       ? {
         // The game on screen counts as the current packet's only while it IS
@@ -2442,3 +2448,9 @@ export function massingerCancel(room) {
 }
 
 export const _internal = { rooms, tournaments };
+
+// For a route that set persisted room fields itself (the correction room's
+// link back to its game): write them now rather than on the next change.
+export function persistNow() {
+  persistRooms(true);
+}

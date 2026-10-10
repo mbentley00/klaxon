@@ -1181,6 +1181,7 @@ async function refreshExports() {
           title: `${teams ? teams + ' · ' : ''}${x.filename} · ${(x.size / 1024).toFixed(1)} KB · ${new Date(x.savedAt).toLocaleString()}`,
         }, room));
         if (teams) game.append(el('span', { className: 'export-teams' }, teams));
+        if (!x.removed) game.append(correctGameButton(x));
         game.append(removeGameButton(x, round, room, teams));
         chips.append(game);
       }
@@ -1188,6 +1189,32 @@ async function refreshExports() {
       ul.append(li);
     }
   } catch { /* ignore */ }
+}
+
+// Open a finished game in MODAQ to fix it (a buzz on the wrong player, a
+// wrong ruling): the server makes a private correction room seeded with the
+// game, and what is changed there goes straight back into these stats.
+function correctGameButton(x) {
+  const btn = el('button', { className: 'ghost tiny export-remove' }, 'Edit');
+  btn.title = 'Open this game in MODAQ and correct it; changes save back into the stats';
+  btn.onclick = async () => {
+    // Opened now, while the click still counts, so no pop-up blocker stops it.
+    const tab = window.open('about:blank', '_blank');
+    btn.disabled = true;
+    try {
+      const r = await api('POST', `/api/tournaments/${code}/exports/${qt(x.filename)}/correct`, { directorToken });
+      remember('staffToken:' + r.code, r.readerToken);
+      remember('staffRole:' + r.code, 'reader');
+      const url = `/modaq?room=${r.code}`;
+      if (tab) tab.location = url; else location.href = url;
+      msay('Opened the game in MODAQ. Every change you make there is saved into the stats.');
+    } catch (e) {
+      tab?.close();
+      msay(e.message, false);
+    }
+    btn.disabled = false;
+  };
+  return btn;
 }
 
 // Take a game out of the stats, or put it back. Reversible, so it asks once
