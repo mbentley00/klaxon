@@ -710,8 +710,22 @@ function applyState(s) {
 // sees, or the room would replay the game to anyone who reconnects.
 let rulingKeys = null;
 let rulingTimer = null;
+// What the pop is about, so it can go the moment that's over: the question it
+// was on, and whether anyone was waiting to buzz when it went up.
+let rulingFor = null;
+function hideRuling() {
+  clearTimeout(rulingTimer);
+  $('#ruling-toast')?.classList.remove('rt-show');
+  rulingFor = null;
+}
 function announceRuling(s) {
   const sheet = s.scoresheet;
+  // A moderator who moves straight on (or a fresh buzz) makes the last ruling
+  // old news: it shouldn't sit over the buzzer into the next question.
+  if (rulingFor) {
+    const now = Number(sheet?.current || sheet?.through) || 0;
+    if (now !== rulingFor.question || (s.queue?.length || 0) > 0) hideRuling();
+  }
   if (!sheet || !Array.isArray(sheet.rows)) { rulingKeys = null; return; }
   const keyed = [];
   for (const row of sheet.rows) {
@@ -723,10 +737,11 @@ function announceRuling(s) {
   const recent = Number(sheet.current || sheet.through) || 0;
   const fresh = keyed.filter((k) => !before.has(k.key) && k.row.n >= recent - 1);
   if (!fresh.length) return;
-  showRuling(fresh[fresh.length - 1].b, sheet);
+  const last = fresh[fresh.length - 1];
+  showRuling(last.b, sheet, last.row.n);
 }
 
-function showRuling(buzz, sheet) {
+function showRuling(buzz, sheet, ruledQuestion) {
   const box = $('#ruling-toast');
   if (!box) return;
   const correct = buzz.points > 0;
@@ -747,7 +762,11 @@ function showRuling(buzz, sheet) {
   void box.offsetWidth;
   box.classList.add('rt-show');
   clearTimeout(rulingTimer);
-  rulingTimer = setTimeout(() => box.classList.remove('rt-show'), 2600);
+  // Ruled and moved on in one go (both in the same update): a glimpse, not
+  // the full pop, over a question that has already started.
+  const current = Number(sheet.current || sheet.through) || 0;
+  rulingTimer = setTimeout(hideRuling, ruledQuestion < current ? 1200 : 2600);
+  rulingFor = { question: current };
 }
 
 // The scoresheet and the chat share one sticky rail. An empty rail would still
