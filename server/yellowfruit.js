@@ -104,8 +104,6 @@ width: 80%;
 }
 </style>`;
 
-const FOOTER = `<div class="html-rpt-hide-in-yft-app" style="font-size:x-small; margin-top: 10px">Made with <a HREF=https://github.com/ANadig/YellowFruit/releases target="_blank">YellowFruit</a> 4.0.18&nbsp;&#x1F34C;</div>`;
-
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const anchor = (s) => String(s ?? '').replace(/[^A-Za-z0-9]/g, '');
 const teamAnchor = (team) => anchor(team);
@@ -156,7 +154,6 @@ ${navBar(link, title, pages)}
 ${STYLE}
 <div style="font-size: 11pt; text-size-adjust: none;">
 ${body}
-${FOOTER}
 </div>
 </BODY>
 </HTML>`;
