@@ -15,16 +15,19 @@
   --buzzer-fade: .5;      /* opacity of a disabled buzzer (LOCKED, BUZZED) */
   --shadow-ink: #17130d;  /* the offset drop shadows */
   --soft: #ddd5c5;
-  --accent: #d8401f;      /* klaxon vermilion: text, links, outlines */
-  --accent-deep: #b3300f; /* darker vermilion text */
-  --accent-fill: #d8401f; /* vermilion as a background (primary buttons, the buzzed buzzer) */
-  --accent-fill-hover: #b3300f;
-  --on-accent: #fff;      /* text on a vermilion or red fill */
+  /* Klaxon indigo. It was vermilion, and in quizbowl red and green mean wrong
+     and right: a red accent everywhere made a -5 one more red thing on the
+     screen. Indigo is nobody's ruling, so the neg and the get stand out. */
+  --accent: #4338b8;      /* text, links, outlines */
+  --accent-deep: #33298f; /* darker accent text */
+  --accent-fill: #4f44c9; /* accent as a background (primary buttons, the buzzed buzzer) */
+  --accent-fill-hover: #4035ad;
+  --on-accent: #fff;      /* text on an accent or red fill */
   --modaq-fill: #1f5fa8;  /* the home page's MODAQ button (white text) */
   --modaq-fill-hover: #174a85;
   --shootout-fill: #6b3fa0; /* the home page's shootout button (white text) */
   --shootout-fill-hover: #56317f;
-  --accent-bg: #fff6f3;   /* a line of chat that names you */
+  --accent-bg: #efedfc;   /* a line of chat that names you */
   --lead: #4338b8;        /* the leading team's score: not green or red, which mean right and wrong */
   --lead-bg: #efedfc;
   --ok: #2f7d4f;
@@ -74,16 +77,16 @@
   --buzzer-fade: .68;     /* faded toward charcoal, red goes to mud sooner */
   --shadow-ink: #6f6554;
   --soft: #474036;
-  --accent: #ff7a55;
-  --accent-deep: #ffa084;
-  --accent-fill: #d8401f;
-  --accent-fill-hover: #bf3517;
+  --accent: #a99fff;
+  --accent-deep: #c6c0ff;
+  --accent-fill: #5a4fd4;
+  --accent-fill-hover: #4c42bd;
   --modaq-fill: #2a64a8;
   --modaq-fill-hover: #22558f;
   --shootout-fill: #7244a6;
   --shootout-fill-hover: #5f378c;
   --on-accent: #fff;
-  --accent-bg: #3a2219;
+  --accent-bg: #272342;
   --lead: #a99fff;
   --lead-bg: #272342;
   --ok: #6cc893;
@@ -582,6 +585,19 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
 }
 
 /* Touch devices: ensure the smaller controls are still an easy, reliable tap. */
+/* Phones: while someone else is buzzed in first, the buzzer and what goes with
+   it go grey, so a glance says "not you". The line above it (who buzzed in)
+   and the answer box stay as they are -- they are still for reading and
+   typing. */
+@media (max-width: 760px), (pointer: coarse) {
+  #buzz-area.others-buzz #buzzer,
+  #buzz-area.others-buzz #buzz-feedback,
+  #buzz-area.others-buzz #stuck-alert,
+  #buzz-area.others-buzz #pip-open,
+  #buzz-area.others-buzz #pip-hint { filter: grayscale(1); opacity: .4; }
+  #buzz-area.others-buzz { background: var(--ghost-hover); border-radius: var(--radius); }
+}
+
 @media (pointer: coarse) {
   .bz-sub { display: none; }   /* no Space bar to press */
   button.tiny { min-height: 40px; }

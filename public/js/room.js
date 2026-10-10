@@ -533,10 +533,10 @@ let pipWin = null;
 // page's theme (see pipTheme below).
 const PIP_CSS = `
   :root { color-scheme: light; --bg: #f3efe6; --surface: #fffdf7; --ink: #17130d; --line: #17130d;
-          --shadow-ink: #17130d; --muted: #6d6456; --accent: #d8401f; --accent-fill: #d8401f; --on-accent: #fff;
+          --shadow-ink: #17130d; --muted: #6d6456; --accent: #4338b8; --accent-fill: #4f44c9; --on-accent: #fff;
           --buzzer-fade: .5; --ok: #2f7d4f; --mine-fill: #2f7d4f; --warn: #9a6400; --warn-bg: #fbedd6; }
   :root[data-theme="dark"] { color-scheme: dark; --bg: #1b1814; --surface: #25211b; --ink: #efe7d8;
-          --line: #cfc5b3; --shadow-ink: #6f6554; --muted: #aba08d; --accent: #ff7a55; --accent-fill: #d8401f; --on-accent: #fff;
+          --line: #cfc5b3; --shadow-ink: #6f6554; --muted: #aba08d; --accent: #a99fff; --accent-fill: #5a4fd4; --on-accent: #fff;
           --buzzer-fade: .68; --ok: #6cc893; --mine-fill: #2e7d4f; --warn: #e8b04c; --warn-bg: #3a2c12; }
   html, body { margin: 0; height: 100%; }
   body { font-family: system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink);
@@ -2472,7 +2472,7 @@ function renderPhase(s) {
     // and took it for being recognized; this line is the one to read.
     const mine = q[0].playerId === state.me?.id;
     const team = memberTeam(s, q[0].playerId);
-    label.textContent = mine ? 'You have the buzz' : `${q[0].name}${team ? ` (${team})` : ''} has the buzz`;
+    label.textContent = mine ? 'You have the buzz' : `${q[0].name}${team ? ` (${team})` : ''} buzzed in`;
     label.className = 'phase big ' + (mine ? 'mine' : 'buzzed');
   } else {
     // Your own buzz says so in words. Reading your own name off the screen and
@@ -2564,6 +2564,9 @@ function renderBuzzer(s) {
     setBuzzer(has ? 'BUZZED' : '—', has ? `${q[0].name} buzzed` : '');
   }
   BUZZ_TONES.forEach((t) => buzzer.classList.toggle(t, t === tone));
+  // Someone else is in first: greyed out on a phone (see styles.css).
+  $('#buzz-area').classList.toggle('others-buzz',
+    state.role === 'player' && has && q[0].playerId !== state.me?.id);
   renderPip();
   renderPipButton();
 }
