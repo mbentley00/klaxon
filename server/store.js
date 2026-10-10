@@ -1139,6 +1139,19 @@ export function withdrawFreeAgainAt(room, playerId) {
   return used == null ? null : used + wait;
 }
 
+function withdrawWaits(room) {
+  const wait = Number(room.settings.withdrawCooldown) || 0;
+  if (wait <= 0) return null;
+  const question = Number(room.scoresheet?.current) || 0;
+  const out = {};
+  if (question <= 0) return out;
+  for (const [playerId, used] of Object.entries(room.withdrawUsed || {})) {
+    const left = Number(used) + wait - question;
+    if (left > 0) out[playerId] = left;
+  }
+  return out;
+}
+
 export function withdraw(room, playerId, { byPlayer = false, by = null } = {}) {
   if (!room.settings.allowWithdraw) return { ok: false };
   if (byPlayer && room.queue[0]?.playerId === playerId) return { ok: false, reason: 'has_floor' };
@@ -1442,6 +1455,10 @@ export function publicState(room) {
     // mode (see store.withdraw). Only people currently waiting are listed, and
     // a question number is not a secret — the room watched them withdraw.
     withdrawFreeAt: room.settings.withdrawCooldown > 0 ? { ...(room.withdrawUsed || {}) } : null,
+    // The same, counted down: how many questions until each waiting player's
+    // next free withdrawal (only players still waiting), worked out here so the
+    // board, the moderator's standings and the player's own line all agree.
+    withdrawWait: withdrawWaits(room),
     // A playtest room shows answer lines once a cycle is over and asks the
     // room what it thought (see playtest.js).
     playtest: playtestOn(room),

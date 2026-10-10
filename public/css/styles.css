@@ -1035,6 +1035,11 @@ body.compact #answer-view { display: none; }
 .sb-row.sb-me { font-weight: 700; }
 .sb-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .sb-split { flex: none; font-family: var(--mono); font-size: .72rem; color: var(--muted); }
+.sb-wd {
+  flex: none; padding: 0 5px; border: 1px solid var(--warn); border-radius: 3px;
+  font-size: .7rem; font-weight: 600; color: var(--warn); white-space: nowrap;
+}
+.session-rule.wd-used { color: var(--warn); font-weight: 600; }
 .sb-total { flex: none; font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
 .sb-rank { flex: none; min-width: 1.8em; font-family: var(--mono); font-size: .8rem; color: var(--muted); text-align: right; }
 .sb-row.sb-me { background: var(--accent-bg); }

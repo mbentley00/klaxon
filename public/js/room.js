@@ -1218,6 +1218,21 @@ $('#answer-box').addEventListener('input', () => {
 // match score, and it runs across every packet of the session: what is on the
 // board is what has been banked from finished packets plus whatever the game in
 // progress has so far (see server/shootout.js).
+// In the rationed mode, a player who has used their free withdrawal says so on
+// every list they're on, so nobody has to remember who withdrew when.
+function wdLeft(s, playerId) {
+  return playerId ? Number(s.withdrawWait?.[playerId]) || 0 : 0;
+}
+function wdBadge(s, playerId) {
+  const left = wdLeft(s, playerId);
+  if (!left) return '';
+  return el('span', {
+    className: 'sb-wd',
+    textContent: `WD in ${left}`,
+    title: `Used their free withdraw. Withdrawing now costs them; free again in ${left} question${left === 1 ? '' : 's'}.`
+  });
+}
+
 function renderShootout(s) {
   const view = $('#shootout-view');
   const board = s.shootout;
@@ -1277,6 +1292,7 @@ function renderShootout(s) {
       // of "1." that says nothing.
       el('span', { className: 'sb-rank', textContent: row.total !== 0 ? `${row.place}.` : '' }),
       el('span', { className: 'sb-name', textContent: me ? `${row.name} (you)` : row.name }),
+      wdBadge(s, member?.id),
       // The banked half is shown separately so nobody has to wonder whether the
       // number moved because of this packet or an earlier one. Shown on EVERY
       // scoring row once the evening has banked a packet, including the ones
@@ -1336,9 +1352,16 @@ function renderSession(s) {
   $('#session-progress').textContent = bits.join(' · ');
   const rule = $('#session-rule');
   const wait = Number(session.withdrawCooldown) || 0;
+  // A player's own status sits beside the rule, all the time -- not only on
+  // the Withdraw button, which shows only while they're queued.
+  const mine = state.role === 'player' ? wdLeft(s, state.me?.id) : 0;
   rule.textContent = session.withdraw === 'rationed' && wait
-    ? `One free withdraw every ${wait} questions`
+    ? `One free withdraw every ${wait} questions` +
+      (state.role === 'player'
+        ? (mine ? ` · yours is used: free again in ${mine}` : ' · yours is ready')
+        : '')
     : WITHDRAW_SHORT[session.withdraw] || '';
+  rule.classList.toggle('wd-used', mine > 0);
   rule.title = WITHDRAW_RULE[session.withdraw] || '';
   $('#leave-game').classList.toggle('hidden', state.role !== 'player');
 }
