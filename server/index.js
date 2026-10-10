@@ -2753,6 +2753,29 @@ io.on('connection', (socket) => {
       // the player-safe scoresheet (see store.buildPlayerScoresheet) before
       // it goes anywhere near a player. `qbj: null` clears it.
       case 'modaq_game': {
+        // With two moderator screens, each sends its own copy of every change,
+        // and a screen in a background tab (whose timers the browser slows to
+        // as little as once a minute) sends it late — putting the players'
+        // scoresheet and the stats back to an older moment. Each copy says
+        // when its game last changed (MODAQ's lastUpdate, which travels with
+        // the shared game, so both screens carry the same time for the same
+        // change): a repeat of a moment the room has already moved past is
+        // dropped. Judged by identity, not by comparing times — two devices'
+        // clocks can disagree, so a change never seen before is always new,
+        // and a repeat of the latest one (a resend) is harmless. A copy
+        // without the time (an older page) is taken as before.
+        const changedAt = Number(payload.lastUpdate);
+        if (Number.isFinite(changedAt) && changedAt > 0) {
+          const seen = (room.gameChangesSeen ||= []);
+          if (seen.includes(changedAt) && changedAt !== room.gameLatestChange) {
+            return ack?.({ ok: true, ignored: 'older_than_seen' });
+          }
+          if (!seen.includes(changedAt)) {
+            seen.push(changedAt);
+            if (seen.length > 200) seen.shift();
+          }
+          room.gameLatestChange = changedAt;
+        }
         try { trackArchive(room, payload.qbj ?? null, ctx.accountId || null); } catch (e) { console.error('game archive failed:', e); }
         if (room.correctionOf && payload.qbj) saveCorrection(room, payload.qbj);
         // The packet's categories, answers and questions don't change during a
