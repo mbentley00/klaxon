@@ -25,6 +25,8 @@
   --shootout-fill: #6b3fa0; /* the home page's shootout button (white text) */
   --shootout-fill-hover: #56317f;
   --accent-bg: #fff6f3;   /* a line of chat that names you */
+  --lead: #4338b8;        /* the leading team's score: not green or red, which mean right and wrong */
+  --lead-bg: #efedfc;
   --ok: #2f7d4f;
   --ok-deep: #1e7d32;
   --ok-bg: #eaf4ea;
@@ -82,6 +84,8 @@
   --shootout-fill-hover: #5f378c;
   --on-accent: #fff;
   --accent-bg: #3a2219;
+  --lead: #a99fff;
+  --lead-bg: #272342;
   --ok: #6cc893;
   --ok-deep: #6cc893;
   --ok-bg: #1c3024;
@@ -225,6 +229,9 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 a.room-code { text-decoration: none; }
 a.room-code:hover { text-decoration: underline; }
 .room-name { color: var(--muted); font-size: .9rem; }
+/* A tournament room: "Room 3" leads, the code is a tag after it. */
+.named-room .room-name { font-family: var(--display); font-weight: 700; font-size: 1rem; color: var(--accent); }
+.named-room .room-code { color: var(--muted); font-weight: 400; font-size: .75rem; letter-spacing: .08em; }
 .bar-right { display: flex; gap: 8px; align-items: center; }
 /* On a phone the right-hand chips (copy link, connection, latency, the theme
    toggle, and Compact for staff) don't fit beside the crumbs. Rather than
@@ -513,6 +520,8 @@ body.compact #latency,
 body.compact .room-name,
 body.compact .crumbs .crumb,
 body.compact .crumb-sep { display: none !important; }
+/* ...but a tournament room keeps its name: it is the room's name there. */
+body.compact .named-room .room-name { display: inline !important; }
 
 body.compact .bar { padding: 4px 8px; padding-top: max(4px, env(safe-area-inset-top)); }
 body.compact .bar > .bar-left { flex-basis: auto; }  /* just the room code: keep one row */
@@ -685,6 +694,18 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
 .scoresheet .ss-part-got { color: var(--ok-deep); font-weight: 700; }
 .scoresheet .ss-part-miss { color: var(--bad); font-weight: 700; }
 .scoresheet .ss-score-line { color: var(--ss-ink); }
+/* The score as a table (team games): a row per team, the leader picked out. */
+.scoresheet .ss-score-table { width: 100%; border-collapse: collapse; font-size: 1rem; font-weight: 400; text-align: left; }
+.scoresheet .ss-score-table th { padding: 5px 8px; font-weight: 400; color: var(--ss-muted); overflow-wrap: anywhere; }
+.scoresheet .ss-score-table td {
+  width: 1%; padding: 5px 8px; text-align: right; white-space: nowrap;
+  font-family: var(--mono); font-size: 1.2rem; font-variant-numeric: tabular-nums; color: var(--ss-muted);
+}
+.scoresheet .ss-score-table tr + tr > * { border-top: 1px solid var(--ss-line); }
+.scoresheet .ss-score-table tr.lead { background: var(--lead-bg); }
+.scoresheet .ss-score-table tr.lead th { font-weight: 700; color: var(--ss-ink-strong); }
+.scoresheet .ss-score-table tr.lead td { font-weight: 700; color: var(--lead); }
+.scoresheet .ss-score-table.tied th, .scoresheet .ss-score-table.tied td { color: var(--ss-ink); }
 /* Which scores these are. The leaderboard below carries the other kind. */
 .scoresheet .ss-score-label {
   display: block; font-family: var(--mono); font-size: .66rem; font-weight: 600;

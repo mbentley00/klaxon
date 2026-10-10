@@ -287,6 +287,7 @@ function showGate(mode, staffRole) {
   $('#gate-name').focus();
   if (!staff) {
     loadRoomInfo().then((info) => {
+      if (info.tournamentCode && info.name) $('#gate-title').textContent = `Join ${info.name}`;
       applyTeamRequirement(info.requireTeam, info.shootout);
       renderRosterGate(info);
     });
@@ -672,10 +673,23 @@ socket.on('roster_alert', (alert) => {
   banner.textContent = `${alert.name}${alert.team ? ` (${alert.team})` : ''} joined but isn't on the roster.`;
 });
 
+// At a tournament a room is "Room 3" to everyone in it -- that is what the
+// schedule and the director say -- so its name leads, in the header and the
+// tab, and the code is a small tag after it. Elsewhere the code is the room's
+// name (it is what you type to get in), so it stays first.
+function showRoomName(s) {
+  const named = !!(s.tournamentCode && s.name);
+  const nav = $('#room-code').parentElement;
+  nav.classList.toggle('named-room', named);
+  if (named && $('#room-name').nextElementSibling !== $('#room-code')) nav.insertBefore($('#room-name'), $('#room-code'));
+  document.title = named ? `${s.name} · ${state.tournament?.name || 'Klaxon'}` : `${code} · Klaxon`;
+}
+
 function applyState(s) {
   if (!s) return;
   state.snapshot = s;
   $('#room-name').textContent = s.name || '';
+  showRoomName(s);
   renderPhase(s);
   renderBuzzer(s);
   renderQueue(s);
@@ -822,7 +836,9 @@ function renderScoresheet(s) {
   if (line.length > 2) line.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
   $('#ss-status').replaceChildren(
     el('span', { className: 'ss-score-label' }, s.shootout ? 'This packet' : 'Score'),
-    el('span', { className: 'ss-score-line' }, line.map((x) => `${x.name}: ${x.points}`).join(', '))
+    s.shootout
+      ? el('span', { className: 'ss-score-line' }, line.map((x) => `${x.name}: ${x.points}`).join(', '))
+      : scoreTable(line)
   );
   if (!wanted) { ssLastKey = ''; return; }   // collapsed: the table isn't drawn
   // State broadcasts arrive on every buzz; only redraw when the sheet changed.
@@ -934,6 +950,19 @@ function keepRowInView(box, row) {
 // the top, every question down the side, and what each of them scored on it.
 // Built from the same player-safe sheet, so there is nothing here the room has
 // not already heard, and no answer lines at all.
+// A team game's score as a table: open-tournament team names run long (and
+// carry numbers of their own -- "Alpha 2: 100, Beta 50" is a puzzle), so each
+// team gets a row and the score its own column. The leader's row stands out;
+// in a tie nobody's does. Not green or red: those say correct and wrong.
+function scoreTable(line) {
+  const top = Math.max(...line.map((x) => x.points));
+  const tied = line.every((x) => x.points === top);
+  return el('table', { className: 'ss-score-table' + (tied ? ' tied' : '') },
+    el('tbody', {}, ...line.map((x) => el('tr', { className: !tied && x.points === top ? 'lead' : '' },
+      el('th', { scope: 'row', textContent: x.name }),
+      el('td', { textContent: String(x.points).replace('-', '−') })))));
+}
+
 function renderFullSheet(s) {
   const dialog = $('#sheet-dialog');
   if (!dialog?.open) return;
@@ -3287,6 +3316,7 @@ function renderTournament() {
   const t = state.tournament;
   if (!t) return;
   $('#tournament-strip').classList.remove('hidden');
+  if (state.snapshot) showRoomName(state.snapshot);   // the tab names the tournament
   // The code reads as a link, so make it one: a director on this device lands
   // in their console, everyone else in the tournament's public stats.
   const tcodeEl = $('#t-code');
