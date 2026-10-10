@@ -385,6 +385,27 @@ app.post('/api/yapp/parse', express.raw({ type: () => true, limit: YAPP_MAX_BYTE
 }));
 
 // Public directory of listed tournaments (browse + request to moderate).
+// The tournaments a signed-in account belongs to: the ones it directs (with
+// the director token, so the console opens on any device the director signs
+// in on — the account was only ever marked director by someone holding that
+// token, see approveDirector) and the ones it moderates or has asked to.
+app.get('/api/accounts/me/tournaments', ah(async (req, res) => {
+  const account = accounts.accountForSession(req.query.sessionToken);
+  if (!account) return res.status(401).json({ error: 'not_logged_in' });
+  const out = [];
+  for (const t of store.allTournaments()) {
+    let m = null;
+    try { m = (await artifacts.getMembers({ kind: 't', code: t.code })).find((x) => x.accountId === account.id); } catch { /* none */ }
+    if (!m) continue;
+    out.push({
+      code: t.code, name: t.name, date: t.date || '',
+      role: m.director ? 'director' : m.status === 'approved' ? 'moderator' : m.status,
+      ...(m.director ? { directorToken: t.directorToken } : {})
+    });
+  }
+  res.json({ tournaments: out });
+}));
+
 app.get('/api/tournaments', (_req, res) => {
   res.json({ tournaments: store.listTournaments() });
 });

@@ -46,8 +46,25 @@ function myCodes() {
 const byDateThenName = (a, b) =>
   (a.date || '9999').localeCompare(b.date || '9999') || a.name.localeCompare(b.name);
 
+// The tournaments the signed-in account belongs to, from the server: what a
+// browser that never opened them still needs to list. A director's token comes
+// with it and is kept like one made here, so the console just opens.
+async function accountTournaments() {
+  if (!account) return [];
+  try {
+    const { tournaments } = await api('GET', `/api/accounts/me/tournaments?sessionToken=${encodeURIComponent(session())}`);
+    for (const t of tournaments) {
+      if (t.directorToken) localStorage.setItem('bz_directorToken:' + t.code, t.directorToken);
+    }
+    return tournaments;
+  } catch { return []; }
+}
+
 async function renderMine() {
-  const mine = (await Promise.all(myCodes().map(async (code) => {
+  const viaAccount = await accountTournaments();
+  const roleOf = new Map(viaAccount.map((t) => [t.code, t.role]));
+  const codes = [...new Set([...myCodes(), ...viaAccount.map((t) => t.code)])];
+  const mine = (await Promise.all(codes.map(async (code) => {
     try { return await api('GET', `/api/tournaments/${code}`); }
     catch { return null; } // gone from the server — keep the token, skip the row
   }))).filter(Boolean).sort(byDateThenName);
@@ -62,8 +79,14 @@ async function renderMine() {
     col.append(el('span', { className: 'pname' }, t.name));
     col.append(el('span', { className: 'pjoined' }, `${t.date || 'Date TBD'} · code ${t.code}`));
     li.append(col);
-    li.append(el('a', { className: 'btnlink tiny', href: '/t/' + t.code },
-      directed.has(t.code) ? 'Director console' : 'Open'));
+    // Director: the console. Moderator: the moderator page, which lists the
+    // rooms to read in. Asked and waiting: that page too, where it says so.
+    const role = directed.has(t.code) ? 'director' : roleOf.get(t.code);
+    li.append(role === 'director'
+      ? el('a', { className: 'btnlink tiny', href: '/t/' + t.code }, 'Director console')
+      : role === 'moderator' || role === 'pending'
+        ? el('a', { className: 'btnlink tiny', href: `/t/${t.code}/join` }, role === 'moderator' ? 'Moderate' : 'Requested')
+        : el('a', { className: 'btnlink tiny', href: '/t/' + t.code }, 'Open'));
     ul.append(li);
   }
   return new Set(mine.map((t) => t.code));
@@ -113,7 +136,7 @@ function actionFor(t, status) {
   if (!account) {
     return el('a', { className: 'btnlink tiny', href: '/account' }, 'Log in to request');
   }
-  if (status === 'approved') return el('span', { className: 'pjoined' }, 'Approved ✓');
+  if (status === 'approved') return el('a', { className: 'btnlink tiny', href: `/t/${t.code}/join` }, 'Approved — moderate');
   if (status === 'pending') return el('span', { className: 'pjoined' }, 'Requested — pending');
   if (status === 'denied') return el('span', { className: 'pjoined' }, 'Denied');
   const btn = el('button', { className: 'tiny primary' }, 'Request to join');
