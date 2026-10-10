@@ -250,6 +250,10 @@ app.post('/api/tournaments/:code/members/director', ah(async (req, res) => {
   const account = accounts.accountForSession(req.body?.sessionToken);
   if (!account) return res.status(401).json({ error: 'not_logged_in' });
   if ((await artifacts.memberStatus({ kind: 't', code: t.code }, account.id)) === 'approved') {
+    // Approved already — but maybe before directors were flagged as such (or
+    // approved as a moderator first): the flag is what lists the tournament
+    // under the account and hands the console to its other devices.
+    await artifacts.markDirector({ kind: 't', code: t.code }, account.id);
     return res.json({ approved: true, changed: false });
   }
   await approveDirector(t, account);
