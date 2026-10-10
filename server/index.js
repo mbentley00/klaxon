@@ -1939,6 +1939,11 @@ function afterMassingerChange(room) {
 }
 
 function emitState(room) {
+  // A new head of the queue has the floor (see answers.followQueue); the
+  // moderator's live answer card follows it.
+  if (answers.followQueue(room)) {
+    emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));
+  }
   io.to(room.code).emit('state', store.publicState(room));
   // The moderator's recent-buzzes list rides along, to staff only: it names
   // who cleared what. Every buzzer change ends in an emitState, so this is

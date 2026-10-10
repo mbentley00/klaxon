@@ -93,6 +93,23 @@ export function open(room, activePlayerId) {
   return { window: room.answers, started: true };
 }
 
+/**
+ * The floor is whoever heads the queue. A wrong answer in queue mode hands the
+ * buzzer to the next player (next_buzz), a player leaving takes their place
+ * with them, and a buzz after the queue ran dry starts it again -- and the
+ * window kept naming the player it opened for, so nobody after the first was
+ * ever asked for their answer. Called whenever the room's state goes out.
+ * Returns whether the floor moved.
+ */
+export function followQueue(room) {
+  const a = state(room);
+  if (!a) return false;
+  const head = room.queue?.[0]?.playerId ?? null;
+  if (a.activePlayerId === head) return false;
+  a.activePlayerId = head;
+  return true;
+}
+
 export function state(room) {
   const a = room.answers;
   return a && a.cycleNo === room.cycleNo ? a : null;
