@@ -183,13 +183,50 @@ async function approveDirector(t, account) {
 // A moderator asked to join: tell the tournament's directors, by the email on
 // their accounts (a director without an account, or without an email on it,
 // only finds out from the console).
+// The emails of a tournament's directors: the accounts flagged as director
+// (see approveDirector) that have an email on them.
+async function directorEmails(t) {
+  const members = await artifacts.getMembers({ kind: 't', code: t.code });
+  return [...new Set(members.filter((m) => m.director)
+    .map((m) => accounts.getAccount(m.accountId)?.email).filter(Boolean))];
+}
+const escHtml = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+const siteOrigin = (req) => (process.env.KLAXON_CANONICAL_HOST
+  ? `https://${process.env.KLAXON_CANONICAL_HOST}`
+  : req ? `${req.protocol}://${req.get('host')}` : `http://localhost:${PORT}`);
+
+// A player lodged a protest: the director rules on protests, so they hear of
+// it at once rather than when they next look at the Results tab.
+async function notifyDirectorsOfProtest(room, protest) {
+  if (!emailEnabled() || !room.tournamentCode) return;
+  const t = store.getTournament(room.tournamentCode);
+  if (!t) return;
+  const to = await directorEmails(t);
+  if (!to.length) return;
+  const url = `${siteOrigin(null)}/t/${t.code}`;
+  const where = `${room.name || `Room ${room.code}`}${protest.round ? `, round ${protest.round}` : ''}`;
+  const who = `${protest.byName || 'A player'}${protest.byTeam ? ` (${protest.byTeam})` : ''}`;
+  // The ground they chose, as the rules put it.
+  const ground = protests.PROTEST_REASONS.find((r) => r.id === protest.reason);
+  const reasonText = ground ? `${ground.label} (ACF ${ground.rule})` : '';
+  await sendEmail({
+    to,
+    subject: `Protest in ${where}: question ${protest.cycle}`,
+    text: `${who} protested question ${protest.cycle} in ${where} of ${t.name || t.code}.` +
+      `${reasonText ? `\n\n${reasonText}` : ''}\n\nRule on it in the director console: ${url} (Results > Protests).`,
+    html: `<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;color:#17130d;line-height:1.5;max-width:520px">` +
+      `<p><strong>${escHtml(who)}</strong> protested <strong>question ${escHtml(protest.cycle)}</strong> in ${escHtml(where)} of ${escHtml(t.name || t.code)}.</p>` +
+      (reasonText ? `<blockquote style="margin:0;padding:10px 14px;border-left:3px solid #ddd5c5;color:#333">${escHtml(reasonText)}</blockquote>` : '') +
+      `<p>Rule on it in the <a href="${escHtml(url)}">director console</a>, under Results &rsaquo; Protests.</p>` +
+      `<hr style="border:none;border-top:1px solid #eee;margin:20px 0"><p style="font-size:12px;color:#888">Klaxon</p></div>`
+  });
+}
+
 async function notifyDirectorsOfRequest(t, requester, origin) {
   if (!emailEnabled()) return;
-  const members = await artifacts.getMembers({ kind: 't', code: t.code });
-  const to = [...new Set(members.filter((m) => m.director)
-    .map((m) => accounts.getAccount(m.accountId)?.email).filter(Boolean))];
+  const to = await directorEmails(t);
   if (!to.length) return;
-  const esc = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+  const esc = escHtml;
   const who = requester.displayName ? `${requester.displayName} (${requester.username})` : requester.username;
   const url = `${origin}/t/${t.code}`;
   const tname = t.name || t.code;
@@ -2716,6 +2753,10 @@ io.on('connection', (socket) => {
     if (res.error) return ack?.({ error: res.error });
     emitToStaff(room.code, 'protest_lodged', { id: res.protest.id, byTeam: res.protest.byTeam,
       cycle: res.protest.cycle, byName: res.protest.byName, reason: res.protest.reason });
+    // A new protest, not the same one asked again.
+    if (res.existed !== true) {
+      notifyDirectorsOfProtest(room, res.protest).catch((e) => console.warn('[email] protest notice failed:', e.message));
+    }
     emitState(room);
     ack?.({ ok: true, id: res.protest.id, existed: res.existed === true });
   });
