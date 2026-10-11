@@ -826,7 +826,10 @@ app.post('/api/tournaments/:code/packets', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
   const packet = typeof req.body?.packet === 'string' ? req.body.packet : JSON.stringify(req.body?.packet);
-  const visible = typeof req.body?.visible === 'boolean' ? req.body.visible : false;
+  // A team tournament's rounds start hidden until the director releases them.
+  // A shootout's packets are the evening's reading list, read in order by the
+  // director's own rooms, so they are usable as soon as they're uploaded.
+  const visible = typeof req.body?.visible === 'boolean' ? req.body.visible : t.format?.kind === 'shootout';
   const tiebreaker = typeof req.body?.tiebreaker === 'boolean' ? req.body.tiebreaker : false;
   const saved = await artifacts.savePacket({ kind: 't', code: t.code }, req.body?.round, packet, { visible, tiebreaker });
   res.json(saved);

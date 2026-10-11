@@ -180,7 +180,7 @@ async function createShootout() {
   const room = await api('POST', '/api/rooms', { tournamentCode: r.code, name: 'Shootout' });
   remember('staffToken:' + room.code, room.readerToken);
   remember('coReaderToken:' + room.code, room.coReaderToken);
-  const note = uploaded ? ` Uploaded ${uploaded} packet${uploaded > 1 ? 's' : ''} (hidden until released).` : '';
+  const note = uploaded ? ` Uploaded ${uploaded} packet${uploaded > 1 ? 's' : ''}, ready for the rooms.` : '';
   say(`Shootout ${r.code} created with room ${room.code}.${note} Opening director console…`);
   location.href = '/t/' + r.code;
 }

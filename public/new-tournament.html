@@ -124,7 +124,7 @@
     <section class="panel">
       <h3>Round packets <span class="optional">optional</span></h3>
       <p class="hint">Upload several <code>.json</code> packets at once — each file's name becomes the round
-        label. Rounds start hidden from moderators; release them from the director console. Still have
+        label. <span class="teams-only">Rounds start hidden from moderators; release them from the director console.</span><span class="shootout-only hidden">The shootout's rooms can read them right away, in this order.</span> Still have
         <code>.docx</code> files? The <a href="/yapp" target="_blank" rel="noopener">packet parser</a> converts them.</p>
       <input type="file" id="t-packet-files" accept=".json,application/json" multiple />
       <label class="toggle"><input type="checkbox" id="t-require-accounts" /> Require readers to have a
