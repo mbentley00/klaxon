@@ -684,7 +684,7 @@ function initModaq() {
       } catch { /* skip bad file */ }
     }
     const kind = tiebreaker ? ' tiebreaker' : '';
-    msay(ok ? `Uploaded ${ok}${kind} round${ok > 1 ? 's' : ''}${document.body.classList.contains('shootout-t') && loadRooms().length <= 1 ? ', ready for the room' : ' (hidden until you make them visible)'}.` : 'No valid packets found.', ok > 0);
+    msay(ok ? `Uploaded ${ok}${kind} round${ok > 1 ? 's' : ''}${packetsOpen ? ', ready for the room' : ' (hidden until you make them visible)'}.` : 'No valid packets found.', ok > 0);
     $('#packet-files').value = '';
     $('#packet-tiebreaker').checked = false;
     refreshPackets();
@@ -968,11 +968,20 @@ $('#roster-alerts-clear').onclick = async () => {
   refreshRosterAlerts();
 };
 
+let packetsOpen = false;
 async function refreshPackets() {
   try {
-    const { packets } = await api('GET', `/api/tournaments/${code}/packets?directorToken=${qt(directorToken)}`);
+    const { packets, alwaysOpen } = await api('GET', `/api/tournaments/${code}/packets?directorToken=${qt(directorToken)}`);
+    // A one-room shootout reads every round as soon as it's uploaded: no
+    // releasing, so no visibility to show or toggle.
+    packetsOpen = alwaysOpen === true;
+    $('#packets-release-hint').textContent = packetsOpen
+      ? 'With one room, every round is ready for it as soon as it is uploaded. Add a second room and you release rounds one by one.'
+      : 'New rounds are hidden from moderators — toggle a round visible to release it.';
+    $('#release-next').classList.toggle('hidden', packetsOpen);
     const visibleCount = packets.filter((p) => p.visible).length;
-    $('#packets-count').textContent = packets.length ? `(${visibleCount}/${packets.length} visible)` : '';
+    $('#packets-count').textContent = !packets.length ? ''
+      : packetsOpen ? `(${packets.length})` : `(${visibleCount}/${packets.length} visible)`;
     updateReleaseNext(packets);
     const ul = $('#packets-list');
     ul.innerHTML = '';
@@ -991,7 +1000,7 @@ async function refreshPackets() {
       }
       li.append(nameWrap);
       const controls = el('span', { className: 'sound-row' });
-      controls.append(packetToggle(p, 'visibility', 'visible', 'Visible'));
+      if (!packetsOpen) controls.append(packetToggle(p, 'visibility', 'visible', 'Visible'));
       controls.append(packetToggle(p, 'tiebreaker', 'tiebreaker', 'Tiebreaker'));
       // Only on a tiebreaker pool with something to split: a playing round isn't
       // meant to leave the rotation, and a round that is already one question
@@ -1618,6 +1627,8 @@ $('#add-rooms').onclick = async () => {
       render();
     }
     say(`Added ${qty} room${qty > 1 ? 's' : ''}.`);
+    // A second room in a shootout brings releasing back (see packetsAlwaysOpen).
+    refreshPackets();
   } catch (e) {
     say('Error creating rooms: ' + e.message, false);
   }

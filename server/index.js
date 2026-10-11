@@ -839,7 +839,9 @@ app.post('/api/tournaments/:code/packets', ah(async (req, res) => {
 app.get('/api/tournaments/:code/packets', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
-  res.json({ packets: await artifacts.listPackets({ kind: 't', code: t.code }) });
+  // alwaysOpen: a one-room shootout, where every round is the room's whatever
+  // its visibility (see packetsAlwaysOpen) — the console says so.
+  res.json({ packets: await artifacts.listPackets({ kind: 't', code: t.code }), alwaysOpen: packetsAlwaysOpen(t) });
 }));
 
 // Director drags the rounds into order. It's the order moderators see them in
