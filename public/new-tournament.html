@@ -52,8 +52,34 @@
       <label class="toggle"><input type="checkbox" id="so-autoadd" checked /> Add players to MODAQ as they buzz in
         (someone who joins mid-packet plays from the next question)</label>
       <label class="toggle"><input type="checkbox" id="so-typed" checked /> Players type their answers</label>
-      <label class="toggle"><input type="checkbox" id="so-withdraw" checked /> Players can withdraw a buzz</label>
-      <p class="hint">The packets, notes for the players and the scoring are set when you open the room.</p>
+      <fieldset class="create-format so-withdraw-choice">
+        <legend>Withdrawing a buzz</legend>
+        <label class="toggle"><input type="radio" name="so-withdraw" value="free" checked />
+          <span><strong>Free withdraws</strong> <span class="hint">A player can take back a buzz at no cost.</span></span></label>
+        <label class="toggle"><input type="radio" name="so-withdraw" value="none" />
+          <span><strong>No withdraws</strong> <span class="hint">A buzz stands once it's in.</span></span></label>
+        <label class="toggle"><input type="radio" name="so-withdraw" value="typed" />
+          <span><strong>Type your answer first</strong> <span class="hint">Everyone waiting in the queue types their
+            answer before the player with the floor gives theirs. Withdrawing is only free if you hadn't committed to a
+            different answer.</span></span></label>
+        <label class="toggle"><input type="radio" name="so-withdraw" value="rationed" />
+          <span><strong>One free withdraw, then a wait</strong> <span class="hint">Not twice in a row: for the next few
+            questions after one, a buzz is yours to answer.</span></span></label>
+        <label class="select-label hidden" id="so-cooldown-row" for="so-cooldown">Questions to wait
+          <input type="number" id="so-cooldown" value="5" min="1" max="40" style="width:5em" /></label>
+      </fieldset>
+      <label class="select-label" for="so-scheme">Scoring</label>
+      <select id="so-scheme">
+        <option value="15/10/-5">15 / 10 / −5 (powers)</option>
+        <option value="20/15/10/-5">20 / 15 / 10 / −5 (superpowers)</option>
+        <option value="20/10/0">20 / 10 / 0 (no negs)</option>
+      </select>
+      <label class="toggle"><input type="checkbox" id="so-bonuses" /> Read bonuses too</label>
+      <label class="select-label" for="so-notes">Notes for the players <span class="optional">optional</span></label>
+      <textarea id="so-notes" rows="3" maxlength="2000"
+        placeholder="What kind of questions these are, what you're playtesting, anything else the room should know."></textarea>
+      <p class="hint">Every room of the shootout reads with these, and the packets below in round order, as you
+        release them. The rooms don't change them.</p>
     </section>
 
     <section class="panel teams-only">
@@ -98,7 +124,7 @@
       </div>
     </section>
 
-    <section class="panel teams-only">
+    <section class="panel">
       <h3>Round packets <span class="optional">optional</span></h3>
       <p class="hint">Upload several <code>.json</code> packets at once — each file's name becomes the round
         label. Rounds start hidden from moderators; release them from the director console. Still have
@@ -134,10 +160,10 @@
       </fieldset>
     </section>
 
-    <section class="panel">
+    <div class="form-actions">
       <button id="create-tournament" class="primary">Create tournament</button>
       <p id="msg" class="msg" role="status"></p>
-    </section>
+    </div>
   </main>
 
   <script type="module" src="/js/new-tournament.js"></script>

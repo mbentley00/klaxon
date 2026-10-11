@@ -87,6 +87,12 @@ async function init() {
     // A shootout tournament has no schedule, team roster or bracket: its rooms
     // set up their own packets, and the score is each room's leaderboard.
     document.body.classList.toggle('shootout-t', t.format?.kind === 'shootout');
+    if (t.format?.kind === 'shootout') {
+      const tab = document.querySelector('.tab[data-tab="packets"]');
+      if (tab) tab.textContent = 'Packets';
+      const head = document.querySelector('#packets-panel h3');
+      if (head) head.textContent = 'Packets';
+    }
     document.title = `${t.name || code} — Klaxon`;
     rememberVisit(t.name, t.date);
     // Merge any rooms that exist server-side but aren't in our local list
@@ -373,8 +379,11 @@ function initShareLinks() {
       for (const l of links) {
         const url = `${location.origin}/s/${l.token}`;
         const li = el('li', {});
-        const col = el('span', { className: 'pcol' });
-        col.append(el('span', { className: 'pname' }, `${KIND_LABEL[l.kind] || l.kind} · ${url}`));
+        // The link on one line of its own, cut short with an ellipsis rather
+        // than wrapped mid-token (Copy takes the whole of it).
+        const col = el('span', { className: 'pcol share-col' });
+        col.append(el('span', { className: 'pname' }, KIND_LABEL[l.kind] || l.kind));
+        col.append(el('code', { className: 'share-url', title: url }, url));
         col.append(el('span', { className: 'pjoined' }, `expires ${new Date(l.expiresAt).toLocaleString()}`));
         const copy = el('button', { className: 'tiny ghost' }, 'Copy');
         copy.onclick = async () => {

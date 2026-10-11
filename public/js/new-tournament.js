@@ -43,15 +43,33 @@ if (new URLSearchParams(location.search).get('kind') === 'shootout') {
 }
 showKind();
 
+// The withdraw rule, as the room settings it comes down to (the same four the
+// shootout's own setup offers; see shootout.withdrawSettings on the server).
+const withdrawMode = () => document.querySelector('input[name=so-withdraw]:checked').value;
+const showCooldown = () => $('#so-cooldown-row').classList.toggle('hidden', withdrawMode() !== 'rationed');
+for (const r of document.querySelectorAll('input[name=so-withdraw]')) r.addEventListener('change', showCooldown);
+showCooldown();
+function withdrawDefaults() {
+  const mode = withdrawMode();
+  if (mode === 'none') return { allowWithdraw: false, lockedAnswers: false, withdrawCooldown: 0 };
+  if (mode === 'typed') return { allowWithdraw: true, lockedAnswers: true, withdrawCooldown: 0 };
+  if (mode === 'rationed') {
+    return { allowWithdraw: true, lockedAnswers: false, withdrawCooldown: Math.max(1, Math.min(40, Number($('#so-cooldown').value) || 5)) };
+  }
+  return { allowWithdraw: true, lockedAnswers: false, withdrawCooldown: 0 };
+}
+
 // Every room of a shootout tournament is a MODAQ shootout room.
 function shootoutDefaults() {
+  const wd = withdrawDefaults();
   return {
     modaqMode: true,
     modaqLite: true,
     shootout: true,
     queueMode: true,
-    allowWithdraw: $('#so-withdraw').checked,
-    typedAnswers: $('#so-typed').checked,
+    ...wd,
+    // Committing an answer is typing it.
+    typedAnswers: $('#so-typed').checked || wd.lockedAnswers,
     shootoutCarry: $('#so-carry').checked,
     shootoutAutoAdd: $('#so-autoadd').checked,
     // A Discord evening is half conversation.
@@ -113,18 +131,7 @@ $('#create-tournament').addEventListener('click', async () => {
       }
     }
 
-    // Optional multi-packet upload: one round per file, filename → round label.
-    const packetFiles = [...($('#t-packet-files').files || [])];
-    let uploaded = 0;
-    for (const file of packetFiles) {
-      try {
-        const packet = JSON.parse(await file.text());
-        if (!Array.isArray(packet.tossups)) throw new Error('no tossups');
-        const round = file.name.replace(/\.[^.]+$/, '');
-        await api('POST', `/api/tournaments/${r.code}/packets`, { directorToken: r.directorToken, round, packet });
-        uploaded++;
-      } catch { /* skip invalid file */ }
-    }
+    const uploaded = await uploadPackets(r);
     const note = uploaded ? ` Uploaded ${uploaded} round${uploaded > 1 ? 's' : ''} (hidden until released).` : '';
     say(`Tournament ${r.code} created.${note} Opening director console…`);
     location.href = '/t/' + r.code;
@@ -134,21 +141,46 @@ $('#create-tournament').addEventListener('click', async () => {
   }
 });
 
-// A shootout tournament starts with its one room, ready to set up; the
-// director adds more rooms from the console if the evening needs them.
+// Optional multi-packet upload: one round per file, filename → round label.
+async function uploadPackets(r) {
+  let uploaded = 0;
+  for (const file of [...($('#t-packet-files').files || [])]) {
+    try {
+      const packet = JSON.parse(await file.text());
+      if (!Array.isArray(packet.tossups)) throw new Error('no tossups');
+      const round = file.name.replace(/\.[^.]+$/, '');
+      await api('POST', `/api/tournaments/${r.code}/packets`, { directorToken: r.directorToken, round, packet });
+      uploaded++;
+    } catch { /* skip invalid file */ }
+  }
+  return uploaded;
+}
+
+// A shootout tournament starts with its one room; the director adds more
+// rooms from the console if the evening needs them. Everything a room would
+// otherwise set up for itself (packets, scoring, the withdraw rule, notes) is
+// the director's, here and in the console.
 async function createShootout() {
   const r = await api('POST', '/api/tournaments', {
     name: $('#tournament-name').value.trim() || undefined,
     defaults: shootoutDefaults(),
-    format: { kind: 'shootout', hasBonuses: false },
+    format: {
+      kind: 'shootout',
+      tossupScheme: $('#so-scheme').value,
+      hasBonuses: $('#so-bonuses').checked,
+      notes: $('#so-notes').value
+    },
+    requireReaderAccounts: $('#t-require-accounts').checked,
     date: $('#t-date').value || undefined,
     listed: $('#t-listed').checked,
     sessionToken: localStorage.getItem('bz_sessionToken') || undefined
   });
   remember('directorToken:' + r.code, r.directorToken);
+  const uploaded = await uploadPackets(r);
   const room = await api('POST', '/api/rooms', { tournamentCode: r.code, name: 'Shootout' });
   remember('staffToken:' + room.code, room.readerToken);
   remember('coReaderToken:' + room.code, room.coReaderToken);
-  say(`Shootout ${r.code} created with room ${room.code}. Opening director console…`);
+  const note = uploaded ? ` Uploaded ${uploaded} packet${uploaded > 1 ? 's' : ''} (hidden until released).` : '';
+  say(`Shootout ${r.code} created with room ${room.code}.${note} Opening director console…`);
   location.href = '/t/' + r.code;
 }

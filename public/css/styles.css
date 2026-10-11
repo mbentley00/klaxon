@@ -1406,5 +1406,16 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .gate-fullname input { flex: 1 1 0; min-width: 0; }
 
 /* A shootout tournament's console: rooms, results and settings only. */
-.shootout-t .tab[data-tab="packets"], .shootout-t .tab[data-tab="stats"],
-.shootout-t .panel[data-tab="packets"], .shootout-t .panel[data-tab="stats"] { display: none !important; }
+.shootout-t .tab[data-tab="stats"], .shootout-t .panel[data-tab="stats"] { display: none !important; }
+/* Its packets tab is the packets alone: no roster, no team-game options. */
+.shootout-t #packets-panel .modaq-block:not(.round-packets-block) { display: none !important; }
+
+/* A form's submit row: the button and its status, outside any panel. */
+.form-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 8px 0 48px; }
+.form-actions .msg { margin: 0; }
+.so-withdraw-choice { margin-top: 6px; }
+
+/* Temporary share links: the URL on one line, truncated, never broken mid-token. */
+.share-col { min-width: 0; flex: 1; }
+.share-url { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  font-family: var(--mono, 'Atkinson Hyperlegible Mono', monospace); font-size: .85rem; }

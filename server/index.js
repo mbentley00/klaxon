@@ -1421,7 +1421,7 @@ app.get('/api/rooms/:code/shootout/export.zip', ah(async (req, res) => {
   const packets = {};
   for (const p of session.packets) {
     if (!games[p.id]) continue;
-    const text = await artifacts.getPacket(bucket, p.id);
+    const text = await artifacts.getPacket(bucket, p.source || p.id);
     try { if (text) packets[p.id] = JSON.parse(text); } catch { /* a damaged file is left out */ }
   }
   const { files, rounds } = shootout.buzzpointsExport({ session, packets, games, code: room.code });

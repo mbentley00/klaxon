@@ -357,7 +357,11 @@ export function normalizeSession(input, prev = null) {
     const id = String(p?.id ?? '');
     if (!PACKET_ID.test(id) || seen.has(id)) continue;
     seen.add(id);
-    packets.push({ id, name: clean(p?.name, 80) || `Packet ${packets.length + 1}`, tossups: count(p?.tossups), bonuses: count(p?.bonuses) });
+    // `source`: the tournament round it is read from, when the director
+    // supplied the packets (a shootout tournament); otherwise the packet was
+    // dropped into the room and is stored under its own id.
+    const source = clean(p?.source, 60);
+    packets.push({ id, name: clean(p?.name, 80) || `Packet ${packets.length + 1}`, tossups: count(p?.tossups), bonuses: count(p?.bonuses), ...(source ? { source } : {}) });
     if (packets.length >= MAX_PACKETS) break;
   }
   const current = typeof input?.current === 'string' ? input.current : prev?.current ?? null;

@@ -329,6 +329,8 @@ function normalizeFormat(f = {}) {
     // 'teams' (scheduled team games) or 'shootout' (Discord shootouts:
     // everyone for themselves, one or more shootout rooms).
     kind: f.kind === 'shootout' ? 'shootout' : 'teams',
+    // A shootout tournament's notes for the players, shown in every room.
+    notes: String(f.notes ?? '').replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim().slice(0, 2000),
     hasBonuses: f.hasBonuses !== false, // default: bonuses on
     tossupScheme: TOSSUP_SCHEMES.includes(f.tossupScheme) ? f.tossupScheme : '15/10/-5',
     // MASSINGER pick/ban: before each game, teams alternate protecting and
@@ -353,6 +355,7 @@ function normalizeRoomDefaults(d = {}) {
   if (typeof d.modaqLite === 'boolean') out.modaqLite = d.modaqLite;
   if (typeof d.typedAnswers === 'boolean') out.typedAnswers = d.typedAnswers;
   if (typeof d.lockedAnswers === 'boolean') out.lockedAnswers = d.lockedAnswers;
+  if (d.withdrawCooldown != null) out.withdrawCooldown = clampNum(d.withdrawCooldown, 0, 40, 0);
   if (typeof d.shootout === 'boolean') out.shootout = d.shootout;
   if (typeof d.shootoutCarry === 'boolean') out.shootoutCarry = d.shootoutCarry;
   if (typeof d.shootoutAutoAdd === 'boolean') out.shootoutAutoAdd = d.shootoutAutoAdd;
