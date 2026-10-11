@@ -185,6 +185,8 @@ details summary { cursor: pointer; color: var(--accent); margin: 12px 0; font-we
 .msg { min-height: 1.2em; font-size: .9rem; }
 .msg.good { color: var(--ok); }
 .msg.bad { color: var(--bad); }
+/* A required field left empty. */
+input.invalid { border-color: var(--bad); background: var(--bad-bg); }
 #join-code { text-transform: uppercase; letter-spacing: .15em; font-family: var(--mono); font-weight: 600; }
 
 /* The two "there's more here" links under the home card's two core actions. */

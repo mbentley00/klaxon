@@ -28,6 +28,11 @@ function readRosterPaste() {
 }
 $('#t-roster-paste').addEventListener('input', readRosterPaste);
 
+$('#tournament-name').addEventListener('input', (e) => {
+  e.target.classList.remove('invalid');
+  if (msg.textContent === 'Give the tournament a name.') say('');
+});
+
 // Default the date to today (local time).
 const today = new Date();
 $('#t-date').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -110,6 +115,13 @@ function shootoutDefaults() {
 
 $('#create-tournament').addEventListener('click', async () => {
   const btn = $('#create-tournament');
+  const nameBox = $('#tournament-name');
+  if (!nameBox.value.trim()) {
+    nameBox.classList.add('invalid');
+    nameBox.focus();
+    nameBox.scrollIntoView({ block: 'center' });
+    return say('Give the tournament a name.', false);
+  }
   btn.disabled = true;
   try {
     if (kind() === 'shootout') return await createShootout();
