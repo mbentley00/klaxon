@@ -30,10 +30,39 @@ const showMassingerOptions = () => $('#massinger-options').classList.toggle('hid
 massingerBox.addEventListener('change', showMassingerOptions);
 showMassingerOptions();
 
+// Teams or a shootout: each shows only its own settings.
+const kind = () => document.querySelector('input[name=t-kind]:checked').value;
+function showKind() {
+  const shootout = kind() === 'shootout';
+  for (const el of document.querySelectorAll('.teams-only')) el.classList.toggle('hidden', shootout);
+  for (const el of document.querySelectorAll('.shootout-only')) el.classList.toggle('hidden', !shootout);
+}
+for (const r of document.querySelectorAll('input[name=t-kind]')) r.addEventListener('change', showKind);
+if (new URLSearchParams(location.search).get('kind') === 'shootout') {
+  document.querySelector('input[name=t-kind][value=shootout]').checked = true;
+}
+showKind();
+
+// Every room of a shootout tournament is a MODAQ shootout room.
+function shootoutDefaults() {
+  return {
+    modaqMode: true,
+    modaqLite: true,
+    shootout: true,
+    queueMode: true,
+    allowWithdraw: $('#so-withdraw').checked,
+    typedAnswers: $('#so-typed').checked,
+    shootoutCarry: $('#so-carry').checked,
+    shootoutAutoAdd: $('#so-autoadd').checked,
+    playerAlerts: true
+  };
+}
+
 $('#create-tournament').addEventListener('click', async () => {
   const btn = $('#create-tournament');
   btn.disabled = true;
   try {
+    if (kind() === 'shootout') return await createShootout();
     const modaqMode = $('#t-def-modaq-mode').value; // off | lite | full
     const defaults = {
       queueMode: $('#t-def-queue').checked,
@@ -102,3 +131,22 @@ $('#create-tournament').addEventListener('click', async () => {
     btn.disabled = false;
   }
 });
+
+// A shootout tournament starts with its one room, ready to set up; the
+// director adds more rooms from the console if the evening needs them.
+async function createShootout() {
+  const r = await api('POST', '/api/tournaments', {
+    name: $('#tournament-name').value.trim() || undefined,
+    defaults: shootoutDefaults(),
+    format: { kind: 'shootout', hasBonuses: false },
+    date: $('#t-date').value || undefined,
+    listed: $('#t-listed').checked,
+    sessionToken: localStorage.getItem('bz_sessionToken') || undefined
+  });
+  remember('directorToken:' + r.code, r.directorToken);
+  const room = await api('POST', '/api/rooms', { tournamentCode: r.code, name: 'Shootout' });
+  remember('staffToken:' + room.code, room.readerToken);
+  remember('coReaderToken:' + room.code, room.coReaderToken);
+  say(`Shootout ${r.code} created with room ${room.code}. Opening director console…`);
+  location.href = '/t/' + r.code;
+}

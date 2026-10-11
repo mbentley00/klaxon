@@ -208,6 +208,11 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
       // Every connected buzzer is its own scored individual rather than part of
       // a team — a Discord shootout, where usernames are the players.
       shootout: eff.shootout === true,
+      // In a shootout, whether the score carries from packet to packet (a
+      // shootout tournament's evening) or each packet is its own game (a room).
+      shootoutCarry: eff.shootoutCarry === true,
+      // Players who join mid-packet are added to MODAQ's game as they arrive.
+      shootoutAutoAdd: eff.shootoutAutoAdd !== false,
       // Anyone may find this game from the home page and join it (see
       // listPublicRooms). Off unless the host asks for it: a room's code is
       // the only thing keeping strangers out of it.
@@ -318,6 +323,9 @@ export const TOSSUP_SCHEMES = ['15/10/-5', '20/15/10/-5', '20/10/0'];
 export const MASSINGER_CONTROLS = ['moderator', 'captain', 'anyone'];
 function normalizeFormat(f = {}) {
   return {
+    // 'teams' (scheduled team games) or 'shootout' (Discord shootouts:
+    // everyone for themselves, one or more shootout rooms).
+    kind: f.kind === 'shootout' ? 'shootout' : 'teams',
     hasBonuses: f.hasBonuses !== false, // default: bonuses on
     tossupScheme: TOSSUP_SCHEMES.includes(f.tossupScheme) ? f.tossupScheme : '15/10/-5',
     // MASSINGER pick/ban: before each game, teams alternate protecting and
@@ -343,6 +351,8 @@ function normalizeRoomDefaults(d = {}) {
   if (typeof d.typedAnswers === 'boolean') out.typedAnswers = d.typedAnswers;
   if (typeof d.lockedAnswers === 'boolean') out.lockedAnswers = d.lockedAnswers;
   if (typeof d.shootout === 'boolean') out.shootout = d.shootout;
+  if (typeof d.shootoutCarry === 'boolean') out.shootoutCarry = d.shootoutCarry;
+  if (typeof d.shootoutAutoAdd === 'boolean') out.shootoutAutoAdd = d.shootoutAutoAdd;
   if (d.answerSeconds != null) out.answerSeconds = clampNum(d.answerSeconds, 1, 60, DEFAULTS.answerSeconds);
   if (d.answerGraceSeconds != null) out.answerGraceSeconds = clampNum(d.answerGraceSeconds, 0, 10, DEFAULTS.answerGraceSeconds);
   return out;
@@ -439,6 +449,8 @@ export function nextGame(room, by = null) {
   room.archive = null;
   room.buzzLog = [];
   room.gameNumber = (room.gameNumber || 1) + 1;
+  // A shootout room's leaderboard is this game's, not the evening's.
+  if (room.settings.shootout) shootout.reset(room);
   pushLog(room, { type: 'next_game', game: room.gameNumber, removed: removed.length, by });
   persistRooms(true);
   return { removed, gameNumber: room.gameNumber };
@@ -1367,6 +1379,8 @@ export function setOptions(room, opts = {}) {
   if (typeof opts.typedAnswers === 'boolean') room.settings.typedAnswers = opts.typedAnswers;
   if (typeof opts.lockedAnswers === 'boolean') room.settings.lockedAnswers = opts.lockedAnswers;
   if (typeof opts.listed === 'boolean') room.settings.listed = opts.listed;
+  if (typeof opts.shootoutCarry === 'boolean') room.settings.shootoutCarry = opts.shootoutCarry;
+  if (typeof opts.shootoutAutoAdd === 'boolean') room.settings.shootoutAutoAdd = opts.shootoutAutoAdd;
   if (typeof opts.shootout === 'boolean') {
     room.settings.shootout = opts.shootout;
     if (opts.shootout) room.settings.requireTeam = false;

@@ -26,8 +26,15 @@
   <main class="stage">
     <section class="panel">
       <h3>Create a tournament</h3>
-      <p class="hint">A tournament links rooms together, holds a schedule, and (with MODAQ mode)
-        collects rosters, packets, live stats, and errata.</p>
+      <fieldset class="create-format">
+        <legend>What kind?</legend>
+        <label class="toggle"><input type="radio" name="t-kind" value="teams" checked />
+          <span><strong>Teams</strong> <span class="hint">Scheduled games between teams, in as many rooms as you need.
+            Collects rosters, packets, live stats and errata.</span></span></label>
+        <label class="toggle"><input type="radio" name="t-kind" value="shootout" />
+          <span><strong>Shootout</strong> <span class="hint">Optimized for Discord: everyone for themselves, a buzz queue,
+            typed answers and a chat. Starts with one room; add more from the console.</span></span></label>
+      </fieldset>
       <label class="select-label" for="tournament-name">Tournament name</label>
       <input id="tournament-name" placeholder="e.g. Fall Invitational" />
       <label class="select-label" for="t-date">Date</label>
@@ -38,7 +45,18 @@
         Klaxon — nothing is published to any other site.</p>
     </section>
 
-    <section class="panel">
+    <section class="panel shootout-only hidden">
+      <h3>Shootout</h3>
+      <label class="toggle"><input type="checkbox" id="so-carry" checked /> Keep scores across packets
+        (the leaderboard is the whole evening, not one packet)</label>
+      <label class="toggle"><input type="checkbox" id="so-autoadd" checked /> Add players to MODAQ as they buzz in
+        (someone who joins mid-packet plays from the next question)</label>
+      <label class="toggle"><input type="checkbox" id="so-typed" checked /> Players type their answers</label>
+      <label class="toggle"><input type="checkbox" id="so-withdraw" checked /> Players can withdraw a buzz</label>
+      <p class="hint">The packets, notes for the players and the scoring are set when you open the room.</p>
+    </section>
+
+    <section class="panel teams-only">
       <h3>Scoring format</h3>
       <label class="select-label" for="fmt-scheme">Tossup point scheme</label>
       <select id="fmt-scheme">
@@ -80,7 +98,7 @@
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel teams-only">
       <h3>Round packets <span class="optional">optional</span></h3>
       <p class="hint">Upload several <code>.json</code> packets at once — each file's name becomes the round
         label. Rounds start hidden from moderators; release them from the director console. Still have
@@ -90,13 +108,13 @@
         director-approved account to access these packets</label>
     </section>
 
-    <section class="panel">
+    <section class="panel teams-only">
       <h3>Roster <span class="optional">optional</span></h3>
       <p class="hint">A registration QBJ (teams + players). MODAQ rooms default to it.</p>
       <input type="file" id="t-roster-file" accept=".qbj,.json,application/json" />
     </section>
 
-    <section class="panel">
+    <section class="panel teams-only">
       <h3>Default room settings</h3>
       <fieldset class="opt-defaults">
         <legend>Every room created in this tournament starts with</legend>

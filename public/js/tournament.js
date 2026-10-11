@@ -84,6 +84,9 @@ async function init() {
   try {
     const t = await api('GET', `/api/tournaments/${code}`);
     $('#t-name').textContent = t.name || '';
+    // A shootout tournament has no schedule, team roster or bracket: its rooms
+    // set up their own packets, and the score is each room's leaderboard.
+    document.body.classList.toggle('shootout-t', t.format?.kind === 'shootout');
     document.title = `${t.name || code} — Klaxon`;
     rememberVisit(t.name, t.date);
     // Merge any rooms that exist server-side but aren't in our local list

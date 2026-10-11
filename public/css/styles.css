@@ -1404,3 +1404,7 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 /* A shootout's join: first and last name side by side, each half the row. */
 .gate-fullname { display: flex; gap: 8px; }
 .gate-fullname input { flex: 1 1 0; min-width: 0; }
+
+/* A shootout tournament's console: rooms, results and settings only. */
+.shootout-t .tab[data-tab="packets"], .shootout-t .tab[data-tab="stats"],
+.shootout-t .panel[data-tab="packets"], .shootout-t .panel[data-tab="stats"] { display: none !important; }
