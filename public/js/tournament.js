@@ -92,6 +92,12 @@ async function init() {
       if (tab) tab.textContent = 'Packets';
       const head = document.querySelector('#packets-panel h3');
       if (head) head.textContent = 'Packets';
+      // A shootout starts with its room and rarely needs another: the room
+      // (its links) comes first, adding rooms after it.
+      const list = $('#rooms-list')?.closest('section');
+      const add = $('#add-rooms')?.closest('section');
+      if (list && add) add.before(list);
+      $('#rooms-empty').textContent = 'No rooms yet — add one below.';
     }
     document.title = `${t.name || code} — Klaxon`;
     rememberVisit(t.name, t.date);
