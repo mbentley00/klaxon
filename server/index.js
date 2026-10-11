@@ -1873,6 +1873,8 @@ app.get('/tp/:code', (_req, res) => res.sendFile(path.join(publicDir, 'player-to
 
 // room.html serves any /r/CODE deep link
 app.get('/r/:code', (_req, res) => res.sendFile(path.join(publicDir, 'room.html')));
+// A room's settings on their own page (the MODAQ reader's "Room options").
+app.get('/r/:code/options', (_req, res) => res.sendFile(path.join(publicDir, 'room-options.html')));
 
 // klaxonbuzz.com/CODE — the shortest possible link to hand a player. A room
 // code (4 letters) lands on the room's join page; a tournament code (5) on the

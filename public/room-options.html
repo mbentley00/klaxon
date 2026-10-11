@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <script src="/js/theme.js"></script>
+  <link rel="icon" href="/favicon.ico?v=2" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=2" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=2" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+  <title>Room options — Klaxon</title>
+  <link rel="preload" href="/fonts/bricolage-800.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/css/fonts.css" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="room">
+  <header class="bar">
+    <nav class="bar-left crumbs" aria-label="Breadcrumb">
+      <a class="crumb crumb-mark" href="/">Klaxon</a>
+      <span class="crumb-sep">›</span>
+      <span class="crumb room-code" id="ro-code"></span>
+      <span class="crumb" aria-current="page">Room options</span>
+    </nav>
+    <div class="bar-right">
+      <span id="ro-conn" class="pill">connecting…</span>
+    </div>
+  </header>
+
+  <main class="stage create-page">
+    <p><a id="ro-back" href="#">← Back to the reader</a></p>
+    <p id="ro-denied" class="warn-box hidden">These are the room's settings, for its reader. Open them from the
+      reader page (Buzzer options), or use the room's reader link.</p>
+
+    <form id="ro-form" class="panel create-form hidden" onsubmit="return false">
+      <h3>Room options</h3>
+      <p class="hint">They apply at once, to everyone in the room. Starting, finishing and moving on to the next
+        game are on the reader page.</p>
+
+      <fieldset class="opt-defaults">
+        <legend>Buzzing</legend>
+        <label class="toggle"><input type="checkbox" id="ro-queue" /> Keep a buzz queue</label>
+        <label class="toggle hidden" id="ro-withdraw-row"><input type="checkbox" id="ro-withdraw" /> Players can withdraw a buzz</label>
+        <label class="select-label hidden" id="ro-cooldown-row" for="ro-cooldown">WD options
+          <select id="ro-cooldown">
+            <option value="0">Withdrawing is always free</option>
+            <option value="3">Free again after 3 questions</option>
+            <option value="5">Free again after 5 questions</option>
+            <option value="10">Free again after 10 questions</option>
+          </select>
+        </label>
+        <label class="toggle hidden" id="ro-autoclear-row"><input type="checkbox" id="ro-autoclear" /> Clear the buzzer 5 s after a buzz</label>
+        <label class="toggle"><input type="checkbox" id="ro-alerts" /> Players can tell you the buzzer is stuck</label>
+      </fieldset>
+
+      <fieldset class="opt-defaults" id="ro-players">
+        <legend>Players</legend>
+        <label class="toggle"><input type="checkbox" id="ro-team" /> Players must give a team name to join</label>
+      </fieldset>
+
+      <fieldset class="opt-defaults">
+        <legend>Answers</legend>
+        <label class="toggle"><input type="checkbox" id="ro-typed" /> Players type their answers</label>
+        <label class="toggle hidden" id="ro-locked-row"><input type="checkbox" id="ro-locked" /> Everyone in the queue commits an answer</label>
+        <div class="sound-row hidden" id="ro-timing">
+          <label class="select-label" for="ro-secs">Seconds to answer</label>
+          <input type="number" id="ro-secs" min="1" max="60" style="width:5em" />
+          <label class="select-label" for="ro-grace">No-delete grace (s)</label>
+          <input type="number" id="ro-grace" min="0" max="10" style="width:5em" />
+        </div>
+      </fieldset>
+
+      <fieldset class="opt-defaults">
+        <legend>The room</legend>
+        <label class="toggle"><input type="checkbox" id="ro-chat" /> Give the room a chat</label>
+        <label class="toggle"><input type="checkbox" id="ro-listed" /> List this game on the Klaxon home page</label>
+      </fieldset>
+      <p id="ro-msg" class="msg" role="status"></p>
+    </form>
+
+    <section id="ro-links" class="panel hidden">
+      <h3>Invite links</h3>
+      <label class="share-row">
+        <span>Players</span>
+        <span class="copy-field">
+          <input id="ro-player-link" readonly />
+          <button type="button" class="copy-btn tiny" data-target="ro-player-link">Copy</button>
+        </span>
+      </label>
+      <label class="share-row hidden" id="ro-coreader-row">
+        <span>Co-reader</span>
+        <span class="copy-field">
+          <input id="ro-coreader-link" readonly />
+          <button type="button" class="copy-btn tiny" data-target="ro-coreader-link">Copy</button>
+        </span>
+      </label>
+      <p class="hint"><a id="ro-log" href="#" download>Download the activity log</a> — buzz times, who cleared
+        what, withdrawals and chat, for working out what happened.</p>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/js/room-options.js"></script>
+</body>
+</html>
