@@ -61,7 +61,12 @@ function showKind() {
   const shootout = kind() === 'shootout';
   for (const el of document.querySelectorAll('.teams-only')) el.classList.toggle('hidden', shootout);
   for (const el of document.querySelectorAll('.shootout-only')) el.classList.toggle('hidden', !shootout);
+  // A team tournament's packets are for approved readers by default; a
+  // shootout is usually its director reading alone. Until someone sets it.
+  const acct = $('#t-require-accounts');
+  if (!acct.dataset.touched) acct.checked = !shootout;
 }
+$('#t-require-accounts').addEventListener('change', (e) => { e.target.dataset.touched = '1'; });
 for (const r of document.querySelectorAll('input[name=t-kind]')) r.addEventListener('change', showKind);
 if (new URLSearchParams(location.search).get('kind') === 'shootout') {
   document.querySelector('input[name=t-kind][value=shootout]').checked = true;
