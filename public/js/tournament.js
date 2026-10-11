@@ -912,20 +912,27 @@ $('#roster-save').onclick = async () => {
 };
 
 // YellowFruit: File > QBJ Schema > Import Teams and Rosters Only.
+// And the whole tournament as a YellowFruit file (.yft: teams, phases, rounds
+// and every final game), which File > Open takes as it is.
 $('#roster-yf').onclick = async () => {
   try {
     const { teams } = await loadStoredRoster();
-    if (!teams.length) return msay('No roster yet: add one with Edit roster first.', false);
     const name = $('#t-name').textContent;
-    const file = toYellowFruitQbj(name, teams);
-    const a = el('a', {
-      href: URL.createObjectURL(new Blob([file], { type: 'application/json' })),
-      download: `${(name || code).replace(/[\\/:*?"<>|]+/g, '').trim() || code} roster.qbj`
-    });
-    document.body.append(a);
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-    msay('Downloaded. In YellowFruit: File > QBJ Schema > Import Teams and Rosters Only.');
+    const stem = (name || code).replace(/[\\/:*?"<>|]+/g, '').trim() || code;
+    const save = (href, download) => {
+      const a = el('a', { href, download });
+      document.body.append(a);
+      a.click();
+      setTimeout(() => { if (href.startsWith('blob:')) URL.revokeObjectURL(href); a.remove(); }, 1000);
+    };
+    save(`/api/tournaments/${code}/yellowfruit.yft?directorToken=${qt(directorToken)}`, `${stem}.yft`);
+    if (teams.length) {
+      // A second download right after the first: some browsers ask once to allow it.
+      setTimeout(() => save(URL.createObjectURL(new Blob([toYellowFruitQbj(name, teams)], { type: 'application/json' })), `${stem} roster.qbj`), 400);
+    }
+    msay(teams.length
+      ? 'Downloaded the tournament (.yft, open it with File > Open) and the roster (.qbj, for File > QBJ Schema > Import Teams and Rosters Only).'
+      : 'Downloaded the tournament (.yft): open it in YellowFruit with File > Open. (No roster yet, so no roster file.)');
   } catch (e) { msay('Could not build the YellowFruit file: ' + e.message, false); }
 };
 

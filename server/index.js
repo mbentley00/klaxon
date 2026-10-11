@@ -23,6 +23,7 @@ import { startWatchdog } from './watchdog.js';
 import { buildZip } from './zip.js';
 import * as accounts from './accounts.js';
 import { parseYellowFruit, planImport } from './yfimport.js';
+import { buildYft } from './yft.js';
 import { parseQbjRoster } from './qbjroster.js';
 import { summarizeQbj, summarizeModaq } from './gamesummary.js';
 
@@ -1126,6 +1127,32 @@ app.get('/api/tournaments/:code/stats', ah(async (req, res) => {
   );
   res.setHeader('Content-Disposition', `attachment; filename="${t.code}-stats.json"`);
   res.type('application/json').send(body);
+}));
+
+// The whole tournament as a YellowFruit file (.yft) that File > Open takes:
+// teams and players, phases and rounds, every final game (see yft.js).
+app.get('/api/tournaments/:code/yellowfruit.yft', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const bucket = { kind: 't', code: t.code };
+  const [matches, structure, roster] = await Promise.all([
+    artifacts.readAllExports(bucket),
+    artifacts.getStructure(bucket).catch(() => null),
+    artifacts.getRoster(bucket).catch(() => null)
+  ]);
+  // The stored roster is a registration QBJ: registrations at the top, or a
+  // { version, objects } file of them.
+  let reg = null;
+  try {
+    const parsed = roster ? JSON.parse(roster) : null;
+    const objs = Array.isArray(parsed?.objects) ? parsed.objects : [parsed];
+    const registrations = objs.flatMap((o) => (o?.type === 'Registration' ? [o] : o?.registrations || []));
+    reg = { registrations };
+  } catch { reg = null; }
+  const file = buildYft(t, computeStats(matches, structure), reg);
+  const name = String(t.name || t.code).replace(/[\\/:*?"<>|]+/g, '').trim() || t.code;
+  res.setHeader('Content-Disposition', `attachment; filename="${name}.yft"`);
+  res.type('application/json').send(JSON.stringify(file, null, 2));
 }));
 
 // --- MODAQ artifacts: room-scoped (the moderator's reader page) -------------
