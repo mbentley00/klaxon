@@ -1291,7 +1291,7 @@ async function refreshErrata() {
       const col = el('span', { className: 'pcol' });
       col.append(el('span', { className: 'pname' },
         `${e.questionType === 'bonus' ? 'Bonus' : 'Tossup'} ${e.questionNumber} — Round ${e.round} · Room ${e.room}`));
-      if (e.text) col.append(el('span', { className: 'pjoined' }, e.text));
+      if (e.text) col.append(el('span', { className: 'pjoined', style: 'white-space: pre-line' }, e.text));
       li.append(col);
       return li;
     };
