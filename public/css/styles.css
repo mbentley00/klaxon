@@ -154,6 +154,13 @@ input:focus, select:focus { outline: 3px solid var(--accent); outline-offset: 0;
 /* Textareas keep the browser's own border, but take the page's colours rather
    than the browser's (which would be a grey slab in the dark theme). */
 textarea { background-color: var(--surface); color: var(--ink); }
+/* A textarea that is a form field like the inputs around it (full width, same
+   border and type), e.g. a shootout tournament's notes for the players. */
+textarea.field {
+  font-family: var(--sans); font-size: 1rem; width: 100%; box-sizing: border-box; resize: vertical;
+  padding: .6em .7em; border: 2px solid var(--line); border-radius: var(--radius);
+}
+textarea.field:focus { outline: 3px solid var(--accent); outline-offset: 0; }
 kbd { font-family: var(--mono); font-size: .85em; background: var(--surface); border: 1px solid var(--line); border-radius: 3px; padding: 0 .35em; }
 a { color: var(--accent); text-underline-offset: 2px; }
 .hidden { display: none !important; }
