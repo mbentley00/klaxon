@@ -84,7 +84,8 @@ $('#create-form').addEventListener('submit', async (e) => {
       playerAlerts: $('#opt-player-alerts').checked,
       typedAnswers: typed.checked,
       lockedAnswers: typed.checked && q && $('#opt-locked').checked,
-      listed: $('#opt-listed').checked
+      listed: $('#opt-listed').checked,
+      chat: $('#opt-chat').checked
     };
     const r = await api('POST', '/api/rooms', { name: $('#room-name').value.trim() || undefined, settings });
     // The reader token authorizes us as reader; the co-reader token is kept so

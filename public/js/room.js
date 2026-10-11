@@ -1430,7 +1430,8 @@ let chatSeen = '';
 
 function renderChat(s) {
   const view = $('#chat-view');
-  const on = !!s.shootout;
+  // The room's own setting (older servers: a shootout always had one).
+  const on = s.chatOn ?? !!s.shootout;
   view.classList.toggle('hidden', !on);
   // Beside the buzzer, not under it: a player watching the chat should not
   // have to scroll away from the thing they are about to press.
@@ -1780,7 +1781,7 @@ $('#chat-box')?.addEventListener('keydown', (e) => {
 // state broadcast, and doesn't cause one.
 socket.on('chat_message', (m) => {
   const s = state.snapshot;
-  if (!s?.shootout) return;
+  if (!s || !(s.chatOn ?? s.shootout)) return;
   s.chat = [...(s.chat || []).filter((x) => x.id !== m.id), m].slice(-120);
   chatSeen = '';
   renderChat(s);

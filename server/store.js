@@ -213,6 +213,9 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
       shootoutCarry: eff.shootoutCarry === true,
       // Players who join mid-packet are added to MODAQ's game as they arrive.
       shootoutAutoAdd: eff.shootoutAutoAdd !== false,
+      // The room has a chat. Its own choice now (off unless asked for); a
+      // caller that doesn't say gets what a shootout always had.
+      chat: typeof eff.chat === 'boolean' ? eff.chat : eff.shootout === true,
       // Anyone may find this game from the home page and join it (see
       // listPublicRooms). Off unless the host asks for it: a room's code is
       // the only thing keeping strangers out of it.
@@ -353,6 +356,7 @@ function normalizeRoomDefaults(d = {}) {
   if (typeof d.shootout === 'boolean') out.shootout = d.shootout;
   if (typeof d.shootoutCarry === 'boolean') out.shootoutCarry = d.shootoutCarry;
   if (typeof d.shootoutAutoAdd === 'boolean') out.shootoutAutoAdd = d.shootoutAutoAdd;
+  if (typeof d.chat === 'boolean') out.chat = d.chat;
   if (d.answerSeconds != null) out.answerSeconds = clampNum(d.answerSeconds, 1, 60, DEFAULTS.answerSeconds);
   if (d.answerGraceSeconds != null) out.answerGraceSeconds = clampNum(d.answerGraceSeconds, 0, 10, DEFAULTS.answerGraceSeconds);
   return out;
@@ -1381,6 +1385,7 @@ export function setOptions(room, opts = {}) {
   if (typeof opts.listed === 'boolean') room.settings.listed = opts.listed;
   if (typeof opts.shootoutCarry === 'boolean') room.settings.shootoutCarry = opts.shootoutCarry;
   if (typeof opts.shootoutAutoAdd === 'boolean') room.settings.shootoutAutoAdd = opts.shootoutAutoAdd;
+  if (typeof opts.chat === 'boolean') room.settings.chat = opts.chat;
   if (typeof opts.shootout === 'boolean') {
     room.settings.shootout = opts.shootout;
     if (opts.shootout) room.settings.requireTeam = false;
@@ -1577,7 +1582,8 @@ export function publicState(room) {
       : null,
     // The tail of it: the whole log would ride in every broadcast, and a buzz
     // causes one. The moderator's export reads the rest (see chatTranscript).
-    chat: room.settings.shootout ? shootout.messages(room) : [],
+    chat: chatOn(room) ? shootout.messages(room) : [],
+    chatOn: chatOn(room),
     // The typed-answer window, when the room uses one (answers.js). Nobody's
     // committed answer is in here — a page knows its own because it typed it.
     answers: (room.settings.typedAnswers || room.settings.lockedAnswers)
@@ -1719,6 +1725,12 @@ export function resetShootout(room) {
     [...room.members.values()].filter((m) => m.role === 'player').map((m) => displayName(m)));
 }
 
+// Does this room have a chat? Its own setting; a room from before there was
+// one has it exactly when it is a shootout.
+export function chatOn(room) {
+  return typeof room.settings.chat === 'boolean' ? room.settings.chat : room.settings.shootout === true;
+}
+
 export function chatSay(room, actor, text) {
   // Everyone who could be addressed: players by the name they are known by,
   // and staff, so the room can get the reader's attention.
@@ -1752,7 +1764,7 @@ export function chatSay(room, actor, text) {
  * its first question with nothing scored is a new game, and starts over.
  */
 export function cycleDivider(room, match = null) {
-  if (!room.settings.shootout) return null;
+  if (!chatOn(room)) return null;
   const n = Number(room.scoresheet?.current);
   if (!Number.isFinite(n) || n < 1) return null;
   const packet = room.scoresheetPacket ?? null;
@@ -2057,7 +2069,7 @@ export function recentActivity(room, limit = RECENT_LIMIT) {
 // An answer the room heard, written into the chat so everyone sees it — not
 // only the players who happened to be in the buzz queue.
 export function chatAnnounce(room, kind, payload) {
-  if (!room.settings.shootout) return { error: 'disabled' };
+  if (!chatOn(room)) return { error: 'disabled' };
   const res = shootout.announce(room, kind, payload);
   if (res.ok) persistRooms();
   return res;

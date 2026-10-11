@@ -3050,7 +3050,7 @@ io.on('connection', (socket) => {
   socket.on('chat_typing', (payload) => {
     const ctx = sock.get(socket.id);
     const room = ctx && store.getRoom(ctx.roomCode);
-    if (!room || !ctx.playerId || !room.settings.shootout) return;
+    if (!room || !ctx.playerId || !store.chatOn(room)) return;
     const name = store.memberName(room, ctx.playerId) || 'someone';
     const typing = payload?.typing !== false;
     // Everyone but the person typing — your own page knows what you are doing.
@@ -3063,7 +3063,7 @@ io.on('connection', (socket) => {
     const ctx = sock.get(socket.id);
     const room = ctx && store.getRoom(ctx.roomCode);
     if (!room || !ctx.playerId) return ack?.({ error: 'no_room' });
-    if (!room.settings.shootout) return ack?.({ error: 'disabled' });
+    if (!store.chatOn(room)) return ack?.({ error: 'disabled' });
     const member = room.members.get(ctx.playerId);
     const actor = {
       id: ctx.playerId,
@@ -3158,7 +3158,7 @@ io.on('connection', (socket) => {
   // the answer panel is only ever shown to the players in the buzz queue, so
   // without this most of the room never learns what was said.
   function announceAnswer(room, playerId, text) {
-    if (!room.settings.shootout) return;
+    if (!store.chatOn(room)) return;
     const who = playerId ? store.memberName(room, playerId) : '';
     const res = store.chatAnnounce(room, 'answer', { name: who || 'Someone', text });
     if (res.ok) {

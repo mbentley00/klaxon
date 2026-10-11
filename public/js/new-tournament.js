@@ -54,6 +54,8 @@ function shootoutDefaults() {
     typedAnswers: $('#so-typed').checked,
     shootoutCarry: $('#so-carry').checked,
     shootoutAutoAdd: $('#so-autoadd').checked,
+    // A Discord evening is half conversation.
+    chat: true,
     playerAlerts: true
   };
 }
