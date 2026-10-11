@@ -681,7 +681,7 @@ function initModaq() {
       } catch { /* skip bad file */ }
     }
     const kind = tiebreaker ? ' tiebreaker' : '';
-    msay(ok ? `Uploaded ${ok}${kind} round${ok > 1 ? 's' : ''}${document.body.classList.contains('shootout-t') ? ', ready for the rooms' : ' (hidden until you make them visible)'}.` : 'No valid packets found.', ok > 0);
+    msay(ok ? `Uploaded ${ok}${kind} round${ok > 1 ? 's' : ''}${document.body.classList.contains('shootout-t') && loadRooms().length <= 1 ? ', ready for the room' : ' (hidden until you make them visible)'}.` : 'No valid packets found.', ok > 0);
     $('#packet-files').value = '';
     $('#packet-tiebreaker').checked = false;
     refreshPackets();

@@ -827,9 +827,10 @@ app.post('/api/tournaments/:code/packets', ah(async (req, res) => {
   if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
   const packet = typeof req.body?.packet === 'string' ? req.body.packet : JSON.stringify(req.body?.packet);
   // A team tournament's rounds start hidden until the director releases them.
-  // A shootout's packets are the evening's reading list, read in order by the
-  // director's own rooms, so they are usable as soon as they're uploaded.
-  const visible = typeof req.body?.visible === 'boolean' ? req.body.visible : t.format?.kind === 'shootout';
+  // So do a shootout's when it has several rooms (whoever runs it decides what
+  // each reads when); with one room, the director is its reader, and an upload
+  // is ready for it at once (see packetsAlwaysOpen).
+  const visible = typeof req.body?.visible === 'boolean' ? req.body.visible : packetsAlwaysOpen(t);
   const tiebreaker = typeof req.body?.tiebreaker === 'boolean' ? req.body.tiebreaker : false;
   const saved = await artifacts.savePacket({ kind: 't', code: t.code }, req.body?.round, packet, { visible, tiebreaker });
   res.json(saved);
@@ -1212,12 +1213,21 @@ app.put('/api/rooms/:code/buzzer-roster', ah(async (req, res) => {
 }));
 
 // Moderators only see rounds the director has made visible.
+// A shootout tournament with a single room is one person's evening: they
+// upload the packets and read them, so there is nothing to release - every
+// packet is the room's, whatever its release flag says. With more rooms the
+// director releases them, as in a team tournament.
+function packetsAlwaysOpen(t) {
+  return t?.format?.kind === 'shootout' && (t.roomCodes?.size ?? 0) <= 1;
+}
+
 app.get('/api/rooms/:code/packets', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
   if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
   const list = await artifacts.listPackets(store.bucketForRoom(room));
-  res.json({ packets: list.filter((p) => p.visible).map((p) => p.round) });
+  const open = packetsAlwaysOpen(room.tournamentCode ? store.getTournament(room.tournamentCode) : null);
+  res.json({ packets: list.filter((p) => p.visible || open).map((p) => p.round) });
 }));
 
 app.post('/api/rooms/:code/packets', ah(async (req, res) => {
@@ -1235,7 +1245,8 @@ app.get('/api/rooms/:code/packets/:round', ah(async (req, res) => {
   if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
   const bucket = store.bucketForRoom(room);
   // Enforce visibility: a moderator can only fetch a round the director released.
-  if (!(await artifacts.isPacketVisible(bucket, req.params.round))) return res.status(404).json({ error: 'not_found' });
+  const open = packetsAlwaysOpen(room.tournamentCode ? store.getTournament(room.tournamentCode) : null);
+  if (!open && !(await artifacts.isPacketVisible(bucket, req.params.round))) return res.status(404).json({ error: 'not_found' });
   const text = await artifacts.getPacket(bucket, req.params.round);
   if (text == null) return res.status(404).json({ error: 'not_found' });
   res.type('application/json').send(text);
