@@ -315,6 +315,9 @@ function initBuzzPoints(t) {
 function initPlaytest(t) {
   const cb = $('#playtest');
   if (!cb) return;
+  // Playtest mode is hidden for now; a tournament already running one keeps
+  // its controls and feedback.
+  $('#playtest-block')?.classList.toggle('hidden', t.playtest !== true);
   const note = $('#playtest-note');
   const list = $('#playtest-list');
 
