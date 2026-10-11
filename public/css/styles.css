@@ -284,6 +284,7 @@ a.room-code:hover { text-decoration: underline; }
 .phase.buzzed { color: var(--accent); }
 .phase.mine { color: var(--ok); }
 .phase.locked { color: var(--accent); }
+.phase.bonus { color: var(--ink); }
 /* A team game's "Jane Doe (Alpha) has the buzz": the line to read, so it is big. */
 .phase.big { font-size: 1.35rem; letter-spacing: .03em; text-transform: none; line-height: 1.25; }
 

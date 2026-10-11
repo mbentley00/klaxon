@@ -2491,6 +2491,8 @@ io.on('connection', (socket) => {
     if (store.waitingForNextGame(room, room.members.get(ctx.playerId))) return;
     // Their team has had its answer to this tossup (see store.teamLockedOut).
     if (store.teamLockedOut(room, room.members.get(ctx.playerId))) return;
+    // A bonus is being read: nobody buzzes until the next tossup.
+    if (store.bonusTeam(room)) return;
 
     const arrival = Date.now();
     // Client tells us, in *server time*, when it thinks the press happened
@@ -2613,6 +2615,10 @@ io.on('connection', (socket) => {
         // A wrong answer: the team is done with this tossup.
         if (payload?.judged === true && payload?.wrong === true && room.queue[0]) {
           store.lockTeamNow(room, room.queue[0].playerId);
+        }
+        // A get: the team's bonus comes next, and the buzzer stays shut for it.
+        if (payload?.judged === true && payload?.wrong !== true && room.queue[0]) {
+          store.bonusNow(room, room.queue[0].playerId);
         }
         // Named in the log, because "who cleared that?" is the whole question
         // when two people have buzzer control (see store.activityLog).
@@ -2875,7 +2881,7 @@ io.on('connection', (socket) => {
           room.packetLists = { categories: payload.categories, answers: payload.answers, questions: payload.questions };
         }
         const lists = room.packetLists || {};
-        store.teamLockoutFromGame(room, payload.qbj ?? null, payload.currentQuestion);
+        store.teamLockoutFromGame(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false);
         store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false,
           payload.protests, lists.categories, lists.answers, lists.questions,
           // Which of a shootout's packets this game is, so the score can be

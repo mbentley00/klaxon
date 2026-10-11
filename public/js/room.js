@@ -2476,7 +2476,13 @@ function renderPhase(s) {
     return;
   }
   // Said up here, not only under the buzzer: phones hide the line in the button.
-  if (!q.length && state.role === 'player' && myTeamLocked(s)) {
+  // A bonus is being read (MODAQ team games with bonuses): whose it is, and
+  // that this isn't a moment to buzz.
+  if (!q.length && s.bonusTeam) {
+    const ours = state.role === 'player' && sameTeam(memberTeam(s, state.me?.id), s.bonusTeam);
+    label.textContent = ours ? `Bonus for your team (${s.bonusTeam})` : `Bonus for ${s.bonusTeam}`;
+    label.className = 'phase big bonus';
+  } else if (!q.length && state.role === 'player' && myTeamLocked(s)) {
     label.textContent = 'Your team has answered this tossup'; label.className = 'phase locked';
   } else if (!q.length) { label.textContent = 'Ready to Buzz'; label.className = 'phase ready'; }
   else if (teamGame(s)) {
@@ -2539,7 +2545,8 @@ function renderBuzzer(s) {
     // Nothing reaches the server while the socket is down, so the buzzer says
     // so rather than taking a press that will never arrive.
     const teamDone = pos < 0 && myTeamLocked(s);
-    const canBuzz = state.connected !== false && s.phase === 'open' && pos < 0 && !teamDone;
+    const bonus = !has && !!s.bonusTeam;
+    const canBuzz = state.connected !== false && s.phase === 'open' && pos < 0 && !teamDone && !bonus;
     // "Buzzed!" is written the moment the button is pressed and cleared when
     // the moderator resets the buzzer — but withdrawing takes you out of the
     // queue without any reset, so it sat there under a buzzer that was ready
@@ -2564,12 +2571,13 @@ function renderBuzzer(s) {
     const offline = state.connected === false;
     tone = offline ? 'locked' : pos === 0 ? 'mine' : pos > 0 ? 'queued' : has ? 'locked' : canBuzz ? 'ready' : 'locked';
     setBuzzer(
-      offline ? 'OFFLINE' : pos === 0 ? "YOU'RE IN" : pos > 0 ? `#${pos + 1} IN LINE` : canBuzz ? 'BUZZ' : 'LOCKED',
+      offline ? 'OFFLINE' : pos === 0 ? "YOU'RE IN" : pos > 0 ? `#${pos + 1} IN LINE` : canBuzz ? 'BUZZ' : bonus ? 'BONUS' : 'LOCKED',
       offline ? 'reconnecting…'
         : pos === 0 ? 'you have the floor'
           : pos > 0 ? 'wait your turn'
             : canBuzz ? 'or press Space'
               : has ? `${q[0].name} buzzed`
+                : bonus ? 'no buzzing until the next tossup'
                 : teamDone ? 'your team already answered' : 'not open');
   } else {
     buzzer.disabled = true;
@@ -2578,8 +2586,9 @@ function renderBuzzer(s) {
   }
   BUZZ_TONES.forEach((t) => buzzer.classList.toggle(t, t === tone));
   // Someone else is in first: greyed out on a phone (see styles.css).
+  // A bonus being read is the same: nothing to press.
   $('#buzz-area').classList.toggle('others-buzz',
-    state.role === 'player' && has && q[0].playerId !== state.me?.id);
+    state.role === 'player' && ((has && q[0].playerId !== state.me?.id) || (!has && !!s.bonusTeam)));
   renderPip();
   renderPipButton();
 }
@@ -2801,6 +2810,9 @@ function renderQueue(s) {
   // everything below it up and down. Empty state instead, and outside queue mode
   // there's only ever one name to show.
   $('#queue-title').textContent = queueMode ? 'Buzz queue' : 'Buzzed in player';
+  // A team game without a queue: the line over the buzzer already says who
+  // buzzed, and there's only ever one. Staff keep the panel for its controls.
+  $('#queue-view').classList.toggle('hidden', teamGame(s) && !staff);
   // Only the lock-to-first case needs saying. "Buzz queue" over a list of names
   // already tells a player everything the sentence under it did; that the
   // buzzer LOCKS on the first buzz is not something the heading gives away.

@@ -1492,17 +1492,23 @@ function shootoutCurrentScores(room) {
 // buzzer queue already says who has answered.
 const teamKey = (name) => String(name ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
 
-export function teamLockoutFromGame(room, match, currentQuestion) {
+export function teamLockoutFromGame(room, match, currentQuestion, hasBonuses = true) {
   const question = Math.floor(Number(currentQuestion)) || 0;
   room.modaqQuestion = question;
+  room.modaqHasBonuses = !!match && hasBonuses;
   const teams = new Set();
   const q = Array.isArray(match?.match_questions)
     ? match.match_questions.find((x) => Number(x?.question_number) === question)
     : null;
+  let got = null;
   for (const b of Array.isArray(q?.buzzes) ? q.buzzes : []) {
     if (Number(b?.result?.value) <= 0 && b?.team?.name) teams.add(teamKey(b.team.name));
+    else if (Number(b?.result?.value) > 0 && b?.team?.name) got = label(b.team.name);
   }
   room.teamLockout = { question, teams: [...teams] };
+  // A get on the question being read means its bonus is being read now, until
+  // MODAQ moves to the next tossup.
+  room.bonusControl = got && room.modaqHasBonuses ? { question, team: got } : null;
 }
 
 // The moderator just ruled the buzz at the head of the queue wrong.
@@ -1512,6 +1518,25 @@ export function lockTeamNow(room, playerId) {
   const question = room.modaqQuestion || 0;
   if (room.teamLockout?.question !== question) room.teamLockout = { question, teams: [] };
   if (!room.teamLockout.teams.includes(team)) room.teamLockout.teams.push(team);
+}
+
+// --- the bonus --------------------------------------------------------------
+// In a MODAQ team game with bonuses, a get hands the team its bonus, and the
+// buzzer stays shut while it's read: a buzz then is never a tossup buzz. Set at
+// once on the correct ruling (as it clears the buzzer, before MODAQ's update
+// lands), and kept in step with MODAQ after that: an undo lifts it, the next
+// tossup ends it.
+export function bonusNow(room, playerId) {
+  if (room.settings.shootout || !room.settings.modaqMode || !room.modaqHasBonuses) return;
+  const m = room.members.get(playerId);
+  const team = label(m?.rosterTeam || m?.team);
+  if (team) room.bonusControl = { question: room.modaqQuestion || 0, team };
+}
+
+export function bonusTeam(room) {
+  if (room.settings.shootout || !room.settings.modaqMode || !room.bonusControl) return null;
+  if (room.bonusControl.question !== (room.modaqQuestion || 0)) return null;
+  return room.bonusControl.team;
 }
 
 export function lockedTeams(room) {
@@ -1540,6 +1565,8 @@ export function publicState(room) {
     // Teams that have already answered this tossup wrong (lower-cased names;
     // see teamLockedOut). Not a secret: the room heard the answer.
     lockedTeams: lockedTeams(room),
+    // The team whose bonus is being read (see bonusTeam), or null.
+    bonusTeam: bonusTeam(room),
     // MASSINGER pick/ban board (null outside the pick/ban phase). Fully
     // public: players watch the same board the moderator drives.
     massinger: room.massinger || null,
