@@ -132,7 +132,13 @@
 
     <section class="panel teams-only">
       <h3>Roster <span class="optional">optional</span></h3>
-      <p class="hint">A registration QBJ (teams + players). MODAQ rooms default to it.</p>
+      <p class="hint">Paste from your registration spreadsheet, or upload a registration QBJ. MODAQ rooms
+        default to it, and you can edit it later in the director console.</p>
+      <label class="roster-paste-label" for="t-roster-paste">Paste from your spreadsheet</label>
+      <textarea id="t-roster-paste" class="field" rows="3"
+        placeholder="Copy the rows, header row included (Team Name, Player 1, Player 2…), and paste here. Emails and other columns are left out."></textarea>
+      <p id="t-roster-paste-note" class="hint"></p>
+      <label class="select-label" for="t-roster-file">Or upload a QBJ</label>
       <input type="file" id="t-roster-file" accept=".qbj,.json,application/json" />
     </section>
 

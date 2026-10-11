@@ -1,7 +1,32 @@
 import { api, remember, readFileText, $ } from './util.js';
+import { parseSpreadsheet, toStoredRoster } from './roster-parse.js';
 
 const msg = $('#msg');
 const say = (t, ok = true) => { msg.textContent = t; msg.className = 'msg ' + (ok ? 'good' : 'bad'); };
+
+// A roster pasted from a registration spreadsheet: read as it's pasted, so
+// what will be saved is on screen before Create.
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+let pastedTeams = [];
+function readRosterPaste() {
+  const text = $('#t-roster-paste').value;
+  const note = $('#t-roster-paste-note');
+  if (!text.trim()) { pastedTeams = []; note.textContent = ''; return; }
+  const { teams, skipped } = parseSpreadsheet(text);
+  pastedTeams = teams;
+  if (!teams.length) {
+    note.textContent = "Couldn't find any teams there. Copy whole rows, with the header row (Team Name, Player 1, …).";
+    return;
+  }
+  const players = teams.reduce((n, t) => n + t.players.length, 0);
+  const unnamed = teams.filter((t) => t.placeholder).length;
+  const names = teams.map((t) => t.name);
+  note.textContent = `Found ${plural(teams.length, 'team')} (${plural(players, 'player')}): `
+    + (names.length > 8 ? names.slice(0, 8).join(', ') + `, and ${names.length - 8} more` : names.join(', ')) + '.'
+    + (skipped ? ` Skipped ${plural(skipped, 'row')} with no players.` : '')
+    + (unnamed ? ` ${unnamed} had no team name and got a placeholder; fix it in the director console.` : '');
+}
+$('#t-roster-paste').addEventListener('input', readRosterPaste);
 
 // Default the date to today (local time).
 const today = new Date();
@@ -120,7 +145,9 @@ $('#create-tournament').addEventListener('click', async () => {
     remember('directorToken:' + r.code, r.directorToken);
 
     // Optional roster upload (needs the code + director token we just got).
-    const rosterText = await readFileText($('#t-roster-file'));
+    // A file wins over a paste: it's the more deliberate of the two.
+    const rosterText = (await readFileText($('#t-roster-file')))
+      || (pastedTeams.length ? toStoredRoster($('#tournament-name').value, pastedTeams) : '');
     if (rosterText) {
       try {
         JSON.parse(rosterText);
