@@ -35,10 +35,6 @@ function preset() {
 // can't promise what the room won't do.
 function sync() {
   const shootout = format() === 'shootout';
-  // A shootout's scores live in MODAQ.
-  if (shootout) useModaq.checked = true;
-  useModaq.disabled = shootout;
-  $('#shootout-needs-modaq').classList.toggle('hidden', !shootout);
   $('#opt-withdraw-row').classList.toggle('hidden', !queue.checked);
   $('#opt-cooldown-row').classList.toggle('hidden', !(queue.checked && withdraw.checked));
   // MODAQ clears the buzzer when you rule on the answer.
