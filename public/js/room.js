@@ -110,6 +110,18 @@ socket.on('kicked', (info) => {
     msg.className = 'msg good';
     return;
   }
+  if (info?.reason === 'next_game') {
+    // The reader moved the room on to a new game; it starts with nobody in it,
+    // so the teams are whoever joins now. Name still filled in: one click back.
+    $('#stage').classList.add('hidden');
+    document.body.classList.remove('has-chat', 'has-sheet');
+    showGate('player');
+    $('#gate-join').textContent = 'Join the next game';
+    const msg = $('#gate-msg');
+    msg.textContent = 'That game is over. The reader is starting the next one — join again to play.';
+    msg.className = 'msg good';
+    return;
+  }
   if (info?.reason === 'ended') {
     // Not a removal: the game is simply over. Say so where they are, and leave
     // the door shut — the room takes no more players.

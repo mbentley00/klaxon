@@ -2688,6 +2688,18 @@ io.on('connection', (socket) => {
         emitState(room);
         return ack?.({ ok: true, ended });
       }
+      // A room holds one game at a time: the next one starts with nobody in
+      // it. Players see why and rejoin from the same link. A tournament room
+      // instead keeps its players across games (see waitingForNextGame).
+      case 'next_game': {
+        if (room.tournamentCode) return ack?.({ error: 'tournament_room' });
+        const by = store.memberName(room, ctx.playerId);
+        const { removed, gameNumber } = store.nextGame(room, by);
+        for (const id of removed) kickPlayer(room, id, 'next_game');
+        store.resetBuzzer(room, { by, judged: true });
+        emitState(room);
+        return ack?.({ ok: true, gameNumber });
+      }
       case 'clear_roster':
         store.clearRoster(room);
         break;

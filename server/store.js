@@ -51,6 +51,8 @@ const serializeRoom = (r) => ({
   // and — in a shootout — which packet that game is.
   scoresheet: r.scoresheet || null,
   scoresheetPacket: r.scoresheetPacket || null,
+  // Which game of the room is being read (Next game counts up).
+  gameNumber: r.gameNumber || 1,
   // Which game-archive entry the game on screen is filed under, so a restart
   // mid-game keeps filing into the same one.
   archive: r.archive || null,
@@ -415,6 +417,31 @@ export function endGame(room, ended, by = null) {
   pushLog(room, { type: ended ? 'end_game' : 'reopen_game', by });
   persistRooms(true);
   return room.ended;
+}
+
+/**
+ * The reader moves the room on to its next game (outside a tournament, a room
+ * holds one game at a time). The game just read has already been filed and its
+ * stats handed to the reader; here the room lets go of it: every player is out
+ * (they rejoin from the same link, for the new game's teams), and the roster,
+ * scoresheet and teams-playing lock built from the old game go with them.
+ * Returns the ids of the players removed, for the caller to disconnect.
+ */
+export function nextGame(room, by = null) {
+  const removed = removeAllPlayers(room);
+  room.roster = null;
+  room.rosterTeams = [];
+  room.gameTeamsSet = false;
+  room.scoresheet = null;
+  room.scoresheetPacket = null;
+  room.catGate = null;
+  // The next game is its own entry in the reader's games, with its own buzz log.
+  room.archive = null;
+  room.buzzLog = [];
+  room.gameNumber = (room.gameNumber || 1) + 1;
+  pushLog(room, { type: 'next_game', game: room.gameNumber, removed: removed.length, by });
+  persistRooms(true);
+  return { removed, gameNumber: room.gameNumber };
 }
 
 // schedule: [{ round, room, teams:[..] }] -> we keep it loose on purpose so a
@@ -1483,6 +1510,7 @@ export function publicState(room) {
     tournamentCode: room.tournamentCode,
     phase: room.phase,
     cycleNo: room.cycleNo,
+    gameNumber: room.gameNumber || 1,
     settings: room.settings,
     // Server time of the buzz the room is waiting on (null when clear) — the
     // player's "buzzer isn't clear" button counts down from it.
