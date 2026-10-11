@@ -44,32 +44,16 @@
     </section>
 
     <section>
-      <h2>Create a room</h2>
-      <form id="create-room" class="stack">
-        <div class="row">
-          <button type="submit" class="primary">Create room &amp; read</button>
-          <button type="button" id="create-modaq" class="modaq">Create room &amp; read (with MODAQ)</button>
-          <button type="button" id="create-shootout" class="shootout">Create room &amp; read (Discord shootout)</button>
-        </div>
-        <!-- Shown once per MODAQ create while logged out, until dismissed for good. -->
-        <div id="no-account-warn" class="warn-box hidden" role="alertdialog" aria-labelledby="naw-title">
-          <p id="naw-title"><strong>You're not logged in.</strong></p>
-          <p>Your MODAQ games are still saved, but without an account you can only get them back
-            from this browser (under <a href="/games">Your games</a>). Log in and they follow you to any device.</p>
-          <div class="row">
-            <a class="btnlink" id="naw-login" href="/account?return=/">Log in first</a>
-            <button type="button" id="naw-continue" class="primary">Continue without an account</button>
-          </div>
-          <label class="check"><input type="checkbox" id="naw-never" /> Don't warn me again</label>
-        </div>
-        <p class="hint">A shootout is everyone for themselves: whoever joins is a competitor of their own,
-          the score runs across every packet you read, and there's a chat.</p>
-      </form>
+      <h2>Read a game</h2>
+      <div class="row">
+        <a class="btnlink primary" href="/create">Create room</a>
+        <a class="btnlink" href="/tournament-mode">Tournaments</a>
+      </div>
+      <p class="hint">A room is one game at a time, with MODAQ or without, teams or a shootout.
+        Several rounds, or a Discord shootout night, is a tournament.</p>
     </section>
 
     <nav class="modes" aria-label="Other modes">
-      <a class="btnlink" href="/advanced">Advanced mode</a>
-      <a class="btnlink" href="/tournament-mode">Tournament mode</a>
       <a class="btnlink" href="/games">Your games</a>
       <a class="btnlink" id="account-link" href="/account?return=/">Log in</a>
     </nav>

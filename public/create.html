@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <script src="/js/theme.js"></script>
+  <link rel="icon" href="/favicon.ico?v=2" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=2" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=2" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+  <title>Create a room — Klaxon</title>
+  <link rel="preload" href="/fonts/bricolage-800.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/css/fonts.css" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="room">
+  <header class="bar">
+    <nav class="bar-left crumbs" aria-label="Breadcrumb">
+      <a class="crumb crumb-mark" href="/">Klaxon</a>
+      <span class="crumb-sep">›</span>
+      <span class="crumb" aria-current="page">Create a room</span>
+    </nav>
+  </header>
+
+  <main class="stage create-page">
+    <form id="create-form" class="panel create-form">
+      <h3>Create a room</h3>
+      <p class="hint">A room is for one game at a time. Doing several rounds?
+        <a href="/tournament-mode">Use Tournaments</a> instead.</p>
+
+      <label class="toggle create-modaq"><input type="checkbox" id="use-modaq" checked />
+        <span><strong>Use MODAQ</strong>
+          <span class="hint">Read the packet inside Klaxon. Scores, buzz points and stats are kept as you go.
+            Without it, read from another window such as a PDF or Google Doc.</span></span></label>
+
+      <fieldset class="create-format">
+        <legend>Who's playing?</legend>
+        <label class="toggle"><input type="radio" name="format" value="teams" checked />
+          <span><strong>Teams</strong> <span class="hint">Standard quizbowl of two teams.</span></span></label>
+        <label class="toggle"><input type="radio" name="format" value="shootout" />
+          <span><strong>Shootout</strong> <span class="hint">Everyone for themselves, with a buzz queue and a chat.</span></span></label>
+        <p class="hint hidden" id="shootout-needs-modaq">A shootout keeps everyone's score in MODAQ, so it requires MODAQ.</p>
+      </fieldset>
+
+      <div id="no-account-warn" class="warn-box hidden" role="note">
+        <p><strong>You're not logged in.</strong> Your MODAQ games are still saved, but only in this browser
+          (under <a href="/games">Your games</a>). <a href="/account?return=/create">Log in</a> and they follow you to any device.</p>
+      </div>
+
+      <details class="create-more">
+        <summary>Game options</summary>
+        <label class="select-label" for="room-name">Room name <span class="optional">optional</span></label>
+        <input id="room-name" placeholder="e.g. Friday practice" maxlength="60" />
+        <fieldset class="opt-defaults">
+          <legend>Buzzing</legend>
+          <label class="toggle"><input type="checkbox" id="opt-queue" /> Keep a buzz queue</label>
+          <label class="toggle hidden" id="opt-withdraw-row"><input type="checkbox" id="opt-withdraw" /> Players can withdraw a buzz</label>
+          <label class="select-label hidden" id="opt-cooldown-row" for="opt-cooldown">WD options
+            <select id="opt-cooldown">
+              <option value="0">Withdrawing is always free</option>
+              <option value="3">Free again after 3 questions</option>
+              <option value="5">Free again after 5 questions</option>
+              <option value="10">Free again after 10 questions</option>
+            </select>
+          </label>
+          <label class="toggle" id="opt-autoclear-row"><input type="checkbox" id="opt-autoclear" /> Clear the buzzer 5 s after a buzz</label>
+          <label class="toggle"><input type="checkbox" id="opt-player-alerts" checked /> Players can tell you the buzzer is stuck</label>
+        </fieldset>
+        <fieldset class="opt-defaults" id="players-group">
+          <legend>Players</legend>
+          <label class="toggle"><input type="checkbox" id="opt-require-team" checked /> Players must give a team name to join</label>
+        </fieldset>
+        <fieldset class="opt-defaults">
+          <legend>Answers</legend>
+          <label class="toggle"><input type="checkbox" id="opt-typed" /> Players type their answers</label>
+          <label class="toggle hidden" id="opt-locked-row"><input type="checkbox" id="opt-locked" /> Everyone in the queue commits an answer</label>
+        </fieldset>
+        <fieldset class="opt-defaults">
+          <legend>Finding the game</legend>
+          <label class="toggle"><input type="checkbox" id="opt-listed" /> List this game on the Klaxon home page</label>
+        </fieldset>
+      </details>
+
+      <div class="row">
+        <button type="submit" id="create-room" class="primary">Create room &amp; read</button>
+      </div>
+      <p id="msg" class="msg" role="status"></p>
+    </form>
+  </main>
+
+  <script type="module" src="/js/create.js"></script>
+</body>
+</html>

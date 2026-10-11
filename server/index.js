@@ -1690,9 +1690,10 @@ app.get('/about', (_req, res) => res.sendFile(path.join(publicDir, 'about.html')
 
 // feedback / bug report form
 app.get('/feedback', (_req, res) => res.sendFile(path.join(publicDir, 'feedback.html')));
-
-// advanced room creation (the options the home page leaves out)
-app.get('/advanced', (_req, res) => res.sendFile(path.join(publicDir, 'advanced.html')));
+// Creating a room: MODAQ or not, teams or a shootout, and the game options.
+app.get('/create', (_req, res) => res.sendFile(path.join(publicDir, 'create.html')));
+// Advanced mode became the create page.
+app.get('/advanced', (_req, res) => res.redirect(301, '/create'));
 
 // tournament hub: create / open / browse, plus reader accounts
 app.get('/tournament-mode', (_req, res) => res.sendFile(path.join(publicDir, 'tournament-mode.html')));
