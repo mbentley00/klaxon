@@ -28,8 +28,18 @@ function preset() {
   typed.checked = shootout;
   $('#opt-require-team').checked = !shootout;
   $('#opt-locked').checked = false;
+  chatDefault();
   sync();
 }
+
+// A shootout read with MODAQ gets a chat: it's the Discord setup, where the
+// room talks in text. Off otherwise. Once the reader sets it, it stays theirs.
+const chat = $('#opt-chat');
+chat.addEventListener('change', () => { chat.dataset.touched = '1'; });
+function chatDefault() {
+  if (!chat.dataset.touched) chat.checked = format() === 'shootout' && useModaq.checked;
+}
+useModaq.addEventListener('change', chatDefault);
 
 // Show only the options that mean something for the choices made, so the form
 // can't promise what the room won't do.
