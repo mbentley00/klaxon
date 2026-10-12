@@ -492,16 +492,29 @@ export async function listGames(roomCode) {
 // per-change sync) overwrites the same file, so the tournament ends up with one
 // current QBJ per match instead of hundreds of timestamped duplicates. The file
 // mtime records when it was last synced.
-export async function saveExport(bucket, { room, round, qbj, inProgress = false, currentQuestion, at }) {
+export async function saveExport(bucket, { room, roomName, round, qbj, inProgress = false, currentQuestion, at }) {
   const roomPart = safeName(room, 'room');
   const roundPart = safeName(round, 'r');
   const filename = `${roomPart}-${roundPart}.qbj`;
   // Stamp the round/room onto the match so the stats engine can group by round
   // regardless of the filename (round labels may contain characters we sanitize).
+  // `_room` is the friendly name the director sees
+  // `_roomCode` is the join code the server matches games by (names aren't unique or stable).
   let obj = typeof qbj === 'string' ? parseJsonOrThrow(qbj) : qbj;
   const file = path.join(bucketDir(bucket), 'exports', filename);
   if (obj && typeof obj === 'object') {
-    obj = { ...obj, _round: String(round ?? ''), _room: String(room ?? '') };
+    obj = {
+      ...obj,
+      _round: String(round ?? ''),
+      _room: String(roomName || room || ''),
+      _roomCode: String(room ?? ''),
+    };
+    // strip "Round" from QBJ's packet field since klaxon adds this to the packet name
+    // for some reason -- use round field as fallback
+    const packetName = (typeof obj.packets === 'string' && obj.packets.trim() ? obj.packets : String(round ?? ''))
+      .replace(/^Round\s+/i, '')
+      .trim();
+    if (packetName) obj.packets = packetName; else delete obj.packets;
     // A live sync marks the match in progress so stats don't count a half-played
     // game as a W/L yet. Final is sticky per matchup: once this room+round has
     // been saved as final for the same teams, post-game review edits (which sync

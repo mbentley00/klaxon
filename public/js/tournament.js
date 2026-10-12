@@ -26,6 +26,10 @@ async function directorTokenFromAccount() {
 // token: they get each room's "Read here" (joining as reader on the account).
 let moderatorView = false;
 
+// Friendly room names (e.g. "Room 1") from the tournament fetch to refer
+// to rooms as, rather than by their join code
+let roomNames = {};
+
 // Reader/co-reader tokens are only ever returned at room-creation time, so the
 // director console keeps the rooms it created (with their tokens) in local
 // storage. The server is still the source of truth for which rooms exist.
@@ -83,6 +87,7 @@ async function init() {
   if (!directorToken) $('#add-rooms')?.closest('section')?.classList.add('hidden');
   try {
     const t = await api('GET', `/api/tournaments/${code}`);
+    roomNames = t.roomNames || {};
     $('#t-name').textContent = t.name || '';
     // A shootout tournament has no schedule, team roster or bracket: its rooms
     // set up their own packets, and the score is each room's leaderboard.
@@ -1229,7 +1234,7 @@ async function refreshExports() {
     const ul = $('#exports-list');
     ul.innerHTML = '';
     // One compact row per round: the round label plus a chip per room that
-    // downloads that match's QBJ (filenames are ROOM-ROUND.qbj).
+    // downloads that match's QBJ (exported as Round_{round number}_TeamA_TeamB.qbj).
     const byRound = new Map();
     for (const x of exports) {
       const base = x.filename.replace(/\.qbj$/, '');
@@ -1250,12 +1255,14 @@ async function refreshExports() {
       const chips = el('span', { className: 'export-chips' });
       for (const { room, x } of games) {
         const url = `/api/tournaments/${code}/exports/${qt(x.filename)}?directorToken=${qt(directorToken)}`;
-        const teams = x.teams?.length ? x.teams.join(' vs ') : '';
+        const teams = x.teams?.length ? x.teams.join(' v. ') : '';
+        const teamsPart = x.teams?.length ? x.teams.map((t) => String(t)).join('_') : '';
+        const exportName = round !== '?' && teamsPart ? `Round_${round}_${teamsPart}.qbj` : x.filename;
         const game = el('span', { className: `export-game${x.removed ? ' removed' : ''}` });
         game.append(el('a', {
-          className: 'chip', href: url, download: x.filename,
-          title: `${teams ? teams + ' · ' : ''}${x.filename} · ${(x.size / 1024).toFixed(1)} KB · ${new Date(x.savedAt).toLocaleString()}`,
-        }, room));
+          className: 'chip', href: url, download: exportName,
+          title: `${exportName} · ${(x.size / 1024).toFixed(1)} KB · ${new Date(x.savedAt).toLocaleString()}`,
+        }, roomNames[room] || room));
         if (teams) game.append(el('span', { className: 'export-teams' }, teams));
         if (!x.removed) game.append(correctGameButton(x));
         game.append(removeGameButton(x, round, room, teams));

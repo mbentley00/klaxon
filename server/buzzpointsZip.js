@@ -81,8 +81,8 @@ export function tournamentBuzzpointsExport(t, rounds, matches) {
       qbj.packets = packetName;
       const teams = game.match_teams.map((mt) => underscored(mt?.team?.name)).join('_');
       const lead = paceName ? `${number}_Round_${number}` : `Round_${number}`;
-      let name = `${lead}_${underscored(game._room || 'Room')}_${teams}`;
-      for (let n = 2; used.has(name); n++) name = `${lead}_${underscored(game._room || 'Room')}-${n}_${teams}`;
+      let name = `${lead}_${teams}`;
+      for (let n = 1; used.has(name); n++) name = `${lead}_${teams}-${n}`;
       used.add(name);
       files.push({ name: `${tournament}/game_files/${name}.qbj`, data: JSON.stringify(qbj, null, 2) });
       games++;
