@@ -124,7 +124,9 @@ app.get('/api/rooms-summary', (req, res) => {
     rooms.push({
       code: room.code,
       name: room.name,
-      players: members.filter((m) => m.role === 'player' && m.connected).length
+      players: members.filter((m) => m.role === 'player' && m.connected).length,
+      // Which reader view to open it in (the home page's rooms you've created).
+      modaq: !!room.settings.modaqMode
     });
   }
   res.json({ rooms });

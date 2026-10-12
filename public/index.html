@@ -49,6 +49,12 @@
         <a class="btnlink primary" href="/create">Create room</a>
         <a class="btnlink" href="/tournament-mode">Tournaments</a>
       </div>
+      <!-- Rooms made in this browser in the last day and still open: back into
+           the reader's view of a game whose tab was closed (see landing.js). -->
+      <div id="created-section" class="hidden">
+        <h3>Rooms you've created</h3>
+        <ul id="created-list" class="recent"></ul>
+      </div>
       <p class="hint">A room is one game at a time, with MODAQ or without, teams or a shootout.
         Several rounds, or a Discord shootout night, is a tournament.</p>
     </section>

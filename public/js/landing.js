@@ -50,11 +50,11 @@ const ago = (ms) => {
   return `${Math.floor(mins / 60)} hr ago`;   // nothing older than a day is listed
 };
 
-async function showRecentRooms() {
+async function showRecentRooms(skip = new Set()) {
   let recent = [];
   try { recent = JSON.parse(recall('recentRooms') || '[]'); } catch { return; }
   const cutoff = Date.now() - RECENT_MAX_AGE_MS;
-  recent = recent.filter((r) => r?.code && Number(r.at) > cutoff);
+  recent = recent.filter((r) => r?.code && Number(r.at) > cutoff && !skip.has(r.code));
   if (!recent.length) return;
   let live = [];
   try {
@@ -77,7 +77,36 @@ async function showRecentRooms() {
   }
   if (ul.childElementCount) $('#recent-section').classList.remove('hidden');
 }
-showRecentRooms();
+// Rooms this browser created in the last day (create.js records them) that are
+// still open, each opening the reader's view: MODAQ, or the reader buzzer.
+async function showCreatedRooms() {
+  let made = [];
+  try { made = JSON.parse(recall('createdRooms') || '[]'); } catch { return []; }
+  const cutoff = Date.now() - RECENT_MAX_AGE_MS;
+  made = made.filter((r) => r?.code && Number(r.at) > cutoff && recall('staffToken:' + r.code));
+  if (!made.length) return [];
+  let live = [];
+  try {
+    live = (await api('GET', `/api/rooms-summary?codes=${made.map((x) => x.code).join(',')}`)).rooms || [];
+  } catch { return []; }
+  const byCode = new Map(live.map((r) => [r.code, r]));
+  const ul = $('#created-list');
+  ul.replaceChildren();
+  for (const { code: rc, at } of made) {
+    const room = byCode.get(rc);
+    if (!room) continue;
+    const link = el('a', { href: room.modaq ? `/modaq?room=${rc}` : `/r/${rc}?role=reader`, className: 'recent-link' });
+    link.append(el('span', { className: 'recent-code' }, rc));
+    link.append(el('span', { className: 'recent-name' }, room.name || ''));
+    link.append(el('span', { className: 'recent-meta' },
+      `${room.players} player${room.players === 1 ? '' : 's'} · created ${ago(at)}`));
+    ul.append(el('li', {}, link));
+  }
+  if (ul.childElementCount) $('#created-section').classList.remove('hidden');
+  return [...byCode.keys()];
+}
+// A room you made is listed there, not again under the rooms you've joined.
+showCreatedRooms().then((mine) => showRecentRooms(new Set(mine)));
 
 // Games their hosts put on the board — mostly Discord readings, where being
 // findable IS the point. Refreshed while the page is open, because the list is

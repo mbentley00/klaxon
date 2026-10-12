@@ -1,4 +1,4 @@
-import { api, remember, $ } from './util.js';
+import { api, remember, recall, $ } from './util.js';
 
 // Creating a room: MODAQ or not, teams or a shootout, and the options those
 // choices imply. A room is one game at a time; several rounds are a tournament.
@@ -98,6 +98,14 @@ $('#create-form').addEventListener('submit', async (e) => {
     // the room UI can build invite links.
     remember('staffToken:' + r.code, r.readerToken);
     remember('coReaderToken:' + r.code, r.coReaderToken);
+    // The home page lists the rooms made here in the last day, so a reader who
+    // closed the tab can get back to the game (see landing.js).
+    try {
+      const day = Date.now() - 24 * 60 * 60 * 1000;
+      const made = JSON.parse(recall('createdRooms') || '[]').filter((x) => x?.code && Number(x.at) > day);
+      made.unshift({ code: r.code, at: Date.now() });
+      remember('createdRooms', JSON.stringify(made.slice(0, 8)));
+    } catch { remember('createdRooms', JSON.stringify([{ code: r.code, at: Date.now() }])); }
     say(`Created room ${r.code}. Opening as reader…`);
     location.href = modaq ? `/modaq?room=${r.code}` : `/r/${r.code}?role=reader`;
   } catch (err) {
