@@ -1436,3 +1436,8 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .panel > .sound-row + .sound-row { margin-top: 10px; }
 .panel > .sound-row + button, .panel > .sound-row + .btnlink { margin-top: 10px; }
 .panel > .msg:empty { margin: 0; min-height: 0; }
+/* Straight on the page (the console's status line under its tabs): the grid
+   gap is the spacing, and an empty one takes none. */
+.stage > .tabbar { margin-bottom: 0; }
+.stage > .msg { margin: 0; }
+.stage > .msg:empty { display: none; }
