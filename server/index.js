@@ -524,6 +524,7 @@ app.patch('/api/accounts/me', (req, res) => {
   if (!account) return res.status(401).json({ error: 'not_logged_in' });
   if (req.body?.displayName !== undefined) accounts.setDisplayName(account, req.body.displayName);
   if (req.body?.prefs !== undefined) accounts.setPrefs(account, req.body.prefs);
+  if (req.body?.modaqSettings !== undefined) accounts.setModaqSettings(account, req.body.modaqSettings);
   if (req.body?.email !== undefined) {
     const r = accounts.setEmail(account, req.body.email);
     if (r.error) return res.status(400).json({ error: r.error });

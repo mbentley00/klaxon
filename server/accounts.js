@@ -147,6 +147,29 @@ export function setPrefs(account, prefs) {
   return account;
 }
 
+// A moderator's MODAQ settings (the Font dialog, read-along, how the screen
+// shows the game), so a new device reads the way the last one did. The keys are
+// MODAQ's device settings (DeviceSettings.ts); values are kept only if they are
+// a boolean, a finite number, or a short string, and null deletes one.
+const MODAQ_SETTING_KEYS = new Set([
+  'trackReaderWithMicrophone', 'showReaderPositionWhileReading', 'instantReaderHighlight', 'buzzPointWordOffset',
+  'useBuzzMenu', 'oneQuestionAtATime', 'questionFontSize', 'fontFamily', 'questionFontColor',
+  'pronunciationGuideColor', 'isScoreVertical', 'isClockHidden', 'isEventLogHidden', 'isPacketNameHidden',
+  'isCustomExportStatusHidden', 'hidePronunciationAnchors', 'noBonusHighlight', 'hideBonusOnDeadTossup'
+]);
+export function setModaqSettings(account, settings) {
+  const out = { ...(account.modaqSettings || {}) };
+  for (const [k, v] of Object.entries(settings && typeof settings === 'object' ? settings : {})) {
+    if (!MODAQ_SETTING_KEYS.has(k)) continue;
+    if (v === null) delete out[k];
+    else if (typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))) out[k] = v;
+    else if (typeof v === 'string' && v.length <= 200) out[k] = v;
+  }
+  account.modaqSettings = out;
+  saveToDisk();
+  return account;
+}
+
 export function setEmail(account, email) {
   const cleaned = cleanEmail(email);
   if (cleaned == null) return { error: 'bad_email' };
@@ -219,7 +242,8 @@ export function publicAccount(account) {
   return account
     ? {
         id: account.id, username: account.username, displayName: account.displayName || '',
-        email: account.email || '', prefs: account.prefs || {}
+        email: account.email || '', prefs: account.prefs || {},
+        modaqSettings: account.modaqSettings || {}
       }
     : null;
 }
