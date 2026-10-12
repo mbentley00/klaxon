@@ -70,22 +70,6 @@
       <p id="rooms-empty" class="hint">No rooms yet — add some above.</p>
     </section>
 
-    <!-- Player landing page (secret link, director only to fetch) -->
-    <section class="panel" id="player-page-panel" data-tab="rooms">
-      <h3>Player landing page</h3>
-      <p class="hint">One link for players with everything: the rooms and their join codes, live
-        stats, and your schedule/Discord links. It's a secret link — the tournament code alone
-        doesn't unlock it — so share it only with your teams.</p>
-      <label class="share-row">
-        <span>Player link</span>
-        <span class="copy-field">
-          <input id="player-link" readonly />
-          <button id="player-link-copy" class="copy-btn ghost tiny">Copy</button>
-          <a id="player-link-open" class="btnlink tiny" target="_blank" rel="noopener">Open</a>
-        </span>
-      </label>
-    </section>
-
     <!-- Message readers (director only) -->
     <section class="panel" id="message-panel" data-tab="rooms">
       <h3>Message readers</h3>
@@ -262,6 +246,22 @@
     </section>
 
     <!-- ============================== SETTINGS ============================== -->
+    <!-- Player landing page (secret link, director only to fetch) -->
+    <section class="panel" id="player-page-panel" data-tab="settings">
+      <h3>Player landing page</h3>
+      <p class="hint">One link for players with everything: the rooms and their join codes, live
+        stats, and your schedule/Discord links. It's a secret link — the tournament code alone
+        doesn't unlock it — so share it only with your teams.</p>
+      <label class="share-row">
+        <span>Player link</span>
+        <span class="copy-field">
+          <input id="player-link" readonly />
+          <button id="player-link-copy" class="copy-btn ghost tiny">Copy</button>
+          <a id="player-link-open" class="btnlink tiny" target="_blank" rel="noopener">Open</a>
+        </span>
+      </label>
+    </section>
+
     <!-- Player-facing links (director only to edit; players see them in rooms) -->
     <section class="panel" id="links-panel" data-tab="settings">
       <h3>Player links</h3>
