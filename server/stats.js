@@ -232,7 +232,7 @@ export function liveGameRows(liveMatches, describeRoom = () => null) {
       const name = mt?.team?.name || '?';
       return { name, total: tossupPoints + num(mt?.bonus_points) + rulingAdjustment(qbj, name) };
     });
-    const room = String(qbj._room ?? '');
+    const room = String(qbj._roomCode ?? qbj._room ?? '');
     const about = (room && describeRoom(room)) || {};
     return {
       round: String(qbj._round ?? ''),
@@ -330,7 +330,7 @@ export function protestRows(allMatches) {
 
       rows.push({
         round: String(qbj._round ?? ''),
-        room: String(qbj._room ?? ''),
+        room: String(qbj._roomCode ?? qbj._room ?? ''),
         live,
         type,
         question,

@@ -922,7 +922,7 @@ app.post('/api/tournaments/:code/exports/:filename/correct', ah(async (req, res)
   if (text == null) return res.status(404).json({ error: 'No such game.' });
   let match;
   try { match = JSON.parse(text); } catch { return res.status(409).json({ error: 'That game file is unreadable.' }); }
-  const gameRoom = String(match._room ?? '').toUpperCase();
+  const gameRoom = String(match._roomCode ?? match._room ?? '').toUpperCase();
   const gameRound = String(match._round ?? '');
   const teamsKey = (match.match_teams || []).map((mt) => String(mt?.team?.name ?? '')).sort().join('|');
   // The archive entry of this very game: same tournament, room, round and teams.
@@ -1000,7 +1000,7 @@ app.post('/api/tournaments/:code/yf-import', ah(async (req, res) => {
   let updated = 0, added = 0;
   for (const step of plan) {
     await artifacts.saveExport(bucket, {
-      room: step.room, round: step.round,
+      room: step.room, roomName: store.describeRoom(step.room)?.name || '', round: step.round,
       qbj: { ...step.match, _yfImported: true },
       inProgress: false, at: Date.now()
     });
@@ -1386,7 +1386,7 @@ app.post('/api/rooms/:code/export', ah(async (req, res) => {
 // sent twice per change).
 async function syncRoomExport(room, { round, qbj, inProgress, currentQuestion }) {
   const saved = await artifacts.saveExport(store.bucketForRoom(room), {
-    room: room.code, round, qbj, inProgress: inProgress === true,
+    room: room.code, roomName: room.name, round, qbj, inProgress: inProgress === true,
     currentQuestion: Number(currentQuestion) || undefined,
     at: Date.now()
   });
@@ -1417,12 +1417,12 @@ async function maybeAutoRelease(room, round) {
   const matches = await artifacts.readAllExports(bucket);
   const roundMatches = matches.filter((m) => String(m.qbj?._round ?? '') === round);
   if (roundMatches.length === 0 || roundMatches.some((m) => m.qbj?._inProgress === true)) return;
-  const played = new Set(roundMatches.map((m) => String(m.qbj?._room || '').toUpperCase()));
+  const played = new Set(roundMatches.map((m) => String(m.qbj?._roomCode ?? m.qbj?._room ?? '').toUpperCase()));
   let expected = t.schedule
     .filter((s) => String(s.round) === round && s.room)
     .map((s) => s.room.toUpperCase());
   if (expected.length === 0) {
-    expected = [...new Set(matches.map((m) => String(m.qbj?._room || '').toUpperCase()))].filter(Boolean);
+    expected = [...new Set(matches.map((m) => String(m.qbj?._roomCode ?? m.qbj?._room ?? '').toUpperCase()))].filter(Boolean);
   }
   if (!expected.every((rc) => played.has(rc))) return;
 
@@ -1462,7 +1462,7 @@ app.get('/api/rooms/:code/shootout/export.zip', ah(async (req, res) => {
   const games = {};
   for (const { qbj } of await artifacts.readAllExports(bucket)) {
     const id = String(qbj?._round ?? '');
-    if (ids.has(id) && String(qbj?._room ?? '').toUpperCase() === room.code) games[id] = qbj;
+    if (ids.has(id) && String(qbj?._roomCode ?? qbj?._room ?? '').toUpperCase() === room.code) games[id] = qbj;
   }
   const packets = {};
   for (const p of session.packets) {
@@ -2115,7 +2115,8 @@ function saveCorrection(room, qbj) {
     const c = room.correctionOf;
     try {
       await artifacts.saveExport({ kind: 't', code: c.tournament }, {
-        room: c.room, round: c.round, qbj: { ...qbj, _correctedAt: Date.now() }, inProgress: false, at: Date.now()
+        room: c.room, roomName: store.describeRoom(c.room)?.name || '',
+        round: c.round, qbj: { ...qbj, _correctedAt: Date.now() }, inProgress: false, at: Date.now()
       });
     } catch (e) { console.error('correction write-back failed:', e); }
   }, 1000));

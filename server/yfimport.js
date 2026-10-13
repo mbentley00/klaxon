@@ -109,7 +109,7 @@ export function planImport(yfGames, existingExports) {
       if (hit.qbj?._protestRulings && typeof hit.qbj._protestRulings === 'object') {
         match._protestRulings = hit.qbj._protestRulings;
       }
-      plan.push({ action: 'update', room: String(hit.qbj._room || 'YF'), round: g.round, match });
+      plan.push({ action: 'update', room: String(hit.qbj._roomCode || hit.qbj._room || 'YF'), round: g.round, match });
     } else {
       plan.push({ action: 'add', room: `YF${newIndex++}`, round: g.round, match: g.match });
     }
