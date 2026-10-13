@@ -319,8 +319,8 @@ export function createTournament({ name, schedule = [], defaults = {}, format = 
   return t;
 }
 
-// The three supported tossup point schemes.
-export const TOSSUP_SCHEMES = ['15/10/-5', '20/15/10/-5', '20/10/0'];
+// The four supported tossup point schemes.
+export const TOSSUP_SCHEMES = ['15/10/-5', '20/15/10/-5', '20/10/0', '10/-5'];
 
 // Who may make a MASSINGER pick (see massingerCanPick).
 export const MASSINGER_CONTROLS = ['moderator', 'captain', 'anyone'];

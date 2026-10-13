@@ -18,7 +18,7 @@
 // Rounds are numbered by the director's round order, since a label like "TB1"
 // isn't a number.
 
-const SCHEME_FORMAT = { '15/10/-5': 'powers', '20/15/10/-5': 'superpowers', '20/10/0': 'pace' };
+const SCHEME_FORMAT = { '15/10/-5': 'powers', '20/15/10/-5': 'superpowers', '20/10/0': 'pace', '10/-5': 'acf' };
 
 // Safe as a file or folder name on every OS, and left alone by the importer's
 // cleanup (it strips "copy", ".json" and "(N)", which would split a game from
