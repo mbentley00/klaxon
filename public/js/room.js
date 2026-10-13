@@ -546,10 +546,10 @@ let pipWin = null;
 const PIP_CSS = `
   :root { color-scheme: light; --bg: #f3efe6; --surface: #fffdf7; --ink: #17130d; --line: #17130d;
           --shadow-ink: #17130d; --muted: #6d6456; --accent: #4338b8; --accent-fill: #4f44c9; --on-accent: #fff;
-          --buzzer-fade: .5; --ok: #2f7d4f; --mine-fill: #2f7d4f; --warn: #9a6400; --warn-bg: #fbedd6; }
+          --buzzer-fade: .5; --soft: #ddd5c5; --line-muted: #847b6b; --ok: #2f7d4f; --mine-fill: #2f7d4f; --warn: #9a6400; --warn-bg: #fbedd6; }
   :root[data-theme="dark"] { color-scheme: dark; --bg: #1b1814; --surface: #25211b; --ink: #efe7d8;
           --line: #cfc5b3; --shadow-ink: #6f6554; --muted: #aba08d; --accent: #a99fff; --accent-fill: #5a4fd4; --on-accent: #fff;
-          --buzzer-fade: .68; --ok: #6cc893; --mine-fill: #2e7d4f; --warn: #e8b04c; --warn-bg: #3a2c12; }
+          --buzzer-fade: .68; --soft: #474036; --line-muted: #6f6656; --ok: #6cc893; --mine-fill: #2e7d4f; --warn: #e8b04c; --warn-bg: #3a2c12; }
   html, body { margin: 0; height: 100%; }
   body { font-family: system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink);
          display: flex; align-items: center; justify-content: center; }
@@ -565,12 +565,17 @@ const PIP_CSS = `
   .pip-buzz.buzzed { background: var(--accent-fill); color: var(--on-accent); }
   .pip-buzz.mine { background: var(--mine-fill); color: #fff; }
   .pip-buzz.queued { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
-  .pip-buzz.locked { background: var(--surface); color: var(--accent); border-color: var(--accent); border-width: 5px; }
+  .pip-buzz.locked { background: var(--soft); color: var(--muted); border-color: var(--line-muted); box-shadow: none; }
   .pip-buzz.mine:disabled, .pip-buzz.queued:disabled, .pip-buzz.locked:disabled { opacity: 1; }
   .pip-buzz.pip-long { font-size: clamp(.7rem, 5vw, 1.1rem); }
   .pip-buzz:not(:disabled):active { transform: translate(4px, 4px); box-shadow: 0 0 0 var(--shadow-ink); }
   .pip-buzz:disabled { opacity: var(--buzzer-fade); cursor: default; box-shadow: 3px 3px 0 var(--shadow-ink); }
   .pip-code { font-size: .7rem; letter-spacing: .12em; color: var(--muted); }
+  .pip-buzz { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+  .pip-sub { font-size: .62rem; font-weight: 500; letter-spacing: 0; text-transform: none; opacity: .75; }
+  .pip-sub:empty { display: none; }
+  body.win-blur .pip-buzz:not(:disabled) { border-style: dashed; }
+  body.win-blur .pip-sub { color: var(--warn); opacity: 1; font-weight: 600; }
 `;
 
 // Keep the floating window on the page's theme, including a switch made while
@@ -609,6 +614,8 @@ async function openPip() {
   d.addEventListener('keydown', (e) => {
     if ((e.code === 'Space' || e.key === ' ') && !e.repeat) { e.preventDefault(); buzzerAction(); }
   });
+  pipWin.addEventListener('focus', renderPipLabel);
+  pipWin.addEventListener('blur', renderPipLabel);
   pipWin.addEventListener('pagehide', () => { pipWin = null; renderPipButton(); });
   renderPip();
   renderPipButton();
@@ -625,9 +632,23 @@ function renderPip() {
   const tone = BUZZ_TONES.find((t) => buzzer.classList.contains(t)) || 'ready';
   phase.textContent = $('#phase-label').textContent;
   phase.className = 'pip-phase ' + (tone === 'mine' ? 'mine' : tone === 'ready' ? 'ready' : 'buzzed');
-  btn.textContent = $('#buzzer-label').textContent;
   btn.className = 'pip-buzz ' + tone + ($('#buzzer-label').classList.contains('bz-long') ? ' pip-long' : '');
   btn.disabled = buzzer.disabled;
+  renderPipLabel();
+}
+
+// The floating window only hears Space while it has focus, just like the page
+// (see setWindowFocus), so it says the same thing when it hasn't.
+function renderPipLabel() {
+  const d = pipWin?.document;
+  const btn = d?.getElementById('pip-buzz');
+  if (!btn) return;
+  const armed = $('#buzzer-sub').dataset.armed === '1';
+  const focused = d.hasFocus();
+  const label = Object.assign(d.createElement('span'), { className: 'pip-label', textContent: $('#buzzer-label').textContent });
+  const sub = Object.assign(d.createElement('span'), { className: 'pip-sub', textContent: armed ? (focused ? 'or press Space' : 'click here to use Space') : '' });
+  btn.replaceChildren(label, sub);
+  d.body.classList.toggle('win-blur', armed && !focused);
 }
 
 function renderPipButton() {
@@ -2585,7 +2606,7 @@ function renderBuzzer(s) {
     setBuzzer(has ? 'BUZZED' : '—', has ? `${q[0].name} buzzed` : '');
   }
   BUZZ_TONES.forEach((t) => buzzer.classList.toggle(t, t === tone));
-  // Someone else is in first: greyed out on a phone (see styles.css).
+  // Someone else is in first: greyed out (see styles.css).
   // A bonus being read is the same: nothing to press.
   $('#buzz-area').classList.toggle('others-buzz',
     state.role === 'player' && ((has && q[0].playerId !== state.me?.id) || (!has && !!s.bonusTeam)));

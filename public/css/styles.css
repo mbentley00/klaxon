@@ -410,6 +410,8 @@ body.win-blur .bz-sub { color: var(--warn); opacity: 1; font-weight: 600; }
    — not the buzzer, not the queue's own heading, not the page under it. */
 .buzz-row { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 16px; align-items: start; }
 .buzz-row > #buzz-area, .buzz-row > #queue-view { min-width: 0; }
+/* No queue on screen (a players' view of a team game): the buzzer has the row. */
+.buzz-row:has(> #queue-view.hidden) { grid-template-columns: minmax(0, 1fr); }
 /* Narrow, or with the right-hand rail already taking 320px: stack them again. */
 @media (max-width: 760px) {
   .buzz-row { grid-template-columns: 1fr; }
@@ -595,18 +597,20 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
 }
 
 /* Touch devices: ensure the smaller controls are still an easy, reliable tap. */
-/* Phones: while someone else is buzzed in first, the buzzer and what goes with
-   it go grey, so a glance says "not you". The line above it (who buzzed in)
-   and the answer box stay as they are -- they are still for reading and
+/* While someone else is buzzed in, the buzzer and what goes with it go grey,
+   on every screen, so a glance says "not you". The line above it (who buzzed
+   in) and the answer box stay as they are -- they are still for reading and
    typing. */
-@media (max-width: 760px), (pointer: coarse) {
-  #buzz-area.others-buzz #buzzer,
-  #buzz-area.others-buzz #buzz-feedback,
-  #buzz-area.others-buzz #stuck-alert,
-  #buzz-area.others-buzz #pip-open,
-  #buzz-area.others-buzz #pip-hint { filter: grayscale(1); opacity: .4; }
-  #buzz-area.others-buzz { background: var(--ghost-hover); border-radius: var(--radius); }
-}
+#buzz-area.others-buzz #buzzer,
+#buzz-area.others-buzz #buzz-feedback,
+#buzz-area.others-buzz #stuck-alert,
+#buzz-area.others-buzz #pip-open,
+#buzz-area.others-buzz #pip-hint { filter: grayscale(1); opacity: .4; }
+#buzz-area.others-buzz { background: var(--ghost-hover); border-radius: var(--radius); }
+/* ...and the buzzer itself is a flat grey disc: no ring colour, no raised
+   shadow, nothing that reads as lit. */
+#buzz-area.others-buzz #buzzer.locked:disabled { background: var(--soft); color: var(--muted);
+  border-color: var(--line-muted); border-width: 3px; box-shadow: none; }
 
 @media (pointer: coarse) {
   .bz-sub { display: none; }   /* no Space bar to press */
