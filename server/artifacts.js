@@ -667,6 +667,7 @@ export async function listExports(bucket) {
       out.push({
         filename: f, size: stat.size, savedAt: stat.mtimeMs,
         teams: qbj ? (qbj.match_teams || []).map((mt) => mt?.team?.name).filter(Boolean) : [],
+        round: qbj?._round != null ? String(qbj._round) : null,
         removed: qbj ? isRemoved(removed, f, qbj) : false
       });
     }

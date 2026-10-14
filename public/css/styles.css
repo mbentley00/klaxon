@@ -483,6 +483,10 @@ body.compact .queue-how { display: none; }
 /* Round packets: a handle to drag a row into a new place. */
 .packet-row { gap: 8px; }
 .packet-row .pname { flex: 1 1 auto; min-width: 0; }
+/* The file a round came from, after its number: "Round 3  UW Fall 3". */
+.packet-file { margin-left: .5em; color: var(--muted); font-weight: 400; }
+.packet-file::before { content: '· '; }
+.packet-row .packet-file + .muted-count::before { content: ' ·'; }
 .drag-handle {
   flex: 0 0 auto; width: auto; min-height: 0; padding: 2px 6px;
   border: 0; background: none; box-shadow: none; color: var(--muted);

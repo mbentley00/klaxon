@@ -17,7 +17,7 @@ import * as resolution from './resolution.js';
 import * as shootout from './shootout.js';
 import { renderReport, PAGES } from './yellowfruit.js';
 import { computeBuzzpoints, renderBuzzpointsCsv, renderBuzzpointsHtml } from './buzzpoints.js';
-import { tournamentBuzzpointsExport } from './buzzpointsZip.js';
+import { tournamentBuzzpointsExport, roundNumbers, gameFileName, buzzpointsGame } from './buzzpointsZip.js';
 import { sendEmail, emailEnabled, feedbackBody, FEEDBACK_TO } from './email.js';
 import { startWatchdog } from './watchdog.js';
 import { buildZip } from './zip.js';
@@ -906,8 +906,38 @@ app.get('/api/tournaments/:code/tiebreakers', ah(async (req, res) => {
 app.get('/api/tournaments/:code/exports', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
-  res.json({ exports: await artifacts.listExports({ kind: 't', code: t.code }) });
+  const bucket = { kind: 't', code: t.code };
+  const [exports, numbers] = await Promise.all([artifacts.listExports(bucket), tournamentRoundNumbers(bucket)]);
+  res.json({ exports: exports.map((x) => {
+    const number = numbers.get(String(x.round ?? '')) ?? null;
+    const downloadName = number && x.teams.length
+      ? `${gameFileName({ match_teams: x.teams.map((name) => ({ team: { name } })) }, number)}.qbj` : x.filename;
+    return { ...x, number, downloadName };
+  }) });
 }));
+
+// Round N is the round's place in the director's round order (see
+// buzzpointsZip.roundNumbers): what a game's download is named by.
+async function tournamentRoundNumbers(bucket) {
+  return roundNumbers(await artifacts.listPackets(bucket));
+}
+
+// One game's QBJ as stock MODAQ would have saved it, for buzzpoints and
+// anything else built on MODAQ's files: Round_<N>_<team>_<team>.qbj, with
+// `packets` naming the packet file the round was uploaded from. A game from
+// a round that isn't one of the tournament's packets (a YellowFruit import)
+// keeps its stored name.
+async function exportDownload(bucket, filename, text) {
+  let qbj;
+  try { qbj = JSON.parse(text); } catch { return { name: filename, text }; }
+  const round = String(qbj?._round ?? '');
+  const number = (await tournamentRoundNumbers(bucket)).get(round);
+  if (!number || !Array.isArray(qbj.match_teams)) return { name: filename, text };
+  return {
+    name: `${gameFileName(qbj, number)}.qbj`,
+    text: JSON.stringify(buzzpointsGame(qbj, round), null, 2)
+  };
+}
 
 // The director corrects a finished game: it opens in MODAQ in a private
 // correction room seeded with the game's own MODAQ copy (from the game
@@ -968,9 +998,12 @@ app.put('/api/tournaments/:code/exports/:filename/removed', ah(async (req, res) 
 app.get('/api/tournaments/:code/exports/:filename', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
-  const text = await artifacts.getExport({ kind: 't', code: t.code }, req.params.filename);
+  const bucket = { kind: 't', code: t.code };
+  const text = await artifacts.getExport(bucket, req.params.filename);
   if (text == null) return res.status(404).json({ error: 'not_found' });
-  res.type('application/json').send(text);
+  const out = await exportDownload(bucket, req.params.filename, text);
+  res.setHeader('Content-Disposition', `attachment; filename="${out.name.replace(/["\\\r\n]/g, '')}"`);
+  res.type('application/json').send(out.text);
 }));
 
 app.get('/api/tournaments/:code/errata', ah(async (req, res) => {
@@ -1621,10 +1654,14 @@ app.get('/t/:code/buzzpoints.zip', ah(async (req, res) => {
     try { packet = JSON.parse(await artifacts.getPacket(bucket, p.round)); } catch { /* a damaged packet is left out */ }
     rounds.push({ round: p.round, tiebreaker: p.tiebreaker, packet });
   }
-  const { files, games } = tournamentBuzzpointsExport(t, rounds, await artifacts.readAllExports(bucket));
-  if (games === 0) return res.status(404).send('No finished games with a packet yet.');
+  // ?games=1: just the game files, for a set that is already on the site (a
+  // mirror of someone else's set): each names its packet by the file the
+  // round was uploaded from, which is that set's own packet name.
+  const gamesOnly = req.query.games === '1';
+  const { files, games } = tournamentBuzzpointsExport(t, rounds, await artifacts.readAllExports(bucket), { gamesOnly });
+  if (games === 0) return res.status(404).send(gamesOnly ? 'No finished games yet.' : 'No finished games with a packet yet.');
   const base = (t.name || t.code).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || t.code;
-  res.setHeader('Content-Disposition', `attachment; filename="${base}_quizbowlbuzzpoints.zip"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${base}_${gamesOnly ? 'games' : 'quizbowlbuzzpoints'}.zip"`);
   res.type('application/zip').send(buildZip(files));
 }));
 

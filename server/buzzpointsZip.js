@@ -7,7 +7,7 @@
 //   data/question_sets/<set>/editions/<date>/index.json
 //   data/question_sets/<set>/editions/<date>/packet_files/Packet-01 - <round>.json
 //   data/tournaments/<tournament>/index.json
-//   data/tournaments/<tournament>/game_files/Round_1_<room>_<team>_<team>.qbj
+//   data/tournaments/<tournament>/game_files/Round_1_<team>_<team>.qbj
 //
 // The importer's rules, which every name here is shaped around:
 // - a game's ROUND is the number after the first `_` of its file name (or
@@ -36,6 +36,41 @@ function fileSafe(text, max = 60) {
 }
 
 const underscored = (text) => fileSafe(text, 40).replace(/[\s_]+/g, '-') || 'x';
+// A team's name in a game's file name, as stock MODAQ writes it (spaces kept),
+// less any `_`: the importer splits the name on them to find the round.
+const teamPart = (text) => fileSafe(text, 40).replace(/_+/g, '-') || 'x';
+
+/**
+ * Every round's number: its place in the director's round order, which is
+ * how a packet is assigned to Round N. Labels like "UW Fall 3" or "TB1"
+ * aren't numbers, and the importer needs one. Map of round label -> number.
+ */
+export function roundNumbers(rounds) {
+  return new Map(rounds.map((r, i) => [String(r.round), i + 1]));
+}
+
+/**
+ * A game's file name the way stock MODAQ names it and the importer reads it:
+ * Round_<N>_<team>_<team>, no extension. A "pace" tournament leads with the
+ * number as well (see the importer's rules above).
+ */
+export function gameFileName(qbj, number, { pace = false } = {}) {
+  const teams = (qbj?.match_teams || []).map((mt) => teamPart(mt?.team?.name)).join('_');
+  return `${pace ? `${number}_` : ''}Round_${number}_${teams}`;
+}
+
+/**
+ * A stored game as its own buzzpoints-ready QBJ: Klaxon's bookkeeping (the
+ * `_` fields) left home and `packets` naming the packet it was read on.
+ */
+export function buzzpointsGame(game, packetName) {
+  const qbj = {};
+  for (const [key, value] of Object.entries(game || {})) {
+    if (!key.startsWith('_')) qbj[key] = value;
+  }
+  if (packetName) qbj.packets = packetName;
+  return qbj;
+}
 
 /**
  * The export's files, as [{ name, data }] for zip.buildZip.
@@ -44,7 +79,7 @@ const underscored = (text) => fileSafe(text, 40).replace(/[\s_]+/g, '-') || 'x';
  * `matches` are the stored games ({ qbj }), removed ones already left out.
  * Games still in progress, and rounds with no packet or no game, are left out.
  */
-export function tournamentBuzzpointsExport(t, rounds, matches) {
+export function tournamentBuzzpointsExport(t, rounds, matches, { gamesOnly = false } = {}) {
   const setName = fileSafe(t.name, 80) || `Klaxon ${t.code}`;
   const date = /^\d{4}-\d{2}-\d{2}$/.test(t.date || '') ? t.date : new Date(t.createdAt || Date.now()).toISOString().slice(0, 10);
   const tournamentName = `${setName} (Klaxon ${t.code})`;
@@ -64,31 +99,34 @@ export function tournamentBuzzpointsExport(t, rounds, matches) {
       .map((m) => m.qbj)
       .filter((q) => q && String(q._round ?? '') === String(r.round) && q._inProgress !== true
         && Array.isArray(q.match_teams) && q.match_teams.length >= 2);
-    if (!r.packet || roundGames.length === 0) return;
+    if (roundGames.length === 0 || (!r.packet && !gamesOnly)) return;
 
-    const packetName = `Packet-${String(number).padStart(pad, '0')} - ${fileSafe(r.round) || 'Round'}`;
-    files.push({ name: `${edition}/packet_files/${packetName}.json`, data: JSON.stringify(r.packet, null, 2) });
-    packets++;
+    // Games only (for a set already on the site): `packets` is the round's own
+    // name, which is the name of the packet file it was uploaded from.
+    const packetName = gamesOnly ? String(r.round)
+      : `Packet-${String(number).padStart(pad, '0')} - ${fileSafe(r.round) || 'Round'}`;
+    if (!gamesOnly) {
+      files.push({ name: `${edition}/packet_files/${packetName}.json`, data: JSON.stringify(r.packet, null, 2) });
+      packets++;
+    }
     // Only some teams play a tiebreaker, so it would skew players' per-game stats.
     if (r.tiebreaker) excluded.push(number);
 
     const used = new Set();
     for (const game of roundGames) {
-      const qbj = {};
-      for (const [key, value] of Object.entries(game)) {
-        if (!key.startsWith('_')) qbj[key] = value;   // Klaxon's own bookkeeping stays home
-      }
-      qbj.packets = packetName;
-      const teams = game.match_teams.map((mt) => underscored(mt?.team?.name)).join('_');
-      const lead = paceName ? `${number}_Round_${number}` : `Round_${number}`;
-      let name = `${lead}_${underscored(game._room || 'Room')}_${teams}`;
-      for (let n = 2; used.has(name); n++) name = `${lead}_${underscored(game._room || 'Room')}-${n}_${teams}`;
+      const qbj = buzzpointsGame(game, packetName);
+      // The same two teams twice in a round (a replay): the room tells them apart.
+      const base = gameFileName(game, number, { pace: paceName });
+      let name = base;
+      if (used.has(name)) name = `${base}_${underscored(game._room || 'Room')}`;
+      for (let n = 2; used.has(name); n++) name = `${base}_${n}`;
       used.add(name);
-      files.push({ name: `${tournament}/game_files/${name}.qbj`, data: JSON.stringify(qbj, null, 2) });
+      files.push({ name: `${gamesOnly ? '' : `${tournament}/`}game_files/${name}.qbj`, data: JSON.stringify(qbj, null, 2) });
       games++;
     }
   });
   if (games === 0) return { files: [], games, packets };
+  if (gamesOnly) return { files, games, packets };
 
   const hasBonuses = t.format?.hasBonuses !== false;
   files.unshift(

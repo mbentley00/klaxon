@@ -25,6 +25,9 @@ async function directorTokenFromAccount() {
 // A signed-in moderator the director approved, here without the director
 // token: they get each room's "Read here" (joining as reader on the account).
 let moderatorView = false;
+// Rooms by their names ("Room 1") where the director gave them one, from the
+// tournament fetch: what the Results chips are labelled with.
+let roomNames = {};
 
 // Reader/co-reader tokens are only ever returned at room-creation time, so the
 // director console keeps the rooms it created (with their tokens) in local
@@ -83,6 +86,7 @@ async function init() {
   if (!directorToken) $('#add-rooms')?.closest('section')?.classList.add('hidden');
   try {
     const t = await api('GET', `/api/tournaments/${code}`);
+    roomNames = t.roomNames || {};
     $('#t-name').textContent = t.name || '';
     // A shootout tournament has no schedule, team roster or bracket: its rooms
     // set up their own packets, and the score is each room's leaderboard.
@@ -597,6 +601,7 @@ function initPublicStats() {
   $('#buzzpoints-open').href = `/t/${code}/buzzpoints${bq}`;
   $('#buzzpoints-csv').href = `/t/${code}/buzzpoints.csv${bq}`;
   $('#buzzpoints-zip').href = `/t/${code}/buzzpoints.zip${bq}`;
+  $('#buzzpoints-games').href = `/t/${code}/buzzpoints.zip${bq}&games=1`;
   initShareLinks();
 
   // Games in progress: which rooms are still playing, the score, where they are
@@ -986,12 +991,15 @@ async function refreshPackets() {
     const ul = $('#packets-list');
     ul.innerHTML = '';
     if (!packets.length) { ul.append(el('li', { className: 'empty' }, 'No round packets yet')); return; }
-    for (const p of packets) {
+    packets.forEach((p, i) => {
       const li = el('li', { className: 'packet-row' });
       li.dataset.round = p.round;
       if (packets.length > 1) li.append(dragHandle(li, p));
       const nameWrap = el('span', { className: 'pname' });
-      nameWrap.append(document.createTextNode(`Round ${p.round}`));
+      // Its place in this list is its round number — what the game files and
+      // buzzpoints call it — and the label is the file it came from.
+      nameWrap.append(document.createTextNode(`Round ${i + 1}`));
+      if (p.round !== String(i + 1)) nameWrap.append(el('span', { className: 'packet-file' }, p.round));
       if (p.tiebreaker) nameWrap.append(el('span', { className: 'tag-badge' }, 'TB'));
       // Rounds uploaded before the count was recorded don't have one.
       if (p.tossups > 0) {
@@ -1009,7 +1017,7 @@ async function refreshPackets() {
       if (p.tiebreaker && p.tossups !== 1) controls.append(splitButton(p));
       li.append(controls);
       ul.append(li);
-    }
+    });
   } catch { /* ignore */ }
 }
 
@@ -1106,6 +1114,8 @@ function saveOrder(ul) {
       const { packets } = await api('PUT', `/api/tournaments/${code}/packets-order`,
         { directorToken, rounds: rowOrder(ul) });
       updateReleaseNext(packets);
+      // A row's number is its place in the list, so a move renumbers them.
+      refreshPackets();
     } catch (e) {
       msay('Could not save the round order: ' + e.message, false);
       refreshPackets();
@@ -1228,8 +1238,9 @@ async function refreshExports() {
     $('#exports-empty').classList.toggle('hidden', exports.length > 0);
     const ul = $('#exports-list');
     ul.innerHTML = '';
-    // One compact row per round: the round label plus a chip per room that
-    // downloads that match's QBJ (filenames are ROOM-ROUND.qbj).
+    // One compact row per round: the round plus a chip per room that downloads
+    // that match's QBJ (stored as ROOM-ROUND.qbj; downloaded the way stock MODAQ
+    // names it, Round_N_Team_Team.qbj, N being the round's place in Packets).
     const byRound = new Map();
     for (const x of exports) {
       const base = x.filename.replace(/\.qbj$/, '');
@@ -1239,23 +1250,27 @@ async function refreshExports() {
       if (!byRound.has(round)) byRound.set(round, []);
       byRound.get(round).push({ room, x });
     }
+    const numberOf = (round) => byRound.get(round).find((g) => g.x.number)?.x.number ?? null;
     const rounds = [...byRound.keys()].sort((a, b) => {
-      const na = Number(a), nb = Number(b);
+      const na = numberOf(a) ?? Number(a), nb = numberOf(b) ?? Number(b);
       return Number.isFinite(na) && Number.isFinite(nb) ? na - nb : a.localeCompare(b);
     });
     for (const round of rounds) {
       const games = byRound.get(round).sort((a, b) => a.room.localeCompare(b.room));
       const li = el('li', {});
-      li.append(el('span', { className: 'pname' }, `Round ${round}`));
+      const number = numberOf(round);
+      const head = el('span', { className: 'pname' }, `Round ${number ?? round}`);
+      if (number && round !== String(number)) head.append(el('span', { className: 'packet-file' }, round));
+      li.append(head);
       const chips = el('span', { className: 'export-chips' });
       for (const { room, x } of games) {
         const url = `/api/tournaments/${code}/exports/${qt(x.filename)}?directorToken=${qt(directorToken)}`;
         const teams = x.teams?.length ? x.teams.join(' vs ') : '';
         const game = el('span', { className: `export-game${x.removed ? ' removed' : ''}` });
         game.append(el('a', {
-          className: 'chip', href: url, download: x.filename,
-          title: `${teams ? teams + ' · ' : ''}${x.filename} · ${(x.size / 1024).toFixed(1)} KB · ${new Date(x.savedAt).toLocaleString()}`,
-        }, room));
+          className: 'chip', href: url, download: x.downloadName || x.filename,
+          title: `${teams ? teams + ' · ' : ''}${x.downloadName || x.filename} · ${(x.size / 1024).toFixed(1)} KB · ${new Date(x.savedAt).toLocaleString()}`,
+        }, roomNames[room] || room));
         if (teams) game.append(el('span', { className: 'export-teams' }, teams));
         if (!x.removed) game.append(correctGameButton(x));
         game.append(removeGameButton(x, round, room, teams));
