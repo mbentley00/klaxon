@@ -33,6 +33,16 @@
         placeholder="What happened, or what would you like Klaxon to do? If it's a bug, the room code and what you were doing help a lot."
         required></textarea>
 
+      <!-- Shown only when a MODAQ reader tab (open, or recently closed) has
+           read-along diagnostics to give; see feedback.js. -->
+      <div id="fb-mic" class="hidden">
+        <label class="toggle"><input type="checkbox" id="fb-mic-include" /> Include microphone / read-along diagnostics</label>
+        <details class="fb-mic-details">
+          <summary>What gets sent</summary>
+          <pre id="fb-mic-text"></pre>
+        </details>
+      </div>
+
       <p class="hint" id="fb-context"></p>
       <button type="submit" class="primary" id="fb-send">Send</button>
       <p id="fb-msg" class="msg" role="status"></p>

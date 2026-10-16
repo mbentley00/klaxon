@@ -57,6 +57,7 @@ if (!role || !(staffToken || sessionToken)) {
   $('#ro-grace').onchange = (e) => set({ answerGraceSeconds: Number(e.target.value) });
   $('#ro-chat').onchange = (e) => set({ chat: e.target.checked });
   $('#ro-listed').onchange = (e) => set({ listed: e.target.checked });
+  $('#ro-evening').onchange = (e) => set({ eveningTotals: e.target.checked });
 }
 
 function render(s) {
@@ -88,6 +89,10 @@ function render(s) {
   if (document.activeElement !== $('#ro-grace')) $('#ro-grace').value = st.answerGraceSeconds ?? 2;
   $('#ro-chat').checked = s.chatOn ?? !!st.shootout;
   $('#ro-listed').checked = !!(s.listed ?? st.listed);
+  // A practice room's evening totals: MODAQ team rooms outside a tournament
+  // (a shootout's leaderboard carries on its own).
+  $('#ro-evening').checked = !!st.eveningTotals;
+  $('#ro-evening-row').classList.toggle('hidden', !st.modaqMode || !!st.shootout || !!s.tournamentCode);
 
   $('#ro-player-link').value = `${location.origin}/${code}`;
   const co = recall('coReaderToken:' + code);

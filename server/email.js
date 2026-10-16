@@ -38,14 +38,20 @@ const transport = () =>
     auth: { user: SMTP_USER, pass: SMTP_PASS }
   }));
 
-export async function sendEmail({ to, subject, html, text, replyTo }) {
+// attachments: [{ filename, content }] with text content.
+export async function sendEmail({ to, subject, html, text, replyTo, attachments }) {
+  const files = attachments?.length ? attachments : undefined;
   if (OUTBOX) {
-    fs.appendFileSync(OUTBOX, JSON.stringify({ to, subject, html, text, replyTo }) + '\n');
+    fs.appendFileSync(OUTBOX, JSON.stringify({ to, subject, html, text, replyTo, attachments: files }) + '\n');
     return true;
   }
   if (smtpConfigured()) {
     try {
-      await transport().sendMail({ from: EMAIL_FROM, to, subject, html, text, ...(replyTo ? { replyTo } : {}) });
+      await transport().sendMail({
+        from: EMAIL_FROM, to, subject, html, text,
+        ...(replyTo ? { replyTo } : {}),
+        ...(files ? { attachments: files.map((f) => ({ filename: f.filename, content: f.content, contentType: 'text/plain; charset=utf-8' })) } : {})
+      });
       return true;
     } catch (e) {
       console.warn('[email] smtp send failed:', e.message);
@@ -58,7 +64,12 @@ export async function sendEmail({ to, subject, html, text, replyTo }) {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ from: EMAIL_FROM, to, subject, html, text, ...(replyTo ? { reply_to: replyTo } : {}) })
+      body: JSON.stringify({
+        from: EMAIL_FROM, to, subject, html, text,
+        ...(replyTo ? { reply_to: replyTo } : {}),
+        // Resend takes attachment content base64-encoded
+        ...(files ? { attachments: files.map((f) => ({ filename: f.filename, content: Buffer.from(f.content, 'utf8').toString('base64') })) } : {})
+      })
     });
     if (!r.ok) {
       console.warn('[email] resend failed', r.status, await r.text().catch(() => ''));
@@ -75,10 +86,16 @@ const esc = (s) => String(s ?? '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>':
 
 // The message is user-written: escaped, with newlines preserved by the style
 // rather than by markup.
-export const feedbackBody = ({ from, kind, page, message }) =>
+// diagnosticsSummary: the read-along diagnostics' header (the full text,
+// log included, rides as an attachment).
+export const feedbackBody = ({ from, kind, page, message, diagnosticsSummary }) =>
   `<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;color:#17130d;line-height:1.5;max-width:520px">` +
   `<p><strong>${esc(from)}</strong> sent ${kind === 'bug' ? 'a bug report' : 'feedback'}` +
   `${page ? ` from <a href="${esc(page)}">${esc(page)}</a>` : ''}.</p>` +
   `<blockquote style="margin:0;padding:10px 14px;border-left:3px solid #ddd5c5;color:#333;white-space:pre-wrap">${esc(message)}</blockquote>` +
+  (diagnosticsSummary
+    ? `<p style="margin-top:18px"><strong>Read-along diagnostics</strong> (full log attached)</p>` +
+      `<pre style="font-size:12px;white-space:pre-wrap;word-break:break-word;background:#f6f3ec;padding:8px 10px">${esc(diagnosticsSummary)}</pre>`
+    : '') +
   `<hr style="border:none;border-top:1px solid #eee;margin:20px 0">` +
   `<p style="font-size:12px;color:#888">Klaxon</p></div>`;

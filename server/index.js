@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import express from 'express';
 import { Server } from 'socket.io';
 
@@ -94,6 +94,41 @@ const publicDir = path.join(__dirname, '..', 'public');
 app.get(['/modaq', '/modaq/'], (_req, res) =>
   res.sendFile(path.join(publicDir, 'modaq', 'moderator.html')));
 
+// The read-along speech model (~40 MB) is for moderators only. The moderator
+// page asks for it only when read-along falls back to local recognition, and
+// first POSTs its staff credential to /api/model-access, which answers with a
+// short-lived signed cookie scoped to /models; without that cookie the file is
+// refused, so players, crawlers and stray links never pull it. The URL stays
+// the same for everyone, so the browser's copy (vosk-browser keeps it in
+// IndexedDB by URL) survives from room to room. A deploy changes the key,
+// which is fine: the page asks again every time it loads the model.
+const MODEL_COOKIE = 'kx_models';
+const MODEL_ACCESS_MS = 12 * 60 * 60 * 1000;
+const modelKey = randomBytes(32);
+const modelSig = (exp) => createHmac('sha256', modelKey).update(String(exp)).digest('base64url');
+function modelAccessOk(req) {
+  const m = new RegExp(`(?:^|;\\s*)${MODEL_COOKIE}=(\\d+)\\.([\\w-]+)`).exec(req.headers.cookie || '');
+  if (!m || Number(m[1]) < Date.now()) return false;
+  const want = Buffer.from(modelSig(m[1])), got = Buffer.from(m[2]);
+  return want.length === got.length && timingSafeEqual(want, got);
+}
+
+app.post('/api/model-access', ah(async (req, res) => {
+  const room = store.getRoom(req.body?.code);
+  if (!room || !(await roomModOk(room, req.body?.token, req.body?.sessionToken))) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const exp = Date.now() + MODEL_ACCESS_MS;
+  const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader('Set-Cookie', `${MODEL_COOKIE}=${exp}.${modelSig(exp)}; Path=/models; Max-Age=${MODEL_ACCESS_MS / 1000}; ` +
+    `HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`);
+  res.json({ ok: true });
+}));
+
+app.use('/models', (req, res, next) => (modelAccessOk(req) ? next() : res.status(403).end()),
+  // Never changes under its name; private, as it's only served with the cookie.
+  express.static(path.join(publicDir, 'models'), { maxAge: '30d', immutable: true,
+    setHeaders: (r) => r.setHeader('Cache-Control', 'private, max-age=2592000, immutable') }));
 app.use(express.static(publicDir));
 
 // --- REST: create rooms/tournaments (the "really easy to create" path) -----
@@ -268,6 +303,7 @@ app.post('/api/tournaments/:code/members/director', ah(async (req, res) => {
 // Mailed straight through; nothing is stored. Rate-limited per IP so the form
 // can't be used to send mail in bulk.
 const FEEDBACK_MAX = 4000;
+const FEEDBACK_DIAGNOSTICS_MAX = 100000;
 const FEEDBACK_WINDOW_MS = 10 * 60 * 1000;
 const FEEDBACK_PER_WINDOW = 5;
 const recentFeedback = new Map();   // ip -> [timestamps]
@@ -304,15 +340,20 @@ app.post('/api/feedback', ah(async (req, res) => {
 
   const kind = req.body?.kind === 'bug' ? 'bug' : 'feedback';
   const page = String(req.body?.page ?? '').trim().slice(0, 300);
+  // Read-along microphone diagnostics the reporter chose to attach (see
+  // public/js/feedback.js): settings and status up top, then the log.
+  const diagnostics = String(req.body?.diagnostics ?? '').slice(0, FEEDBACK_DIAGNOSTICS_MAX);
+  const diagnosticsSummary = diagnostics.split(/\n(?:Log[ :(])/)[0].trim();
   if (feedbackThrottled(callerIp(req))) return res.status(429).json({ error: "That's a lot of messages at once — try again in a few minutes." });
 
   if (!emailEnabled()) return res.status(503).json({ error: "This form isn't set up to send mail yet." });
   const sent = await sendEmail({
     to: FEEDBACK_TO,
     subject: kind === 'bug' ? `Klaxon bug report from ${replyTo}` : `Klaxon feedback from ${replyTo}`,
-    html: feedbackBody({ from: replyTo, kind, page, message }),
-    text: `From: ${replyTo}\nPage: ${page || '-'}\n\n${message}`,
-    replyTo
+    html: feedbackBody({ from: replyTo, kind, page, message, diagnosticsSummary }),
+    text: `From: ${replyTo}\nPage: ${page || '-'}\n\n${message}${diagnostics ? '\n\n--- read-along diagnostics attached ---' : ''}`,
+    replyTo,
+    attachments: diagnostics ? [{ filename: 'read-along-diagnostics.txt', content: diagnostics }] : undefined
   });
   if (!sent) return res.status(502).json({ error: "Couldn't send that just now." });
   res.json({ ok: true });
@@ -2786,11 +2827,19 @@ io.on('connection', (socket) => {
       case 'next_game': {
         if (room.tournamentCode) return ack?.({ error: 'tournament_room' });
         const by = store.memberName(room, ctx.playerId);
-        const { removed, gameNumber } = store.nextGame(room, by);
+        // keepPlayers: the practice evening's next packet, same people (see
+        // store.nextGame). The moderator page asks, keeping them by default.
+        const { removed, gameNumber } = store.nextGame(room, by, { keepPlayers: payload.keepPlayers === true });
         for (const id of removed) kickPlayer(room, id, 'next_game');
         store.resetBuzzer(room, { by, judged: true });
         emitState(room);
         return ack?.({ ok: true, gameNumber });
+      }
+      case 'reset_evening': {
+        if (room.tournamentCode) return ack?.({ error: 'tournament_room' });
+        store.resetEvening(room, store.memberName(room, ctx.playerId));
+        emitState(room);
+        return ack?.({ ok: true });
       }
       case 'clear_roster':
         store.clearRoster(room);
@@ -3192,6 +3241,17 @@ io.on('connection', (socket) => {
     try { store.refreshShootoutRoster(room); } catch { /* best-effort */ }
     emitState(room);
     ack?.({ ok: true });
+  });
+
+  // A player moves to another team from their own page (see store.setOwnTeam).
+  socket.on('set_my_team', (payload, ack) => {
+    const ctx = sock.get(socket.id);
+    const room = ctx && store.getRoom(ctx.roomCode);
+    if (!room || !ctx.playerId) return ack?.({ error: 'no_room' });
+    const result = store.setOwnTeam(room, ctx.playerId, payload?.team);
+    if (result.error) return ack?.(result);
+    emitState(room);
+    ack?.(result);
   });
 
   // --- playtest feedback (see playtest.js) -------------------------------

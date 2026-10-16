@@ -738,6 +738,9 @@ function applyState(s) {
   renderSession(s);
   renderShootout(s);
   renderChat(s);
+  renderMyTeam(s);
+  renderNextPacket(s);
+  renderEvening(s);
   announceBuzz(s);
   announceRuling(s);
   if (roomInfo) {
@@ -822,8 +825,117 @@ function syncRail() {
   const rail = $('#side-rail');
   if (!rail) return;
   const filled = !$('#scoresheet-view').classList.contains('hidden')
-    || !$('#chat-view').classList.contains('hidden');
+    || !$('#chat-view').classList.contains('hidden')
+    || !$('#evening-view').classList.contains('hidden');
   rail.classList.toggle('hidden', !filled || document.body.classList.contains('compact'));
+}
+
+// ---- Practice evening: your team, the next packet, tonight's totals ----
+// A room outside a tournament is often the same people reading packet after
+// packet. The reader keeps them in the room from one packet to the next (see
+// store.nextGame), so players need to see that they're still in, which team
+// they're on, and to be able to swap sides themselves.
+const teamSwitchAllowed = (s) =>
+  state.role === 'player' && !s.tournamentCode && !s.settings?.shootout && !s.settings?.rosterJoin;
+
+function renderMyTeam(s) {
+  const line = $('#me-line');
+  const me = (s.members || []).find((m) => m.id === state.me?.id);
+  const show = !!me && teamSwitchAllowed(s);
+  line.classList.toggle('hidden', !show);
+  if (!show) return;
+  // What a reconnect sends back (see the 'connect' handler): the server's
+  // view, so a rejoin never undoes a switch or the name the game knew them by.
+  state.me.name = me.name;
+  state.me.team = me.team;
+  // ...and what a page reload sends (see maybeAutoJoin).
+  if (me.team && recall('team') !== me.team) remember('team', me.team);
+  const team = me.effectiveTeam || '';
+  $('#me-team').textContent = me.pendingTeam
+    ? `On ${team} · moving to ${me.pendingTeam} next packet`
+    : team ? `You're on ${team}` : 'No team yet';
+  // Suggest the teams already in the room, so a switch doesn't make a new
+  // team out of a typo.
+  const teams = [...new Set((s.members || [])
+    .filter((m) => m.role === 'player' && m.effectiveTeam)
+    .map((m) => m.effectiveTeam))].sort();
+  const list = $('#me-team-list');
+  const key = teams.join('\n');
+  if (list.dataset.key !== key) {
+    list.replaceChildren(...teams.map((t) => el('option', { value: t })));
+    list.dataset.key = key;
+  }
+}
+
+$('#me-switch')?.addEventListener('click', () => {
+  $('#me-switch').classList.add('hidden');
+  $('#me-team-form').classList.remove('hidden');
+  const me = state.snapshot?.members?.find((m) => m.id === state.me?.id);
+  $('#me-team-input').value = me?.pendingTeam || me?.effectiveTeam || '';
+  $('#me-team-input').focus();
+  $('#me-team-input').select();
+});
+const closeTeamForm = () => {
+  $('#me-team-form').classList.add('hidden');
+  $('#me-switch').classList.remove('hidden');
+};
+$('#me-team-cancel')?.addEventListener('click', closeTeamForm);
+$('#me-team-form')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const team = $('#me-team-input').value.trim();
+  socket.emit('set_my_team', { team }, (resp) => {
+    const msg = $('#me-team-msg');
+    if (!resp?.ok) {
+      msg.textContent = resp?.error === 'team_required' ? 'This room needs a team name.' : "Couldn't change your team.";
+      return;
+    }
+    remember('team', team);
+    closeTeamForm();
+    msg.textContent = resp.pending
+      ? "You're in this game for your old team; you'll play for the new one from the next packet."
+      : '';
+  });
+});
+
+// The packet number the page last saw, to notice the reader moving on.
+let seenGameNumber = null;
+let nextBannerTimer = null;
+function renderNextPacket(s) {
+  const n = Number(s.gameNumber) || 1;
+  const before = seenGameNumber;
+  seenGameNumber = n;
+  if (before == null || n <= before || !state.me || state.role !== 'player' || s.settings?.shootout) return;
+  const me = (s.members || []).find((m) => m.id === state.me.id);
+  if (!me) return;
+  const banner = $('#next-banner');
+  banner.textContent = `Packet ${n} is starting — you're still in` + (me.effectiveTeam ? `, on ${me.effectiveTeam}.` : '.');
+  banner.classList.remove('hidden');
+  clearTimeout(nextBannerTimer);
+  nextBannerTimer = setTimeout(() => banner.classList.add('hidden'), 15000);
+}
+
+function renderEvening(s) {
+  const view = $('#evening-view');
+  const ev = s.evening;
+  const on = !!ev && ev.players?.length > 0;
+  view.classList.toggle('hidden', !on);
+  syncRail();
+  if (!on) return;
+  $('#evening-games').textContent = ev.games
+    .map((g) => `Packet ${g.n}${g.live ? ' (now)' : ''}: ` + g.teams.map((t) => `${t.name} ${t.score}`).join(' – '))
+    .join(' · ');
+  const me = (s.members || []).find((m) => m.id === state.me?.id);
+  const myName = String(me?.displayName || me?.name || '').toLowerCase().trim();
+  const head = el('tr', {}, ...['Player', 'Team', 'GP', 'P', '10', 'N', 'Pts'].map((h) => el('th', {}, h)));
+  const rows = ev.players.map((p) => {
+    const tr = el('tr', {},
+      el('td', {}, p.name), el('td', {}, p.teams.join(', ')),
+      el('td', {}, String(p.games)), el('td', {}, String(p.powers)), el('td', {}, String(p.tens)),
+      el('td', {}, String(p.negs)), el('td', {}, String(p.points)));
+    if (myName && p.name.toLowerCase().trim() === myName) tr.className = 'ev-me';
+    return tr;
+  });
+  $('#evening-table').replaceChildren(el('thead', {}, head), el('tbody', {}, ...rows));
 }
 
 // ---- Live scoresheet (read-only) ----

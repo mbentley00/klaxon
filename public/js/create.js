@@ -52,6 +52,8 @@ function sync() {
   // A competitor in a shootout is their own team.
   $('#players-group').classList.toggle('hidden', shootout);
   $('#opt-locked-row').classList.toggle('hidden', !(typed.checked && queue.checked));
+  // Evening totals come from MODAQ's scoresheet; a shootout carries its own.
+  $('#opt-evening-set').classList.toggle('hidden', shootout || !useModaq.checked);
   $('#no-account-warn').classList.toggle('hidden', !useModaq.checked || signedIn);
 }
 
@@ -91,7 +93,9 @@ $('#create-form').addEventListener('submit', async (e) => {
       typedAnswers: typed.checked,
       lockedAnswers: typed.checked && q && $('#opt-locked').checked,
       listed: $('#opt-listed').checked,
-      chat: $('#opt-chat').checked
+      chat: $('#opt-chat').checked,
+      // A shootout's leaderboard is its own evening total (shootoutCarry).
+      eveningTotals: modaq && !shootout && $('#opt-evening').checked
     };
     const r = await api('POST', '/api/rooms', { name: $('#room-name').value.trim() || undefined, settings });
     // The reader token authorizes us as reader; the co-reader token is kept so

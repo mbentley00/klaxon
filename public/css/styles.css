@@ -1449,3 +1449,27 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .stage > .tabbar { margin-bottom: 0; }
 .stage > .msg { margin: 0; }
 .stage > .msg:empty { display: none; }
+
+/* Read-along diagnostics preview on the feedback form */
+.fb-mic-details summary { font-size: .85rem; margin: 4px 0; }
+.fb-mic-details pre { max-height: 240px; overflow: auto; font-size: .75rem; white-space: pre-wrap; word-break: break-word; background: rgba(127,127,127,.12); padding: 8px 10px; border-radius: 6px; margin: 0; }
+
+/* Next packet, same players: a short note at the top of the stage. */
+.next-banner {
+  margin: 10px 0; padding: 8px 12px; text-align: center; font-weight: 600;
+  border: 2px solid var(--line); border-radius: var(--radius);
+  background: var(--ok-bg); color: var(--ok-deep);
+}
+/* Your team, under the buzzer. */
+.me-line { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; font-size: .9rem; }
+.me-line .hint { flex-basis: 100%; text-align: center; margin: 0; }
+.me-team-form { display: flex; gap: 6px; align-items: center; }
+.me-team-form input { width: 12em; padding: 4px 8px; }
+/* Tonight's totals in the side rail. */
+.evening { min-width: 0; margin-bottom: 14px; }
+.evening h3 { margin: 0 0 4px; }
+.evening .hint { margin: 0 0 6px; overflow-wrap: anywhere; }
+.evening-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+.evening-table th, .evening-table td { padding: 4px 6px; border-bottom: 1px solid var(--ss-line, var(--line)); text-align: left; overflow-wrap: anywhere; }
+.evening-table th:nth-child(n+3), .evening-table td:nth-child(n+3) { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.evening-table tr.ev-me td { font-weight: 700; }

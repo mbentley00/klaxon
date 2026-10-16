@@ -79,6 +79,10 @@ const serializeRoom = (r) => ({
   shootout: r.shootout || null,
   // ...and what the host set up for it: packets, notes, withdraw rule.
   shootoutSession: r.shootoutSession || null,
+  // The games already read tonight, for the evening's totals (see
+  // recordEveningGame).
+  evening: r.evening || null,
+  eveningSheet: r.eveningSheet || null,
   chat: r.chat || []
 });
 
@@ -213,6 +217,9 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
       shootoutCarry: eff.shootoutCarry === true,
       // Players who join mid-packet are added to MODAQ's game as they arrive.
       shootoutAutoAdd: eff.shootoutAutoAdd !== false,
+      // A practice evening: players see a running total across the packets
+      // read in this room (see eveningSummary). Off unless asked for.
+      eveningTotals: eff.eveningTotals === true,
       // The room has a chat. Its own choice now (off unless asked for); a
       // caller that doesn't say gets what a shootout always had.
       chat: typeof eff.chat === 'boolean' ? eff.chat : eff.shootout === true,
@@ -439,13 +446,34 @@ export function endGame(room, ended, by = null) {
 /**
  * The reader moves the room on to its next game (outside a tournament, a room
  * holds one game at a time). The game just read has already been filed and its
- * stats handed to the reader; here the room lets go of it: every player is out
- * (they rejoin from the same link, for the new game's teams), and the roster,
- * scoresheet and teams-playing lock built from the old game go with them.
- * Returns the ids of the players removed, for the caller to disconnect.
+ * stats handed to the reader; here the room lets go of it: the roster,
+ * scoresheet and teams-playing lock built from the old game go.
+ *
+ * keepPlayers is the practice evening — the same people reading packet after
+ * packet. Everyone stays, each on the team they ended the game on (or the one
+ * they asked to switch to), so the next packet's teams fill themselves in.
+ * Without it the room clears: every player is out and rejoins from the same
+ * link, for a new group's teams. Returns the ids of the players removed, for
+ * the caller to disconnect.
  */
-export function nextGame(room, by = null) {
-  const removed = removeAllPlayers(room);
+export function nextGame(room, by = null, { keepPlayers = false } = {}) {
+  recordEveningGame(room);
+  const removed = keepPlayers ? [] : removeAllPlayers(room);
+  if (keepPlayers) {
+    for (const m of room.members.values()) {
+      if (m.role !== 'player') continue;
+      // The name MODAQ knew them by, so the next game (and the evening's
+      // totals) lines them up with the same player (see displayName).
+      if (m.rosterPlayer) m.knownAs = m.rosterPlayer;
+      m.team = m.pendingTeam || effectiveTeam(m) || null;
+      m.pendingTeam = null;
+      m.assignedTeam = null;
+      m.rosterTeam = null;
+      m.rosterPlayer = null;
+      m.lastRosterTeam = null;
+    }
+    room.queue = [];
+  }
   room.roster = null;
   room.rosterTeams = [];
   room.gameTeamsSet = false;
@@ -458,9 +486,129 @@ export function nextGame(room, by = null) {
   room.gameNumber = (room.gameNumber || 1) + 1;
   // A shootout room's leaderboard is this game's, not the evening's.
   if (room.settings.shootout) shootout.reset(room);
-  pushLog(room, { type: 'next_game', game: room.gameNumber, removed: removed.length, by });
+  pushLog(room, { type: 'next_game', game: room.gameNumber, removed: removed.length, kept: !!keepPlayers, by });
   persistRooms(true);
   return { removed, gameNumber: room.gameNumber };
+}
+
+// --- the evening's totals -----------------------------------------------------
+// A practice room reads packet after packet to the same people. With the
+// room's eveningTotals option on, players see a running total for the evening
+// alongside each game's scoresheet. It is kept per PLAYER, not per team:
+// players swap sides between packets, and a total that followed the team would
+// credit their points to whoever sat in their seat. Each finished game is
+// filed here when the room moves on (recorded whether or not the option is on,
+// so turning it on mid-evening still counts the packets already read); the
+// game being read is added live. Built from the sanitized player scoresheet,
+// so it can never say more than the room has already heard.
+const EVENING_MAX_GAMES = 40;
+const playerKey = (name) => String(name ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+function gameSummary(sheet, n) {
+  if (!sheet || !Array.isArray(sheet.rows) || !Array.isArray(sheet.teams)) return null;
+  const players = new Map();
+  let buzzes = 0;
+  for (const row of sheet.rows) {
+    for (const b of row.buzzes || []) {
+      const team = sheet.teams[b.team]?.name || '';
+      const name = String(b.player || '').trim();
+      if (!name) continue;
+      buzzes++;
+      const p = players.get(playerKey(name)) || { name, team, points: 0, powers: 0, tens: 0, negs: 0 };
+      p.points += b.points;
+      if (b.points > 10) p.powers++;
+      else if (b.points > 0) p.tens++;
+      else if (b.points < 0) p.negs++;
+      players.set(playerKey(name), p);
+    }
+  }
+  // Players who were in the game but never buzzed still played it.
+  sheet.teams.forEach((t) => {
+    for (const name of t.players || []) {
+      const key = playerKey(name);
+      if (key && !players.has(key)) players.set(key, { name, team: t.name, points: 0, powers: 0, tens: 0, negs: 0 });
+    }
+  });
+  if (!buzzes) return null;
+  return {
+    n,
+    teams: sheet.teams.map((t, i) => ({ name: t.name, score: Number(sheet.scores?.[i]) || 0 })),
+    players: [...players.values()]
+  };
+}
+
+function recordEveningGame(room) {
+  const game = gameSummary(room.scoresheet || room.eveningSheet, room.gameNumber || 1);
+  room.eveningSheet = null;
+  if (!game) return;
+  const games = (room.evening ||= { games: [] }).games;
+  games.push(game);
+  if (games.length > EVENING_MAX_GAMES) games.shift();
+}
+
+/** The reader starts the evening's totals again (the packets stay in Previous games). */
+export function resetEvening(room, by = null) {
+  room.evening = { games: [], since: room.gameNumber || 1 };
+  pushLog(room, { type: 'reset_evening', by });
+  persistRooms();
+}
+
+// What players see: one row per player across every game tonight, the teams
+// they played for in order, and each game's final score. Null when the option
+// is off, in a tournament (the director's stats are the record there) or in a
+// shootout (whose own leaderboard carries, see shootoutCarry).
+export function eveningSummary(room) {
+  if (!room.settings.eveningTotals || room.tournamentCode || room.settings.shootout) return null;
+  const games = [...(room.evening?.games || [])];
+  const live = gameSummary(room.scoresheet, room.gameNumber || 1);
+  if (live) games.push({ ...live, live: true });
+  const players = new Map();
+  for (const g of games) {
+    for (const p of g.players) {
+      const key = playerKey(p.name);
+      const t = players.get(key) || { name: p.name, teams: [], games: 0, points: 0, powers: 0, tens: 0, negs: 0 };
+      if (p.team && !t.teams.includes(p.team)) t.teams.push(p.team);
+      t.games++;
+      t.points += p.points;
+      t.powers += p.powers;
+      t.tens += p.tens;
+      t.negs += p.negs;
+      players.set(key, t);
+    }
+  }
+  return {
+    games: games.map((g) => ({ n: g.n, live: g.live === true, teams: g.teams })),
+    players: [...players.values()].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name))
+  };
+}
+
+/**
+ * A player moves to another team, from their own page — a practice evening
+ * reshuffles sides between packets. Outside tournaments (where the roster says
+ * who plays for whom), shootouts (no teams) and roster-join rooms (where the
+ * team comes with the name picked). Mid-game, a player MODAQ already has on a
+ * team stays there until the next packet (the game can't change its lineups
+ * underneath the reader); otherwise the move is immediate.
+ */
+export function setOwnTeam(room, playerId, team) {
+  const member = room.members.get(playerId);
+  if (!member || member.role !== 'player') return { error: 'no_member' };
+  if (room.tournamentCode || room.settings.shootout || room.settings.rosterJoin) return { error: 'not_allowed' };
+  const name = String(team ?? '').trim().slice(0, 60);
+  if (!name && room.settings.requireTeam) return { error: 'team_required' };
+  const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  if (norm(effectiveTeam(member)) !== norm(name)) member.isCaptain = false;
+  if (member.rosterTeam && norm(member.rosterTeam) !== norm(name)) {
+    member.pendingTeam = name || null;
+  } else {
+    member.team = name || null;
+    member.assignedTeam = null;
+    member.pendingTeam = null;
+  }
+  refreshQueueNames(room);
+  pushLog(room, { type: 'set_own_team', playerId, team: name || null, pending: !!member.pendingTeam });
+  persistRooms();
+  return { ok: true, pending: member.pendingTeam || null };
 }
 
 // schedule: [{ round, room, teams:[..] }] -> we keep it loose on purpose so a
@@ -618,7 +766,10 @@ export function joinRoom(room, { playerId, name, role, team, rosterTeam, rosterP
     joinedAt: Date.now()
   };
   if (existing) {
-    if (name) member.name = name.slice(0, 40);
+    if (name && name.slice(0, 40) !== member.name) {
+      member.name = name.slice(0, 40);
+      member.knownAs = null;      // a new name of their own beats the old game's
+    }
     if (team !== undefined) member.team = team ? String(team).slice(0, 40) : null;
     member.role = normRole; // reflect (re)authorized role on reconnect
     member.connected = true;
@@ -897,7 +1048,8 @@ export function autoLinkRosterPlayers(room) {
   let linked = 0;
   for (const member of room.members.values()) {
     if (member.role !== 'player' || member.rosterPlayer) continue;
-    const typed = norm(member.name);
+    // The name the last game knew them by first (see nextGame), else their own.
+    const typed = norm(member.knownAs || member.name);
     if (!typed) continue;
     const memberTeam = norm(member.team);
     // Prefer an exact full-name match, and prefer one on the team they typed.
@@ -1026,7 +1178,7 @@ export function assignRosterPlayer(room, playerId, team, player) {
 
 // What everyone should be shown (and told) when this buzzer goes off: the
 // roster player once assigned, otherwise whatever they typed on the join gate.
-export const displayName = (member) => member?.rosterPlayer || member?.name || '?';
+export const displayName = (member) => member?.rosterPlayer || member?.knownAs || member?.name || '?';
 
 // A room as the stats pages name it: its friendly name and the people reading
 // in it (connected ones first; if nobody is connected, whoever last was).
@@ -1388,6 +1540,7 @@ export function setOptions(room, opts = {}) {
   if (typeof opts.listed === 'boolean') room.settings.listed = opts.listed;
   if (typeof opts.shootoutCarry === 'boolean') room.settings.shootoutCarry = opts.shootoutCarry;
   if (typeof opts.shootoutAutoAdd === 'boolean') room.settings.shootoutAutoAdd = opts.shootoutAutoAdd;
+  if (typeof opts.eveningTotals === 'boolean') room.settings.eveningTotals = opts.eveningTotals;
   if (typeof opts.chat === 'boolean') room.settings.chat = opts.chat;
   if (typeof opts.shootout === 'boolean') {
     room.settings.shootout = opts.shootout;
@@ -1574,6 +1727,8 @@ export function publicState(room) {
     // tournament turned it off). Built by buildPlayerScoresheet(): only what the
     // players in the room have already heard.
     scoresheet: playerScoresheetOn(room) ? room.scoresheet || null : null,
+    // Tonight's running totals, per player (see eveningSummary); null when off.
+    evening: playerScoresheetOn(room) ? eveningSummary(room) : null,
     queue: room.queue,
     // When each player's next free withdrawal comes round, in the rationed
     // mode (see store.withdraw). Only people currently waiting are listed, and
@@ -1637,6 +1792,8 @@ export function publicState(room) {
       offRoster: m.offRoster === true,
       waiting: waitingForNextGame(room, m),
       nextTeam: m.nextTeam || null,
+      // A team they asked to move to, from the next packet (see setOwnTeam).
+      pendingTeam: m.pendingTeam || null,
       effectiveTeam: effectiveTeam(m) || null,
       displayName: displayName(m)
     }))
@@ -2383,6 +2540,9 @@ export function setScoresheet(room, match, currentQuestion, hasBonuses = true, p
   const questionCeiling = texts.length ? Math.max(0, ceiling - reveal.lag) : 0;
   room.scoresheet = buildPlayerScoresheet(match, currentQuestion, hasBonuses, protests, cats, ceiling,
     answerLines, texts, questionCeiling);
+  // The moderator page clears the live sheet just before it moves the room on,
+  // so the evening's totals take the game from the last sheet it had.
+  if (room.scoresheet) room.eveningSheet = room.scoresheet;
   persistRooms();
   return { ok: true };
 }

@@ -70,6 +70,9 @@
     <!-- The host called the game over. First thing on the page, because
          everything below it still looks playable and isn't. -->
     <div id="ended-banner" class="ended-banner hidden" role="status"></div>
+    <!-- The reader moved on to the next packet and kept everyone: say so, and
+         which team you're on for it (see renderNextPacket). -->
+    <div id="next-banner" class="next-banner hidden" role="status"></div>
 
     <!-- Discord shootout: what's being played, where the reader has got to, and
          the one rule players need. One line above the buzzer — it's reference,
@@ -106,6 +109,20 @@
           <span id="buzzer-sub" class="bz-sub"></span>
         </button>
         <div id="buzz-feedback" class="feedback"></div>
+        <!-- Your team, and a way to change it: a practice evening reshuffles
+             sides between packets (see renderMyTeam / store.setOwnTeam). Not
+             in tournaments, shootouts or roster-join rooms. -->
+        <div id="me-line" class="me-line hidden">
+          <span id="me-team"></span>
+          <button id="me-switch" class="tiny ghost">Switch team</button>
+          <form id="me-team-form" class="me-team-form hidden">
+            <input id="me-team-input" list="me-team-list" maxlength="60" placeholder="Team name" autocomplete="off" />
+            <datalist id="me-team-list"></datalist>
+            <button type="submit" class="tiny">Save</button>
+            <button type="button" id="me-team-cancel" class="tiny ghost">Cancel</button>
+          </form>
+          <p id="me-team-msg" class="hint"></p>
+        </div>
         <!-- Typed answers, directly under the buzzer: a box you have seconds to
              type in can't be somewhere you have to go looking for. Everyone
              behind the buzzer commits an answer before the player with the floor
@@ -172,6 +189,15 @@
         <div class="ss-scroll">
           <table id="ss-table" class="ss-events"></table>
         </div>
+      </section>
+
+      <!-- Tonight's totals: every player across the room's packets, whichever
+           team they played for (store.eveningSummary). Only with the room's
+           evening option on. -->
+      <section id="evening-view" class="evening hidden" aria-label="Tonight's totals">
+        <h3>Tonight</h3>
+        <p id="evening-games" class="hint"></p>
+        <table id="evening-table" class="evening-table"></table>
       </section>
 
       <section id="chat-view" class="panel chat hidden">

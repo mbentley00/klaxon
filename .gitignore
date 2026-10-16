@@ -6,3 +6,5 @@ npm-debug.log*
 dist/
 .claude/
 data/
+# Downloaded at image build (see Dockerfile)
+public/models/
