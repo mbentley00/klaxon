@@ -87,6 +87,33 @@ document.addEventListener('visibilitychange', wakeUp);
 window.addEventListener('pageshow', wakeUp);
 window.addEventListener('focus', wakeUp);
 
+// Keep the screen on while in the room. A phone that dims and locks between
+// tossups freezes the page (see wakeUp), and the buzz that matters is the one
+// you make before you could have unlocked it. The browser drops the lock
+// whenever the page is hidden, so it's asked for again on the way back.
+// Unsupported (or refused, e.g. low battery): the phone just sleeps as before.
+let wakeLock = null;
+let wakeLockPending = false;
+async function keepScreenOn() {
+  if (!state.role || wakeLock || wakeLockPending || !navigator.wakeLock || document.visibilityState !== 'visible') return;
+  wakeLockPending = true;
+  try {
+    const lock = await navigator.wakeLock.request('screen');
+    lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+    // Left the room while the request was out.
+    if (state.role) wakeLock = lock; else lock.release().catch(() => undefined);
+  } catch { /* not allowed now; asked again on the next visit or tap */ }
+  wakeLockPending = false;
+}
+function letScreenSleep() {
+  const lock = wakeLock;
+  wakeLock = null;
+  lock?.release().catch(() => undefined);
+}
+document.addEventListener('visibilitychange', keepScreenOn);
+// Some browsers only grant it during a tap; any tap in the room retries.
+document.addEventListener('pointerdown', keepScreenOn, { passive: true });
+
 // Server RTT probes — answer immediately so the server can measure us. Two
 // channels (a routine probe and one the server fires right after a buzz) let it
 // cross-check for clients that stall latency packets to cheat the buzz clamp.
@@ -100,6 +127,7 @@ socket.on('rtt_echo', ackNow);
 socket.on('kicked', (info) => {
   forget('joined:' + code); forget('role:' + code);
   state.role = null; state.me = null;
+  letScreenSleep();
   if (info?.reason === 'left') {
     $('#stage').classList.add('hidden');
     document.body.classList.remove('has-chat', 'has-sheet');
@@ -390,6 +418,7 @@ function doJoin(role, name, team, roster) {
       return;
     }
     enterStage(resp.state);
+    keepScreenOn();
   });
 }
 

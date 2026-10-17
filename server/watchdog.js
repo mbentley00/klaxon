@@ -159,10 +159,8 @@ export function startWatchdog({ io, dataDir, send, to, describe = () => ({}), wi
     ], crash?.lastWindow || null).catch(() => {});
   }
   try { fs.writeFileSync(marker, JSON.stringify({ startedAt: new Date(startedAt).toISOString(), pid: process.pid })); } catch { /* ignore */ }
+  // Called by index.js's shutdown handler once records are saved.
   const cleanExit = () => { try { fs.rmSync(marker, { force: true }); } catch { /* ignore */ } };
-  for (const sig of ['SIGTERM', 'SIGINT']) {
-    process.on(sig, () => { cleanExit(); process.exit(0); });
-  }
 
   function report(subject, paragraphs, window) {
     const body = paragraphs.filter(Boolean).map((p) => (p.startsWith('<pre') ? p : `<p>${esc(p)}</p>`)).join('') +
@@ -174,5 +172,5 @@ export function startWatchdog({ io, dataDir, send, to, describe = () => ({}), wi
     return send({ to, subject: `[Klaxon] ${subject}`, html, text: paragraphs.filter((p) => !p.startsWith('<pre')).join('\n\n') });
   }
 
-  return { snapshot: () => lastWindow };
+  return { snapshot: () => lastWindow, cleanExit };
 }

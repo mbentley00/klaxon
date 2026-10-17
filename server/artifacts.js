@@ -749,9 +749,24 @@ export async function saveStructure(bucket, structure) {
 // records and room identities are written here so a restart/deploy doesn't
 // orphan every director console and reader link. Live buzz state is NOT saved.
 
-export async function saveTournamentRecord(record) {
+// Chained per tournament like rooms.json below: two quick changes (a schedule
+// save, then auto-release) must land in order, or the older record wins.
+const tournamentWrites = new Map(); // code -> promise of its last write
+export function saveTournamentRecord(record) {
   const file = path.join(bucketDir({ kind: 't', code: record.code }), 'tournament.json');
-  await writeAtomic(file, JSON.stringify(record, null, 2));
+  const text = JSON.stringify(record, null, 2);
+  const next = (tournamentWrites.get(record.code) || Promise.resolve())
+    .catch(() => { /* a failed write must not stall later ones */ })
+    .then(() => writeAtomic(file, text));
+  tournamentWrites.set(record.code, next);
+  next.finally(() => { if (tournamentWrites.get(record.code) === next) tournamentWrites.delete(record.code); }).catch(() => {});
+  return next;
+}
+
+// Every tournament and room record write still in flight, for a clean
+// shutdown: a deploy stops the process, and a half-done write is a lost change.
+export function flushRecordWrites() {
+  return Promise.allSettled([roomWrites, ...tournamentWrites.values()]);
 }
 
 export async function loadTournamentRecords() {

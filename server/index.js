@@ -20,6 +20,7 @@ import { computeBuzzpoints, renderBuzzpointsCsv, renderBuzzpointsHtml } from './
 import { tournamentBuzzpointsExport, roundNumbers, gameFileName, buzzpointsGame } from './buzzpointsZip.js';
 import { sendEmail, emailEnabled, feedbackBody, FEEDBACK_TO } from './email.js';
 import { startWatchdog } from './watchdog.js';
+import { startBackups } from './backup.js';
 import { buildZip } from './zip.js';
 import * as accounts from './accounts.js';
 import { parseYellowFruit, planImport } from './yfimport.js';
@@ -3389,15 +3390,19 @@ io.on('connection', (socket) => {
 // Rehydrate tournaments and room identities from the data volume BEFORE
 // accepting traffic, so director consoles and reader links survive restarts.
 // Rooms older than the TTL are dropped at boot (they age out of rooms.json on
-// its next rewrite); tournaments are kept indefinitely — their stats live on
-// the same volume.
+// its next rewrite), except a tournament's; tournaments are kept indefinitely —
+// their stats live on the same volume.
 const ROOM_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 try {
   const [tournamentRecords, roomRecords] = await Promise.all([
     artifacts.loadTournamentRecords(),
     artifacts.loadRoomRecords()
   ]);
-  const freshRooms = roomRecords.filter((r) => Date.now() - (r.createdAt || 0) < ROOM_TTL_MS);
+  // A tournament's rooms live as long as the tournament does: its reader links
+  // and director corrections still point at them long after the event.
+  const tournamentCodes = new Set(tournamentRecords.map((t) => t?.code));
+  const freshRooms = roomRecords.filter((r) =>
+    Date.now() - (r.createdAt || 0) < ROOM_TTL_MS || (r.tournamentCode && tournamentCodes.has(r.tournamentCode)));
   store.hydrate({ tournaments: tournamentRecords, rooms: freshRooms });
   if (tournamentRecords.length || freshRooms.length) {
     console.log(`rehydrated ${tournamentRecords.length} tournament(s), ${freshRooms.length} room(s)`);
@@ -3471,10 +3476,45 @@ httpServer.listen(PORT, () => {
 
 // Stalls and crashes email the operator (see watchdog.js). Off without email
 // configured, and off in a test run unless asked for.
-if (emailEnabled() || process.env.KLAXON_WATCHDOG === '1') {
-  startWatchdog({
+const watchdog = (emailEnabled() || process.env.KLAXON_WATCHDOG === '1')
+  ? startWatchdog({
     io, dataDir: artifacts.DATA_DIR, to: process.env.KLAXON_ALERT_EMAIL || FEEDBACK_TO,
     send: (msg) => (emailEnabled() ? sendEmail(msg) : Promise.resolve(console.warn('[watchdog] (no email configured)', msg.subject))),
     describe: () => store.activity()
-  });
+  })
+  : null;
+
+// A nightly copy of the data volume off Fly's disks (see backup.js).
+startBackups({
+  dataDir: artifacts.DATA_DIR,
+  beforeBackup: () => { store.persistNow(); return artifacts.flushRecordWrites(); },
+  onFailure: (e) => {
+    if (!emailEnabled()) return;
+    sendEmail({
+      to: process.env.KLAXON_ALERT_EMAIL || FEEDBACK_TO,
+      subject: '[Klaxon] Nightly backup failed',
+      text: `The offsite backup of the data volume failed and will be retried hourly.\n\n${e?.message || e}`,
+    }).catch(() => {});
+  },
+});
+
+// A deploy (or fly machine stop) sends SIGINT/SIGTERM and kills the process a
+// few seconds later. Room records are written on a short delay to keep scoring
+// off the disk, so save them now and wait for every record write in flight;
+// leaving at once would drop the last moments of every room and tournament.
+let shuttingDown = false;
+async function shutdown(sig) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${sig}: saving records before exit`);
+  const leave = () => { watchdog?.cleanExit(); process.exit(0); };
+  setTimeout(leave, 3500).unref();   // Fly's kill_timeout is 5 s: never be the reason it waits
+  try {
+    store.persistNow();
+    await artifacts.flushRecordWrites();
+  } catch (e) {
+    console.error('saving on shutdown failed:', e);
+  }
+  leave();
 }
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => shutdown(sig));
