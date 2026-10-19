@@ -313,7 +313,7 @@ async function notifyDirectorsOfProtest(room, protest) {
   });
 }
 
-async function notifyDirectorsOfRequest(t, requester, origin) {
+async function notifyDirectorsOfRequest(t, requester, origin, { bye = false } = {}) {
   if (!emailEnabled()) return;
   const to = await directorEmails(t);
   if (!to.length) return;
@@ -323,11 +323,14 @@ async function notifyDirectorsOfRequest(t, requester, origin) {
   const tname = t.name || t.code;
   await sendEmail({
     to,
-    subject: `${who} asked to moderate ${tname}`,
-    text: `${who}${requester.email ? ` <${requester.email}>` : ''} asked to moderate ${tname}.\n\nApprove them in the director console: ${url} (Settings > Reader accounts).`,
+    subject: bye ? `${who} asked to read on their byes at ${tname}` : `${who} asked to moderate ${tname}`,
+    text: `${who}${requester.email ? ` <${requester.email}>` : ''} asked to ${bye ? 'read on their bye rounds at' : 'moderate'} ${tname}.\n\n` +
+      `Approve them in the director console: ${url} (Moderators & links > Reader accounts).` +
+      (bye ? ' They can read nowhere until you assign them a round and room there.' : ''),
     html: `<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;color:#17130d;line-height:1.5;max-width:520px">` +
-      `<p><strong>${esc(who)}</strong>${requester.email ? ` (${esc(requester.email)})` : ''} asked to moderate <strong>${esc(tname)}</strong>.</p>` +
-      `<p>Approve them in the <a href="${esc(url)}">director console</a>, under Settings &rsaquo; Reader accounts.</p>` +
+      `<p><strong>${esc(who)}</strong>${requester.email ? ` (${esc(requester.email)})` : ''} asked to ${bye ? 'read on their bye rounds at' : 'moderate'} <strong>${esc(tname)}</strong>.</p>` +
+      `<p>Approve them in the <a href="${esc(url)}">director console</a>, under Moderators &amp; links &rsaquo; Reader accounts.` +
+      `${bye ? ' They can read nowhere until you assign them a round and room there.' : ''}</p>` +
       `<hr style="border:none;border-top:1px solid #eee;margin:20px 0"><p style="font-size:12px;color:#888">Klaxon</p></div>`,
     replyTo: requester.email || undefined
   });
@@ -635,12 +638,15 @@ app.post('/api/tournaments/:code/access', ah(async (req, res) => {
   if (!account) return res.status(401).json({ error: 'not_logged_in' });
   const bucket = { kind: 't', code: t.code };
   const before = await artifacts.memberStatus(bucket, account.id);
-  const m = await artifacts.requestMembership(bucket, account.id, account.username);
+  // Through the bye-reader link (/t/CODE/join?as=bye): a player who reads on
+  // their byes, approved for no room until the director assigns one.
+  const bye = req.body?.as === 'bye';
+  const m = await artifacts.requestMembership(bucket, account.id, account.username, bye ? { scope: 'assigned' } : {});
   res.json({ status: m.status });
   // Only a NEW request: asking again while pending shouldn't email again.
   if (before == null && m.status === 'pending') {
     const origin = process.env.KLAXON_CANONICAL_HOST ? `https://${process.env.KLAXON_CANONICAL_HOST}` : `${req.protocol}://${req.get('host')}`;
-    notifyDirectorsOfRequest(t, account, origin)
+    notifyDirectorsOfRequest(t, account, origin, { bye: m.scope === 'assigned' })
       .catch((e) => console.warn('[email] access request notice failed:', e.message));
   }
 }));
@@ -677,7 +683,12 @@ app.post('/api/tournaments/:code/members', ah(async (req, res) => {
   if (!account) return res.status(404).json({ error: 'account_not_found' });
   const bucket = { kind: 't', code: t.code };
   await artifacts.requestMembership(bucket, account.id, account.username);
-  const member = await artifacts.setMemberStatus(bucket, account.id, 'approved');
+  let member = await artifacts.setMemberStatus(bucket, account.id, 'approved');
+  // "Add bye reader": no rooms until assigned.
+  if (req.body?.as === 'bye') {
+    member = await artifacts.setMemberAccess(bucket, account.id, { scope: 'assigned', assignments: member.scope === 'assigned' ? member.assignments : [] });
+    revokeAccountStaff(t, account.id);
+  }
   res.json({ member });
 }));
 

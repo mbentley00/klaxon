@@ -285,12 +285,22 @@
       <p class="hint">Send this to your moderators. They sign in or create an account and ask to join;
         their requests show up below for you to approve. Once approved they can read in any room
         of this tournament without a reader link.</p>
-      <p class="hint">Players who read on their byes: set them to <strong>Assigned rounds only</strong> and
-        give them the round and room they read. They see only those packets, and are players
+      <label class="share-row">
+        <span>Player reading during a bye round</span>
+        <span class="copy-field">
+          <input id="bye-invite-link" readonly />
+          <button id="bye-invite-copy" class="copy-btn tiny">Copy</button>
+          <a id="bye-invite-open" class="btnlink tiny" target="_blank" rel="noopener">Open</a>
+        </span>
+      </label>
+      <p class="hint">Send this one to players who read on their byes. Their requests come in as
+        <strong>Assigned rounds only</strong> with no rounds, so approving them lets them read nowhere
+        until you give them a round and room below. They see only those packets, and are players
         everywhere else.</p>
       <div class="sound-row">
         <input id="member-add-id" placeholder="Email or username of a registered account" />
         <button id="member-add" class="primary tiny">Add moderator</button>
+        <button id="member-add-bye" class="tiny">Add bye reader</button>
       </div>
       <ul id="members-list" class="players"></ul>
       <p id="members-empty" class="hint">No access requests yet.</p>

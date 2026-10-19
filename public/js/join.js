@@ -5,6 +5,9 @@ import { api, $, el, remember } from './util.js';
 // them; approved, it lists the rooms, each opening straight into the reader
 // gate's account path (so no reader link is needed).
 const code = location.pathname.split('/')[2].toUpperCase();
+// The bye-reader invite (/t/CODE/join?as=bye): a player asking to read on
+// their byes, approved for no room until the director assigns one.
+const asBye = new URLSearchParams(location.search).get('as') === 'bye';
 const session = () => localStorage.getItem('bz_sessionToken');
 const STATES = ['#j-signin', '#j-ask', '#j-pending', '#j-denied', '#j-approved'];
 const show = (id) => STATES.forEach((s) => $(s).classList.toggle('hidden', s !== id));
@@ -23,7 +26,7 @@ async function render() {
   }
   $('#account-pill').textContent = account ? account.username : 'Log in';
   if (!account) {
-    $('#j-signin-link').href = '/account?return=' + encodeURIComponent(location.pathname);
+    $('#j-signin-link').href = '/account?return=' + encodeURIComponent(location.pathname + location.search);
     return show('#j-signin');
   }
   $('#j-who').textContent = account.username;
@@ -81,7 +84,7 @@ function showRooms(access) {
 $('#j-request').onclick = async () => {
   $('#j-request').disabled = true;
   try {
-    await api('POST', `/api/tournaments/${code}/access`, { sessionToken: session() });
+    await api('POST', `/api/tournaments/${code}/access`, { sessionToken: session(), ...(asBye ? { as: 'bye' } : {}) });
     say('');
     render();
   } catch (e) {
@@ -98,6 +101,10 @@ $('#j-request').onclick = async () => {
     return say("This tournament doesn't exist, or it has ended. Check the link with the director.", false);
   }
   $('#j-name').textContent = tournament.name || `Tournament ${code}`;
+  if (asBye) {
+    $('#j-ask-text').textContent = 'Ask the director to let you read during your bye rounds. Once they approve you and give you a round and room, it shows up here.';
+    $('#j-request').textContent = 'Request to read on my byes';
+  }
   $('#j-date').textContent = tournament.date ? tournament.date : '';
   document.title = `Moderate ${tournament.name || code} — Klaxon`;
   render();

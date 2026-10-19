@@ -831,11 +831,14 @@ async function saveMembers(bucket, members) {
 }
 
 // Idempotent: a reader requesting access that already exists keeps their status.
-export async function requestMembership(bucket, accountId, username) {
+// `scope: 'assigned'` (the bye-reader invite) starts them with no rounds at
+// all, so approving them gives them nothing until the director assigns some.
+export async function requestMembership(bucket, accountId, username, { scope } = {}) {
   const members = await getMembers(bucket);
   let m = members.find((x) => x.accountId === accountId);
   if (!m) {
     m = { accountId, username: String(username || ''), status: 'pending', requestedAt: Date.now(), approvedAt: null };
+    if (scope === 'assigned') { m.scope = 'assigned'; m.assignments = []; }
     members.push(m);
     await saveMembers(bucket, members);
   }

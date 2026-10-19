@@ -567,19 +567,21 @@ async function saveStructure() {
 // Public stats link + YellowFruit download — no director token required to view.
 // The link a director hands to moderators: it takes them through signing in
 // to a request the director approves below.
-function initModInvite() {
-  const link = `${location.origin}/t/${code}/join`;
-  const input = $('#mod-invite-link');
+// Two of them: full moderators, and players who read on their byes (who
+// start with no room at all until assigned one).
+function initModInvite(prefix, link) {
+  const input = $(`#${prefix}-invite-link`);
   if (!input) return;
   input.value = link;
-  $('#mod-invite-open').href = link;
-  const copy = $('#mod-invite-copy');
+  $(`#${prefix}-invite-open`).href = link;
+  const copy = $(`#${prefix}-invite-copy`);
   copy.onclick = async () => {
     try { await navigator.clipboard.writeText(link); } catch { input.select(); document.execCommand('copy'); }
     const o = copy.textContent; copy.textContent = 'Copied!'; setTimeout(() => { copy.textContent = o; }, 1200);
   };
 }
-initModInvite();
+initModInvite('mod', `${location.origin}/t/${code}/join`);
+initModInvite('bye', `${location.origin}/t/${code}/join?as=bye`);
 
 function initPublicStats() {
   const link = `${location.origin}/t/${code}/stats`;
@@ -712,12 +714,12 @@ function initModaq() {
   $('#tb-refresh').onclick = refreshTiebreakers;
   refreshTiebreakers();
   $('#members-refresh').onclick = refreshMembers;
-  $('#member-add').onclick = async () => {
+  const addMember = async (bye) => {
     const identifier = $('#member-add-id').value.trim();
     if (!identifier) return msay('Enter the email or username of a registered account.', false);
     try {
-      const { member } = await api('POST', `/api/tournaments/${code}/members`, { directorToken, identifier });
-      msay(`${member.username} added as an approved moderator.`);
+      const { member } = await api('POST', `/api/tournaments/${code}/members`, { directorToken, identifier, ...(bye ? { as: 'bye' } : {}) });
+      msay(bye ? `${member.username} added as a bye reader. Assign their rounds below.` : `${member.username} added as an approved moderator.`);
       $('#member-add-id').value = '';
       refreshMembers();
     } catch (e) {
@@ -726,6 +728,8 @@ function initModaq() {
         : 'Could not add moderator: ' + e.message, false);
     }
   };
+  $('#member-add').onclick = () => addMember(false);
+  $('#member-add-bye').onclick = () => addMember(true);
   refreshMembers();
   setInterval(refreshMembers, 20000);
 
@@ -1176,7 +1180,8 @@ async function refreshMembers() {
       const li = el('li', { className: m.status === 'denied' ? 'gone' : '' });
       const col = el('span', { className: 'pcol' });
       col.append(el('span', { className: 'pname' }, m.username));
-      col.append(el('span', { className: 'pjoined' }, `Status: ${m.status}`));
+      const bye = m.scope === 'assigned' ? ' · reads on byes' : '';
+      col.append(el('span', { className: 'pjoined' }, `Status: ${m.status}${bye}`));
       li.append(col);
       const actions = el('span', { className: 'sound-row' });
       const setStatus = async (status) => {
