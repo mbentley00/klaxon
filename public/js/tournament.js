@@ -790,6 +790,8 @@ function rosterCount() {
   $('#roster-dialog-count').textContent = rosterTeams.length
     ? `(${plural(rosterTeams.length, 'team')}, ${plural(players, 'player')})`
     : '';
+  // Every change lands here: say plainly that it isn't kept until saved.
+  $('#roster-unsaved').classList.toggle('hidden', rosterSnapshot() === rosterSaved);
 }
 
 // One row per team: its name, then a box per player and one blank box at the
@@ -857,7 +859,8 @@ function rosterPaste(text) {
   $('#roster-paste-note').textContent =
     `Added ${plural(teams.length, 'team')} (${plural(players, 'player')}).` +
     (skipped ? ` Skipped ${plural(skipped, 'row')} with no players.` : '') +
-    (unnamed ? ` ${unnamed} had no team name and got a placeholder (highlighted): type the real names in.` : '');
+    (unnamed ? ` ${unnamed} had no team name and got a placeholder (highlighted): type the real names in.` : '') +
+    ' Press Save roster below to keep them.';
   return true;
 }
 
