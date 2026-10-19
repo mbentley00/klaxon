@@ -108,9 +108,13 @@ export function register(username, password, displayName, email) {
   if (!USERNAME_RE.test(name)) return { error: 'bad_username' };
   if (String(password || '').length < 6) return { error: 'bad_password' };
   if (byUsername.has(name.toLowerCase())) return { error: 'username_taken' };
+  // Every new account has an email: it's how a director finds and adds a
+  // moderator, and how Klaxon reaches them. (Accounts made before this keep
+  // working without one.)
   const cleanedEmail = cleanEmail(email);
+  if (cleanedEmail === '') return { error: 'email_required' };
   if (cleanedEmail == null) return { error: 'bad_email' };
-  if (cleanedEmail && byEmail.has(cleanedEmail)) return { error: 'email_taken' };
+  if (byEmail.has(cleanedEmail)) return { error: 'email_taken' };
   const salt = crypto.randomBytes(16).toString('hex');
   const account = {
     id: id(), username: name, usernameLower: name.toLowerCase(),
@@ -173,6 +177,8 @@ export function setModaqSettings(account, settings) {
 export function setEmail(account, email) {
   const cleaned = cleanEmail(email);
   if (cleaned == null) return { error: 'bad_email' };
+  // An email once given can be changed, not removed.
+  if (cleaned === '' && account.email) return { error: 'email_required' };
   if (cleaned && byEmail.get(cleaned) && byEmail.get(cleaned) !== account.id) return { error: 'email_taken' };
   if (account.email) byEmail.delete(account.email);
   account.email = cleaned;

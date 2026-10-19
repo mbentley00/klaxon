@@ -45,6 +45,9 @@ async function render() {
   show('#j-ask');
 }
 
+// "Round 4", or the round's own name when it already says "round"
+// ("MASSINGER Round 01"), never "Round MASSINGER Round 01".
+const roundName = (r) => (/\bround\b/i.test(String(r)) ? String(r) : `Round ${r}`);
 const roomName = (room) => {
   const name = tournament?.roomNames?.[room];
   return name ? `${name} · ${room}` : `Room ${room}`;
@@ -60,6 +63,18 @@ function showRooms(access) {
   show('#j-approved');
   // Assigned rounds only (a player who reads on their byes): just those.
   const assigned = access?.scope === 'assigned';
+  // The bye-reader link, opened by someone who can already read everywhere
+  // (most often the director, signed in as themselves): it changes nothing
+  // for them, and a page listing every room would look like it had failed.
+  const already = $('#j-bye-already');
+  already.classList.toggle('hidden', !(asBye && !assigned));
+  if (asBye && !assigned) {
+    already.textContent = (access?.director
+      ? "You're signed in as this tournament's director, "
+      : "You're signed in as a full moderator of this tournament, ") +
+      'so this bye-reader link doesn\'t change anything: you can still read in every room. ' +
+      'To see what a bye reader gets, open the link signed in with a different account.';
+  }
   $('#j-approved-full').classList.toggle('hidden', assigned);
   $('#j-approved-assigned').classList.toggle('hidden', !assigned);
   if (assigned) {
@@ -67,7 +82,7 @@ function showRooms(access) {
     $('#j-no-rooms').classList.add('hidden');
     $('#j-no-assignments').classList.toggle('hidden', list.length > 0);
     $('#j-rooms').replaceChildren(...list.map((a) =>
-      el('li', {}, el('span', { className: 'pname' }, el('strong', {}, `Round ${a.round}`), ` · ${roomName(a.room)}`), readHere(a.room))));
+      el('li', {}, el('span', { className: 'pname' }, el('strong', {}, roundName(a.round)), ` · ${roomName(a.room)}`), readHere(a.room))));
   } else {
     const rooms = tournament?.rooms || [];
     $('#j-no-assignments').classList.add('hidden');

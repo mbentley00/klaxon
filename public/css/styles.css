@@ -1511,11 +1511,14 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .member-access { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .member-access > select { align-self: flex-start; max-width: 100%; }
 .assign-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.assign-chips li { display: inline-flex; align-items: center; gap: 4px; border: 1.5px solid var(--line); border-radius: 6px; padding: 1px 2px 1px 8px; font-size: .85rem; background: var(--surface); }
-.assign-chips li.hint { border: 0; padding: 0; background: none; }
+/* Inside the member list, whose rows (.players li) would otherwise give each
+   chip their padding and take the last one's bottom border away. */
+.players .assign-chips li { display: inline-flex; align-items: center; justify-content: flex-start; gap: 6px; border: 1.5px solid var(--line); border-radius: 6px; padding: 3px 4px 3px 8px; font-size: .85rem; background: var(--surface); }
+.players .assign-chips li.hint { border: 0; padding: 0; background: none; }
 .assign-chips button { box-shadow: none; padding: .05em .45em; }
 .assign-add select { min-width: 0; flex: 1 1 120px; }
 .assign-by-round { margin-top: 14px; }
 .assign-rounds { list-style: none; margin: 4px 0 0; padding: 0; font-size: .9rem; }
 .assign-rounds li { padding: 3px 0; border-bottom: 1px solid var(--soft); }
+.assign-rounds li:last-child { border-bottom: 0; }
 #members-list li { flex-wrap: wrap; }

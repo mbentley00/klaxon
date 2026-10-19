@@ -1210,6 +1210,9 @@ async function assignmentChoices() {
   const rooms = (t?.rooms || []).map((c) => ({ code: c, name: t.roomNames?.[c] || '' }));
   return { rounds: packets.map((p) => String(p.round)), rooms };
 }
+// "Round 4", or the round's own name when it already says "round"
+// ("MASSINGER Round 01"), never "Round MASSINGER Round 01".
+const roundName = (r) => (/\bround\b/i.test(String(r)) ? String(r) : `Round ${r}`);
 const roomLabel = (rooms, rc) => { const r = rooms.find((x) => x.code === rc); return r?.name ? `${r.name} (${rc})` : `Room ${rc}`; };
 
 // Full moderator (any room, any round: how every moderator worked before), or
@@ -1241,14 +1244,14 @@ function memberAccessEditor(m, { rounds, rooms }) {
   if (!list.length) chips.append(el('li', { className: 'hint' }, 'No rounds yet: they can\'t moderate anywhere until you add one.'));
   for (const a of list) {
     const x = mkBtn('×', 'tiny ghost', () => save('assigned', list.filter((y) => y !== a)));
-    x.title = 'Remove'; x.setAttribute('aria-label', `Remove round ${a.round} in ${roomLabel(rooms, a.room)}`);
-    chips.append(el('li', {}, el('span', {}, `Round ${a.round} · ${roomLabel(rooms, a.room)}`), x));
+    x.title = 'Remove'; x.setAttribute('aria-label', `Remove ${roundName(a.round)} in ${roomLabel(rooms, a.room)}`);
+    chips.append(el('li', {}, el('span', {}, `${roundName(a.round)} · ${roomLabel(rooms, a.room)}`), x));
   }
   box.append(chips);
 
   const round = el('select');
   round.setAttribute('aria-label', 'Round');
-  round.append(el('option', { value: '' }, 'Round…'), ...rounds.map((r) => el('option', { value: r }, `Round ${r}`)));
+  round.append(el('option', { value: '' }, 'Round…'), ...rounds.map((r) => el('option', { value: r }, roundName(r))));
   const room = el('select');
   room.setAttribute('aria-label', 'Room');
   room.append(el('option', { value: '' }, 'Room…'), ...rooms.map((r) => el('option', { value: r.code }, roomLabel(rooms, r.code))));
@@ -1279,7 +1282,7 @@ function renderAssignmentsByRound(members, { rounds, rooms }) {
   const ul = el('ul', { className: 'assign-rounds' });
   for (const r of order) {
     const who = byRound.get(r);
-    ul.append(el('li', {}, el('strong', {}, `Round ${r}`), ' ', who ? who.join(' · ') : el('span', { className: 'hint' }, 'nobody assigned')));
+    ul.append(el('li', {}, el('strong', {}, roundName(r)), ' ', who ? who.join(' · ') : el('span', { className: 'hint' }, 'nobody assigned')));
   }
   box.replaceChildren(el('h4', {}, 'Assigned readers by round'), ul);
 }

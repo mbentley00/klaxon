@@ -48,6 +48,8 @@ function setMode(next) {
   $('#acct-password').setAttribute('autocomplete', mode === 'register' ? 'new-password' : 'current-password');
   $('#acct-display-reg').classList.toggle('hidden', mode !== 'register');
   $('#acct-email-reg').classList.toggle('hidden', mode !== 'register');
+  // Required only when creating an account (a hidden required box would block logging in).
+  $('#acct-email-reg').required = mode === 'register';
   say('');
 }
 
@@ -101,6 +103,7 @@ const friendly = (e) => ({
   bad_password: 'Password must be at least 6 characters.',
   bad_username: 'Username must be 3–30 letters, numbers, or _ . -',
   bad_email: "That doesn't look like an email address.",
+  email_required: 'Enter your email address.',
   email_taken: 'That email is already on another account.',
   not_logged_in: 'Please log in.'
 }[e] || e);
@@ -133,7 +136,8 @@ $('#account-form').addEventListener('submit', async (e) => {
     const body = { username, password };
     if (mode === 'register') {
       body.displayName = $('#acct-display-reg').value.trim() || undefined;
-      body.email = $('#acct-email-reg').value.trim() || undefined;
+      body.email = $('#acct-email-reg').value.trim();
+      if (!body.email) { $('#acct-email-reg').focus(); return say('Enter your email address to create an account.', false); }
     }
     const r = await api('POST', path, body);
     setSession(r.sessionToken);

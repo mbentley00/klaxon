@@ -663,8 +663,10 @@ app.get('/api/tournaments/:code/access', ah(async (req, res) => {
   // What they may moderate: everywhere, or the rounds and rooms assigned.
   const scope = member?.status === 'approved' ? (member.scope === 'assigned' ? 'assigned' : 'all') : null;
   const assignments = scope === 'assigned' ? (member.assignments || []) : undefined;
-  if (!t.requireReaderAccounts) return res.json({ required: false, status: 'approved', memberStatus, scope, assignments });
-  res.json({ required: true, status: account ? memberStatus : null, memberStatus, scope, assignments });
+  // The director's own account is a full member of their tournament.
+  const director = member?.director === true;
+  if (!t.requireReaderAccounts) return res.json({ required: false, status: 'approved', memberStatus, scope, assignments, director });
+  res.json({ required: true, status: account ? memberStatus : null, memberStatus, scope, assignments, director });
 }));
 
 // Director lists / approves / denies reader accounts.
