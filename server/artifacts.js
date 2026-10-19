@@ -168,6 +168,8 @@ export async function savePacket(bucket, round, jsonText, opts = {}) {
     // The room whose moderator uploaded it, or null for the director's. A
     // moderator may replace only their own room's upload (see packetOwner).
     uploadedBy: opts.uploadedBy !== undefined ? opts.uploadedBy : (prev.uploadedBy ?? null),
+    // A new version of a round keeps its place in the director's order.
+    ...(Number.isFinite(prev.order) ? { order: prev.order } : {}),
   };
   await setPacketMeta(bucket, meta);
   return { round: name, visible: meta[name].visible, tiebreaker: meta[name].tiebreaker, tossups: meta[name].tossups };

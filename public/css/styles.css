@@ -802,6 +802,9 @@ body.compact .scoresheet { display: none; }
 .roster-grid .rt-remove { min-width: 28px; }
 .roster-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px 14px; border-top: 2px solid var(--soft); background: var(--surface); }
 .roster-unsaved { font-weight: 700; color: var(--warn); font-size: .9rem; }
+/* Packets tab: per-round Replace / Delete. */
+.packet-replace { display: inline-flex; }
+.packet-delete { color: var(--bad); }
 .sr-only {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap; border: 0;

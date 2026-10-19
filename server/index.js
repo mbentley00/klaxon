@@ -1012,10 +1012,56 @@ app.post('/api/tournaments/:code/packets', ah(async (req, res) => {
   // So do a shootout's when it has several rooms (whoever runs it decides what
   // each reads when); with one room, the director is its reader, and an upload
   // is ready for it at once (see packetsAlwaysOpen).
-  const visible = typeof req.body?.visible === 'boolean' ? req.body.visible : packetsAlwaysOpen(t);
-  const tiebreaker = typeof req.body?.tiebreaker === 'boolean' ? req.body.tiebreaker : false;
-  const saved = await artifacts.savePacket({ kind: 't', code: t.code }, req.body?.round, packet, { visible, tiebreaker, uploadedBy: null });
+  // A round that is already there keeps its release and tiebreaker settings
+  // unless the upload says otherwise: a corrected file shouldn't take a
+  // released round away from the moderators.
+  const bucket = { kind: 't', code: t.code };
+  const exists = (await artifacts.packetOwner(bucket, req.body?.round)).exists;
+  const visible = typeof req.body?.visible === 'boolean' ? req.body.visible : exists ? undefined : packetsAlwaysOpen(t);
+  const tiebreaker = typeof req.body?.tiebreaker === 'boolean' ? req.body.tiebreaker : exists ? undefined : false;
+  const saved = await artifacts.savePacket(bucket, req.body?.round, packet, { visible, tiebreaker, uploadedBy: null });
+  if (exists) notifyPacketsChanged(t);
+  res.json({ ...saved, replaced: exists });
+}));
+
+// Games filed for each round (removed ones too: they were played on it), by
+// the round's stored name. What Replace and Delete warn about.
+async function gamesByRound(bucket) {
+  const counts = new Map();
+  for (const x of await artifacts.listExports(bucket)) {
+    if (x.round == null) continue;
+    const name = artifacts._internal.safeName(x.round, 'round');
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  return counts;
+}
+
+// Director replaces one round's packet with a new file: same name, place,
+// release state and tiebreaker setting. Rooms already reading it keep the
+// version they loaded until they start the round again.
+app.put('/api/tournaments/:code/packets/:round', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const bucket = { kind: 't', code: t.code };
+  if (!(await artifacts.packetOwner(bucket, req.params.round)).exists) return res.status(404).json({ error: 'not_found' });
+  const packet = typeof req.body?.packet === 'string' ? req.body.packet : JSON.stringify(req.body?.packet);
+  let saved;
+  try { saved = await artifacts.savePacket(bucket, req.params.round, packet, { uploadedBy: null }); }
+  catch (e) { return res.status(400).json({ error: e.message === 'bad_packet' ? 'That file has no tossups.' : 'That file isn\'t a packet (JSON).' }); }
+  notifyPacketsChanged(t);
   res.json(saved);
+}));
+
+// Director deletes a round's packet. Games played on it stay in the results
+// and stats; only the packet goes.
+app.delete('/api/tournaments/:code/packets/:round', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const bucket = { kind: 't', code: t.code };
+  if (!(await artifacts.packetOwner(bucket, req.params.round)).exists) return res.status(404).json({ error: 'not_found' });
+  await artifacts.deletePacket(bucket, req.params.round);
+  notifyPacketsChanged(t);
+  res.json({ ok: true });
 }));
 
 app.get('/api/tournaments/:code/packets', ah(async (req, res) => {
@@ -1023,7 +1069,10 @@ app.get('/api/tournaments/:code/packets', ah(async (req, res) => {
   if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
   // alwaysOpen: a one-room shootout, where every round is the room's whatever
   // its visibility (see packetsAlwaysOpen) — the console says so.
-  res.json({ packets: await artifacts.listPackets({ kind: 't', code: t.code }), alwaysOpen: packetsAlwaysOpen(t) });
+  const bucket = { kind: 't', code: t.code };
+  const games = await gamesByRound(bucket).catch(() => new Map());
+  const packets = (await artifacts.listPackets(bucket)).map((p) => ({ ...p, games: games.get(p.round) || 0 }));
+  res.json({ packets, alwaysOpen: packetsAlwaysOpen(t) });
 }));
 
 // Director drags the rounds into order. It's the order moderators see them in

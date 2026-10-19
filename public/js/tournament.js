@@ -679,13 +679,30 @@ function initModaq() {
     const files = [...($('#packet-files').files || [])];
     if (!files.length) return msay('Choose one or more packet JSON files first.', false);
     const tiebreaker = $('#packet-tiebreaker').checked;
+    // A file named like a round that's already here replaces that round's
+    // packet: say so first.
+    let existing = [];
+    try {
+      const { packets } = await api('GET', `/api/tournaments/${code}/packets?directorToken=${qt(directorToken)}`);
+      const have = new Map(packets.map((x) => [x.round, x]));
+      existing = files.map((f) => have.get(f.name.replace(/\.[^.]+$/, ''))).filter(Boolean);
+    } catch { /* the upload says what happened */ }
+    if (existing.length) {
+      const played = existing.filter((x) => x.games > 0);
+      if (!confirm(`${existing.length === 1 ? 'This round is' : 'These rounds are'} already uploaded and will be replaced: `
+        + existing.map((x) => `"${x.round}"`).join(', ') + '.'
+        + (played.length ? `\n\nGames have already been played on ${played.map((x) => `"${x.round}"`).join(', ')}.` : '')
+        + '\n\nEach keeps its place, release state and tiebreaker setting.')) return;
+    }
     let ok = 0;
     for (const file of files) {
       try {
         const packet = JSON.parse(await file.text());
         if (!Array.isArray(packet.tossups)) throw new Error('no tossups');
         const round = file.name.replace(/\.[^.]+$/, '');
-        await api('POST', `/api/tournaments/${code}/packets`, { directorToken, round, packet, tiebreaker });
+        // Only a ticked box changes the setting: a corrected file for an
+        // existing tiebreaker round mustn't turn it back into a playing round.
+        await api('POST', `/api/tournaments/${code}/packets`, { directorToken, round, packet, ...(tiebreaker ? { tiebreaker } : {}) });
         ok++;
       } catch { /* skip bad file */ }
     }
@@ -1017,6 +1034,7 @@ async function refreshPackets() {
       // has nothing to gain. An older round with no recorded count still offers
       // it — the server refuses if there's nothing there.
       if (p.tiebreaker && p.tossups !== 1) controls.append(splitButton(p));
+      controls.append(replaceButton(p, i + 1), deleteButton(p, i + 1));
       li.append(controls);
       ul.append(li);
     });
@@ -1128,6 +1146,68 @@ function saveOrder(ul) {
 // Breaks a tiebreaker round into one round per question, so each can be
 // released on its own. Confirmed first: it makes twenty rounds out of one, and
 // that's a lot of list to undo by hand.
+const gamesNote = (p) => (p.games > 0
+  ? `\n\n${p.games} game${p.games === 1 ? ' has' : 's have'} already been played on it.`
+  : '');
+
+// A new file for one round: it keeps the round's name, place, release and
+// tiebreaker setting.
+function replaceButton(p, number) {
+  const btn = el('button', { className: 'ghost tiny', textContent: 'Replace…' });
+  btn.title = 'Upload a new file for this round';
+  btn.setAttribute('aria-label', `Replace the packet for Round ${number}`);
+  const pick = el('input', { type: 'file', accept: '.json,application/json', className: 'hidden' });
+  btn.onclick = () => pick.click();
+  pick.onchange = async () => {
+    const file = pick.files?.[0];
+    pick.value = '';
+    if (!file) return;
+    let packet;
+    try {
+      packet = JSON.parse(await file.text());
+      if (!Array.isArray(packet.tossups) || !packet.tossups.length) throw new Error('no tossups');
+    } catch { return msay(`"${file.name}" isn't a packet file (JSON with tossups).`, false); }
+    const was = p.tossups > 0 ? ` (currently ${p.tossups} tossups)` : '';
+    if (!confirm(`Replace the packet for Round ${number}${p.round !== String(number) ? ` ("${p.round}")` : ''}${was} with "${file.name}" (${packet.tossups.length} tossups)?`
+      + gamesNote(p)
+      + (p.games > 0 ? ' Their scores and stats stay as they are; their buzzpoints are checked against the new text, and any question that no longer matches is flagged in the download.' : '')
+      + '\n\nIt keeps its place, release state and tiebreaker setting. A room already reading it keeps the version it loaded until it starts the round again.')) return;
+    btn.disabled = true;
+    try {
+      await api('PUT', `/api/tournaments/${code}/packets/${qt(p.round)}`, { directorToken, packet });
+      msay(`Replaced the Round ${number} packet with "${file.name}".`);
+      refreshPackets();
+      refreshTiebreakers();
+    } catch (e) {
+      msay('Could not replace: ' + e.message, false);
+    } finally { btn.disabled = false; }
+  };
+  const wrap = el('span', { className: 'packet-replace' }, btn, pick);
+  return wrap;
+}
+
+function deleteButton(p, number) {
+  const btn = el('button', { className: 'ghost tiny packet-delete', textContent: 'Delete' });
+  btn.setAttribute('aria-label', `Delete the packet for Round ${number}`);
+  btn.onclick = async () => {
+    if (!confirm(`Delete the packet for Round ${number}${p.round !== String(number) ? ` ("${p.round}")` : ''}? This can't be undone.`
+      + gamesNote(p)
+      + (p.games > 0 ? ' Those games stay in your results and stats, but the buzzpoints download will leave them out.' : '')
+      + (p.visible ? '\n\nIt is released: moderators can no longer load it.' : ''))) return;
+    btn.disabled = true;
+    try {
+      await api('DELETE', `/api/tournaments/${code}/packets/${qt(p.round)}`, { directorToken });
+      msay(`Deleted the Round ${number} packet.`);
+      refreshPackets();
+      refreshTiebreakers();
+    } catch (e) {
+      msay('Could not delete: ' + e.message, false);
+      btn.disabled = false;
+    }
+  };
+  return btn;
+}
+
 function splitButton(p) {
   const btn = el('button', { className: 'ghost tiny', textContent: 'Split' });
   btn.title = 'Make one releasable round per tossup';
