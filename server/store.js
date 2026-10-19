@@ -2615,14 +2615,59 @@ function massingerArm(m, now = Date.now()) {
   m.deadline = m.timerSec > 0 ? now + m.timerSec * 1000 : null;
 }
 
+// Each team gets this many bans and this many protects.
+export const MASSINGER_MAX_PER_TEAM = 3;
+
+// The order of picks, by team index (0 = picks first) and kind: the first team
+// bans; then each team in turn bans and protects; the first team's last
+// protect closes it. With 3 of each:
+//   0 ban | 1 ban, 1 protect | 0 ban, 0 protect | 1 ban, 1 protect |
+//   0 ban, 0 protect | 1 ban, 1 protect | 0 protect
+export function massingerSchedule(per = MASSINGER_MAX_PER_TEAM) {
+  const steps = [{ team: 0, type: 'ban' }];
+  for (let i = 0; i < 2 * per - 1; i++) {
+    const team = i % 2 === 0 ? 1 : 0;
+    steps.push({ team, type: 'ban' }, { team, type: 'protect' });
+  }
+  steps.push({ team: 0, type: 'protect' });
+  return steps;
+}
+
+// The pick that's due now (null when the schedule is used up). Boards saved
+// before the schedule existed have none: any team, either kind.
+const massingerStep = (m) => (Array.isArray(m.schedule) ? m.schedule[m.actions.length] ?? null : undefined);
+
+const massingerUsed = (m, team, type) => m.actions.filter((a) => a.team === team && a.type === type).length;
+// How many of `type` the team has left (Infinity on a board without limits).
+function massingerLeft(m, team, type) {
+  const limit = m.limits?.[type];
+  return Number.isFinite(limit) ? Math.max(0, limit - massingerUsed(m, team, type)) : Infinity;
+}
+const massingerBannable = (m) => m.subcats.filter((sc) => sc.protectedBy == null && sc.banned < sc.indexes.length);
+
+// Whose turn it is follows the schedule.
+function massingerSyncTurn(m) {
+  const step = massingerStep(m);
+  if (step) m.turn = step.team;
+}
+
+// Done when the schedule is used up, or nothing is left to pick, or the target
+// is reached and a ban is due (none may take it below; the protects after the
+// last ban still happen).
 function massingerFinishIfDone(m) {
-  if (massingerRemaining(m) <= m.target) {
+  const step = massingerStep(m);
+  const atTarget = massingerRemaining(m) <= m.target;
+  if (step === null || massingerBannable(m).length === 0
+    || (atTarget && (step === undefined || step.type === 'ban'))) {
     m.status = 'done';
     m.deadline = null;
   }
 }
 
-export function massingerStart(room, { round, subcats, teams, timerSec, target, control } = {}) {
+export function massingerStart(room, { round, subcats, teams, timerSec, target, control, randomFirst } = {}) {
+  // Coin flip for who picks first, done here so no client decides it.
+  const flip = randomFirst === true && Math.random() < 0.5;
+  if (flip && Array.isArray(teams)) teams = [teams[1], teams[0]];
   const labels = new Set();
   const clean = [];
   for (const sc of Array.isArray(subcats) ? subcats : []) {
@@ -2643,6 +2688,9 @@ export function massingerStart(room, { round, subcats, teams, timerSec, target, 
     timerSec: clampNum(timerSec, 0, 300, 30),
     target: clampNum(target, 1, total, 20),
     control: MASSINGER_CONTROLS.includes(control) ? control : 'captain',
+    limits: { ban: MASSINGER_MAX_PER_TEAM, protect: MASSINGER_MAX_PER_TEAM },
+    schedule: massingerSchedule(MASSINGER_MAX_PER_TEAM),
+    coinFlip: randomFirst === true,
     subcats: clean,
     actions: []
   };
@@ -2669,15 +2717,19 @@ export function massingerPick(room, { type, label, by } = {}) {
   if (!sc) return { error: 'no_subcat' };
   if (sc.protectedBy != null) return { error: 'protected' };
   if (sc.banned >= sc.indexes.length) return { error: 'exhausted' };
-  if (type === 'protect') {
-    sc.protectedBy = m.turn;
-  } else if (type === 'ban') {
-    sc.banned += 1;
-  } else {
-    return { error: 'bad_type' };
+  if (type !== 'protect' && type !== 'ban') return { error: 'bad_type' };
+  const step = massingerStep(m);
+  if (step) {
+    m.turn = step.team;
+    if (type !== step.type) return { error: step.type === 'ban' ? 'ban_now' : 'protect_now' };
+  } else if (massingerLeft(m, m.turn, type) <= 0) {
+    return { error: type === 'ban' ? 'no_bans_left' : 'no_protects_left' };
   }
+  if (type === 'protect') sc.protectedBy = m.turn;
+  else sc.banned += 1;
   m.actions.push({ type, label, team: m.turn, at: Date.now(), by: by || 'moderator' });
-  m.turn = 1 - m.turn;
+  if (step) massingerSyncTurn(m);
+  else m.turn = 1 - m.turn;
   massingerArm(m);
   massingerFinishIfDone(m);
   return { ok: true };
@@ -2688,6 +2740,7 @@ export function massingerSetTurn(room, team) {
   const m = room.massinger;
   if (!m || m.status !== 'active') return { error: 'not_active' };
   if (team !== 0 && team !== 1) return { error: 'bad_team' };
+  if (massingerStep(m)) return { error: 'scheduled' };   // the order is fixed
   m.turn = team;
   massingerArm(m);
   return { ok: true };
@@ -2713,6 +2766,7 @@ export function massingerResetSubcat(room, label) {
   m.actions = m.actions.filter((a) => a.label !== label);
   // Reopening a row can put the count back above target, so re-decide status.
   m.status = 'active';
+  massingerSyncTurn(m);
   massingerArm(m);
   massingerFinishIfDone(m);
   return { ok: true };
@@ -2734,14 +2788,19 @@ export function massingerUndo(room) {
   return { ok: true };
 }
 
-// Timer enforcement: apply a random legal ban for the team on the clock.
+// Timer enforcement: a random pick of whatever is due (a ban or a protect)
+// for the team on the clock.
 export function massingerRandomBan(room, by) {
   const m = room.massinger;
   if (!m || m.status !== 'active') return { error: 'not_active' };
-  const bannable = m.subcats.filter((sc) => sc.protectedBy == null && sc.banned < sc.indexes.length);
-  if (bannable.length === 0) return { error: 'exhausted' };
-  const sc = bannable[Math.floor(Math.random() * bannable.length)];
-  return massingerPick(room, { type: 'ban', label: sc.label, by: by || 'random' });
+  const step = massingerStep(m);
+  const type = step ? step.type
+    : massingerLeft(m, m.turn, 'ban') > 0 ? 'ban' : massingerLeft(m, m.turn, 'protect') > 0 ? 'protect' : null;
+  if (!type) return { error: 'no_picks_left' };
+  const pool = massingerBannable(m);   // what can be banned can also be protected
+  if (pool.length === 0) return { error: 'exhausted' };
+  const sc = pool[Math.floor(Math.random() * pool.length)];
+  return massingerPick(room, { type, label: sc.label, by: by || 'random' });
 }
 
 // Can this member make the pick that's on the clock? The server decides this

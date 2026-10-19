@@ -104,12 +104,19 @@
     <section id="massinger-view" class="panel massinger hidden" aria-live="polite">
       <h3>MASSINGER pick/ban <span id="ms-round" class="muted-count"></span></h3>
       <div id="ms-status" class="ms-status"></div>
+      <div id="ms-clock" class="ms-clock hidden" aria-hidden="true">
+        <div class="ms-clock-num"></div>
+        <div class="ms-clock-bar"><span></span></div>
+      </div>
+      <div id="ms-counts" class="ms-counts hidden"></div>
       <p id="ms-hint" class="ms-hint"></p>
       <details id="ms-board-wrap" class="ms-board-wrap" open>
         <summary>The board</summary>
         <ul id="ms-board" class="ms-board"></ul>
       </details>
     </section>
+    <!-- A pick lands: shown over everything for a moment, with a sound. -->
+    <div id="ms-flash" class="ms-flash hidden" aria-live="assertive"></div>
     <div class="buzz-row">
       <section id="buzz-area">
         <div id="phase-label" class="phase ready">Ready to Buzz</div>

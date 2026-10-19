@@ -275,15 +275,17 @@
     <!-- ============================== MASSINGER ============================== -->
     <section class="panel" id="massinger">
       <h3>MASSINGER (pick/ban) tournaments</h3>
-      <p>Before each game, the two teams take turns protecting or banning subcategories until 20
-        tossups are left. Then the game is read on those 20.</p>
+      <p>Before each game, each team makes 3 bans and 3 protects, in a fixed order. The first team
+        bans. Then the second team bans and protects, then the first team bans and protects, and so on.
+        The first team's last protect ends it. From a 26-tossup packet that leaves 20, and the game is
+        read on those.</p>
 
       <h4>Set up</h4>
       <ol>
         <li><strong>Create the tournament</strong> as a team tournament. Under the scoring format, tick
           <em>MASSINGER pick/ban before each game</em>, then choose who picks (each team's captain,
           anyone on the team, or the moderator only) and the timer (seconds per pick, 0 for none).</li>
-        <li><strong>Check the packets.</strong> Each round needs more than 20 tossups, and every tossup
+        <li><strong>Check the packets.</strong> Each round needs more than 20 tossups (26 uses all six bans), and every tossup
           needs its subcategory as the last part of its metadata, after the last comma
           (<code>&lt;Author, Science - Biology&gt;</code>), with at least two different subcategories.
           A packet that doesn't qualify is read in full, without a pick/ban.</li>
@@ -300,9 +302,10 @@
         <li><strong>Teams.</strong> The moderator chooses the two teams and puts every connected player on
           one, marking a captain for each team if captains pick. Meanwhile players see
           <em>Starting soon</em> above their buzzer, with the team they're on.</li>
-        <li><strong>Pick/ban.</strong> The moderator chooses which team picks first and clicks
-          <em>Begin pick/ban</em>. Players pick on their own screens. When the timer runs out, a
-          random ban is made. The moderator can undo or edit picks.</li>
+        <li><strong>Pick/ban.</strong> Who picks first is a coin flip unless the moderator chooses a
+          team. The moderator clicks <em>Begin pick/ban</em>, and players pick on their own screens.
+          When the timer runs out, a random pick of the due kind (ban or protect) is made. The
+          moderator can undo or edit picks.</li>
         <li><strong>Read.</strong> <em>Continue to the game</em> starts the game straight away with the
           lobby's teams and players. The pick/ban result stays folded above the game.</li>
       </ol>

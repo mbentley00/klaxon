@@ -687,7 +687,68 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
 #massinger-view.lobby { border-color: var(--accent); }
 .massinger .ms-status.soon { color: var(--accent); font-size: 1.15rem; }
 .massinger.lobby .ms-hint { font-size: 1rem; color: var(--ink); }
-.ms-board-wrap > summary { cursor: pointer; font-size: .85rem; color: var(--muted); margin-bottom: 6px; }/* Tournament code in the room's tournament strip: a real link. */
+.ms-board-wrap > summary { cursor: pointer; font-size: .85rem; color: var(--muted); margin-bottom: 6px; }
+
+/* The pick clock: big enough to read across a room. */
+.ms-clock { margin: .2em 0 .7em; text-align: center; }
+.ms-clock-num {
+  font-size: clamp(3.2rem, 14vw, 6rem); font-weight: 800; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--ink); letter-spacing: -.02em;
+}
+.ms-clock-bar { height: 12px; border: 1.5px solid var(--line); border-radius: 99px; overflow: hidden; margin-top: 8px; background: var(--surface); }
+.ms-clock-bar span { display: block; height: 100%; background: var(--accent); transition: width .2s linear; }
+.ms-clock.warn .ms-clock-num { color: var(--warn); }
+.ms-clock.warn .ms-clock-bar span { background: var(--warn); }
+.ms-clock.urgent .ms-clock-num { color: var(--bad); animation: ms-pulse .5s ease-in-out infinite alternate; }
+.ms-clock.urgent .ms-clock-bar span { background: var(--bad); }
+.ms-clock.expired .ms-clock-num { color: var(--bad); font-size: clamp(2.2rem, 9vw, 3.6rem); animation: ms-blink 1s steps(2) infinite; }
+@keyframes ms-pulse { from { transform: scale(1); } to { transform: scale(1.12); } }
+
+/* Picks left per team; the team on the clock stands out. */
+.ms-counts { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 .5em; font-size: .85rem; }
+.ms-count { border: 1.5px solid var(--line); border-radius: 6px; padding: 2px 8px; color: var(--muted); }
+.ms-count.on { border-color: var(--accent); color: var(--ink); }
+.ms-next { color: var(--muted); align-self: center; }
+
+/* A pick lands: a card over the page, and the row it hit. */
+.ms-flash { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; pointer-events: none; padding: 16px; }
+.ms-flash.hidden { display: none; }
+.ms-flash-card {
+  text-align: center; padding: 22px 34px; border-radius: 14px; border: 3px solid currentColor;
+  background: var(--surface); box-shadow: 0 18px 60px rgba(0,0,0,.35); max-width: min(560px, 100%);
+  animation: ms-flash-in 2.4s cubic-bezier(.2,1.4,.4,1) forwards;
+}
+.ms-flash-card.ban { color: var(--bad); }
+.ms-flash-card.protect { color: var(--ok-deep); }
+.ms-flash-icon { font-size: 3.4rem; line-height: 1; }
+.ms-flash-verb { font-size: clamp(1.8rem, 8vw, 3rem); font-weight: 900; letter-spacing: .08em; }
+.ms-flash-label { font-size: clamp(1.2rem, 5vw, 1.8rem); font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
+.ms-flash-by { font-size: .95rem; color: var(--muted); margin-top: 4px; }
+@keyframes ms-flash-in {
+  0% { opacity: 0; transform: scale(.4) rotate(-4deg); }
+  14% { opacity: 1; transform: scale(1.08) rotate(1deg); }
+  22% { transform: scale(1) rotate(0); }
+  80% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(.96); }
+}
+.ms-flash-card.ban .ms-flash-icon { animation: ms-shake .45s .15s ease-in-out 2; }
+@keyframes ms-shake { 25% { transform: translateX(-8px) rotate(-6deg); } 75% { transform: translateX(8px) rotate(6deg); } }
+.ms-board li.just-banned { animation: ms-row-ban 1.6s ease-out; }
+.ms-board li.just-protected { animation: ms-row-protect 1.6s ease-out; }
+@keyframes ms-row-ban {
+  0%, 30% { background: var(--bad); color: #fff; transform: scale(1.05); opacity: 1; }
+  10%, 20% { transform: translateX(-4px) scale(1.05); }
+  15%, 25% { transform: translateX(4px) scale(1.05); }
+}
+@keyframes ms-row-protect {
+  0%, 30% { background: var(--ok-deep); color: #fff; transform: scale(1.05); box-shadow: 0 0 0 4px var(--ok-bg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-flash-card, .ms-flash-card .ms-flash-icon, .ms-board li.just-banned, .ms-board li.just-protected, .ms-clock-num { animation-duration: .01s !important; animation-iteration-count: 1 !important; }
+  .ms-flash-card { animation: ms-fade 2.4s forwards !important; }
+}
+@keyframes ms-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+/* Tournament code in the room's tournament strip: a real link. */
 .tournament h3 .tlink { color: var(--accent); text-decoration: none; border-bottom: 1.5px solid var(--accent); }
 .tournament h3 .tlink:hover { color: var(--ink); border-bottom-color: var(--ink); }
 
