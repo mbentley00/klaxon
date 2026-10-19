@@ -62,11 +62,26 @@ function nameLike(cell) {
  *
  * Returns { teams: [{ name, players, placeholder }], skipped, header }.
  */
-export function parseSpreadsheet(text) {
-  const rows = splitCells(text).filter((r) => r.some((c) => clean(c)));
-  if (!rows.length) return { teams: [], skipped: 0, header: false };
+// A header cell is short ("Team Name", "Player 3", "School"). A team called
+// "this team name will not be sponsored by xerox" says "team" too, but it's a
+// team, and taking its row for the header loses it.
+const headerCell = (c) => {
+  const h = clean(c);
+  if (!h || h.split(' ').length > 4) return false;
+  // "Player 2" is a header; "Team 2" is a team.
+  return PLAYER_HEADER.test(h) || ((TEAM_LIKE.test(h) || SCHOOL_HEADER.test(h)) && !/\d/.test(h));
+};
 
-  const headerAt = rows.findIndex((r) => r.some((c) => TEAM_LIKE.test(c) || PLAYER_HEADER.test(clean(c))));
+export function parseSpreadsheet(text) {
+  let rows = splitCells(text).filter((r) => r.some((c) => clean(c)));
+  if (!rows.length) return { teams: [], skipped: 0, header: false };
+  // Columns empty in every row (a selection that started a column early) say
+  // nothing; without them, the first column is the first one with something in it.
+  const width = Math.max(...rows.map((r) => r.length));
+  const used = [...Array(width).keys()].filter((i) => rows.some((r) => clean(r[i])));
+  rows = rows.map((r) => used.map((i) => r[i] ?? ''));
+
+  const headerAt = rows.findIndex((r) => r.some(headerCell));
   let teamCol = -1;
   let playerCols = [];
   let numberCol = -1;
@@ -85,32 +100,44 @@ export function parseSpreadsheet(text) {
     body = rows.slice(headerAt + 1);
   }
 
+  // No header to go on: the columns still line up. The first column is the
+  // team (a blank cell there is a team without a name, never its first
+  // player), unless it only ever holds row numbers; the name-like cells after
+  // it are the players.
+  if (!(header && playerCols.length)) {
+    const firstCol = body.map((r) => clean(r[0])).filter(Boolean);
+    const numbered = firstCol.length > 0 && firstCol.every((c) => /^\d+$/.test(c));
+    numberCol = numbered ? 0 : -1;
+    teamCol = numbered ? 1 : 0;
+    playerCols = [...Array(Math.max(0, ...body.map((r) => r.length))).keys()].filter((i) => i > teamCol);
+  }
+
   const teams = [];
   let skipped = 0;
-  let unnamed = 0;
+  const pending = [];
   for (const row of body) {
-    let name;
-    let players;
-    if (header && playerCols.length) {
-      name = teamCol >= 0 ? clean(row[teamCol]) : '';
-      players = playerCols.map((i) => row[i]).filter(nameLike).map(clean);
-    } else {
-      // No header to go on: team first, then whoever follows.
-      const cells = row.map(clean);
-      const first = cells.findIndex((c) => c && !/^\d+$/.test(c));
-      name = first >= 0 ? cells[first] : '';
-      players = cells.slice(first + 1).filter(nameLike);
-    }
+    const name = teamCol >= 0 ? clean(row[teamCol]) : '';
+    // A cell repeating the team's own name isn't a player (a "CAP" footer row).
+    let players = playerCols.map((i) => row[i]).filter(nameLike).map(clean)
+      .filter((p) => p.toLowerCase() !== name.toLowerCase());
     players = [...new Map(players.map((p) => [p.toLowerCase(), p])).values()];
     if (!players.length) { skipped++; continue; }
-    let placeholder = false;
-    if (!name) {
-      unnamed++;
-      const n = numberCol >= 0 ? clean(row[numberCol]) : '';
-      name = `Team ${/^\d+$/.test(n) ? n : unnamed}`;
-      placeholder = true;
+    const team = { name, players, placeholder: !name };
+    if (!name) pending.push({ team, n: numberCol >= 0 ? clean(row[numberCol]) : '' });
+    teams.push(team);
+  }
+  // Teams without a name: Team 1, Team 2... (the sheet's row number when it
+  // has one), never the name of a team that is already there.
+  const taken = new Set(teams.filter((t) => t.name).map((t) => t.name.toLowerCase()));
+  let next = 1;
+  for (const { team, n } of pending) {
+    let name = /^\d+$/.test(n) && !taken.has(`team ${n}`) ? `Team ${n}` : '';
+    while (!name) {
+      if (!taken.has(`team ${next}`)) name = `Team ${next}`;
+      next++;
     }
-    teams.push({ name, players, placeholder });
+    taken.add(name.toLowerCase());
+    team.name = name;
   }
   return { teams, skipped, header };
 }
