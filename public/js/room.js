@@ -124,6 +124,15 @@ socket.on('rtt_echo', ackNow);
 // Removed by the reader: drop our identity and return home. Leaving on our own
 // (the shootout's Leave game) is different: back to the join gate, name still
 // filled in, so coming back later is one click.
+// A reader assigned to rounds, whose room just started a round that isn't
+// theirs (or whose access the director changed): no longer staff here. Back
+// to their list of rounds, which says where they read and when.
+socket.on('staff_revoked', (info) => {
+  forget('staffRole:' + code); forget('joined:' + code); forget('role:' + code);
+  const t = info?.tournamentCode;
+  location.replace(t ? `/t/${t}/join` : `/r/${code}`);
+});
+
 socket.on('kicked', (info) => {
   forget('joined:' + code); forget('role:' + code);
   state.role = null; state.me = null;
@@ -407,6 +416,8 @@ function doJoin(role, name, team, roster) {
         not_logged_in: 'Moderators: sign in with your reader account below, then try again.',
         not_approved: "Your account isn't approved for this tournament yet — request access below, or ask the director to add you (they can use your email).",
         no_tournament: "This room isn't part of a tournament, so only its reader link grants control.",
+        not_assigned: "You read only the rounds the director assigned you, and none of them is in this room. Join as a player below.",
+        not_your_round: "This room is reading a round you weren't assigned. You can read here when your round comes up; join as a player for now.",
       }[resp.denyReason] || 'Staff credentials invalid — open the room from your reader link.';
       // Not approved (but logged in): offer the access request right here.
       const tcode = resp.state?.tournamentCode;
@@ -2250,15 +2261,59 @@ const sameTeam = (a, b) => {
   return norm(a) !== '' && norm(a) === norm(b);
 };
 
+// The board is open while picks are being made and folds away once it's done
+// (it sits above the buzzer). Only on a change, so a player's own toggle sticks.
+let msShownStatus = null;
+
+// Before the board exists: the moderator is setting the teams. Say so plainly
+// (a bare buzzer here reads as "the game has started"), and say which team
+// this buzzer is on, since that decides who picks.
+function renderMassingerLobby(s, lobby) {
+  const view = $('#massinger-view');
+  view.classList.remove('hidden');
+  view.classList.add('lobby');
+  $('#ms-round').textContent = lobby.round ? `Round ${lobby.round}` : '';
+  const status = $('#ms-status');
+  status.className = 'ms-status soon';
+  status.textContent = 'Starting soon — the moderator is setting the teams.';
+  const hint = $('#ms-hint');
+  if (state.role !== 'player') {
+    hint.textContent = 'Teams take turns protecting or banning categories before the first question.';
+  } else {
+    const team = myTeam(s);
+    const me = (s.members || []).find((x) => x.id === state.me?.id);
+    const vouched = !!me?.rosterPlayer || !!me?.assignedTeam;
+    hint.textContent = !team
+      ? "You're not on a team yet. Tell the moderator which team you're on — only players on a team can pick."
+      : `You're on ${team}${vouched ? '' : ' (the moderator still has to confirm it)'}` +
+        `${me?.isCaptain ? ', and you make its picks' : ''}. ` +
+        'Teams take turns protecting or banning categories before the first question.';
+  }
+  $('#ms-board-wrap').classList.add('hidden');
+  msShownStatus = 'lobby';
+}
+
 function renderMassinger(s) {
   const m = s.massinger;
   const view = $('#massinger-view');
+  if (s.massingerLobby) {
+    if (msTimer) { clearInterval(msTimer); msTimer = null; }
+    renderMassingerLobby(s, s.massingerLobby);
+    return;
+  }
+  view.classList.remove('lobby');
   if (!m) {
     view.classList.add('hidden');
     if (msTimer) { clearInterval(msTimer); msTimer = null; }
+    msShownStatus = null;
     return;
   }
   view.classList.remove('hidden');
+  $('#ms-board-wrap').classList.remove('hidden');
+  if (msShownStatus !== m.status) {
+    $('#ms-board-wrap').open = m.status !== 'done';
+    msShownStatus = m.status;
+  }
   $('#ms-round').textContent = m.round ? `Round ${m.round}` : '';
 
   // My turn? Then the board becomes interactive for me: the team on the clock

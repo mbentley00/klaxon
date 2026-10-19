@@ -97,6 +97,19 @@
          for their own. Players press it to buzz; staff press (or Space) to
          reset. The queue's column is a fixed width and pinned to the top of the
          row, so a buzz landing moves neither of them.  -->
+    <!-- MASSINGER pick/ban (tournament games only): "starting soon" while the
+         moderator sets the teams, then the board the moderator is driving, so
+         both teams watch picks land live. Above the buzzer: nothing is read
+         until it's done, and once it is, the board folds away. -->
+    <section id="massinger-view" class="panel massinger hidden" aria-live="polite">
+      <h3>MASSINGER pick/ban <span id="ms-round" class="muted-count"></span></h3>
+      <div id="ms-status" class="ms-status"></div>
+      <p id="ms-hint" class="ms-hint"></p>
+      <details id="ms-board-wrap" class="ms-board-wrap" open>
+        <summary>The board</summary>
+        <ul id="ms-board" class="ms-board"></ul>
+      </details>
+    </section>
     <div class="buzz-row">
       <section id="buzz-area">
         <div id="phase-label" class="phase ready">Ready to Buzz</div>
@@ -259,15 +272,6 @@
            lodged are argued. -->
       <p class="hint" id="protest-where"></p>
       <ul id="protest-list" class="protest-list"></ul>
-    </section>
-
-    <!-- MASSINGER pick/ban board (tournament games only) — mirrors the board
-         the moderator is driving so both teams watch picks land live. -->
-    <section id="massinger-view" class="panel massinger hidden" aria-live="polite">
-      <h3>MASSINGER pick/ban <span id="ms-round" class="muted-count"></span></h3>
-      <div id="ms-status" class="ms-status"></div>
-      <p id="ms-hint" class="ms-hint"></p>
-      <ul id="ms-board" class="ms-board"></ul>
     </section>
 
     <!-- Roster (staff only): load a QBJ registration file, pick the teams

@@ -23,6 +23,7 @@ import { startWatchdog } from './watchdog.js';
 import { startBackups } from './backup.js';
 import { roundSummary } from './scorecard.js';
 import { buildZip } from './zip.js';
+import { toPacketNumbers } from './packetNumbers.js';
 import * as accounts from './accounts.js';
 import { parseYellowFruit, planImport } from './yfimport.js';
 import { buildYft } from './yft.js';
@@ -72,18 +73,67 @@ function roomStaffOk(room, token) {
 // A logged-in account that a director approved for the room's tournament is a
 // moderator credential in its own right — no reader-token link required.
 // Returns true, or why not: 'no_tournament' | 'not_logged_in' | 'not_approved'.
-async function accountModeratorOk(room, sessionToken) {
-  if (!room.tournamentCode) return 'no_tournament';
+// An account may be approved for every room (scope 'all', the default) or
+// only for the rooms and rounds the director assigned it (scope 'assigned':
+// a player who reads on their byes). ALL_ROUNDS, or a Set of round labels.
+const ALL_ROUNDS = 'all';
+const roundAllowed = (rounds, round) => rounds === ALL_ROUNDS || (rounds instanceof Set && rounds.has(String(round ?? '')));
+
+// What the account behind a session may do in this room:
+// { rounds } or { reason: 'no_tournament' | 'not_logged_in' | 'not_approved' | 'not_assigned' }.
+async function accountRoomAccess(room, sessionToken) {
+  if (!room.tournamentCode) return { reason: 'no_tournament' };
   const account = accounts.accountForSession(sessionToken);
-  if (!account) return 'not_logged_in';
-  const status = await artifacts.memberStatus({ kind: 't', code: room.tournamentCode }, account.id);
-  return status === 'approved' ? true : 'not_approved';
+  if (!account) return { reason: 'not_logged_in' };
+  const m = await artifacts.getMember({ kind: 't', code: room.tournamentCode }, account.id);
+  if (m?.status !== 'approved') return { reason: 'not_approved' };
+  if (m.scope !== 'assigned') return { rounds: ALL_ROUNDS };
+  const rounds = new Set((m.assignments || []).filter((a) => a.room === room.code).map((a) => a.round));
+  return rounds.size ? { rounds } : { reason: 'not_assigned' };
+}
+
+// A game no one has touched for this long is over, whatever its file says
+// (a moderator who closed the tab without finishing it).
+const LIVE_GAME_IDLE_MS = 20 * 60 * 1000;
+
+// The round this room is reading right now, or '' between games. A scoped
+// reader is staff here only then, or during one of their own rounds: a staff
+// screen hears the game as it is read (the shared game carries the packet,
+// typed answers carry its answers).
+async function roomLiveRound(room) {
+  const s = await modaqStateFor(room).catch(() => null);
+  if (!s?.json || !s.round) return '';
+  if (Date.now() - (s.at || 0) > LIVE_GAME_IDLE_MS) return '';
+  if (room.tournamentCode) {
+    const game = await artifacts.getRoomRoundExport({ kind: 't', code: room.tournamentCode }, room.code, s.round).catch(() => null);
+    if (game && game._inProgress !== true && Array.isArray(game.match_questions) && game.match_questions.length) return '';
+  }
+  return String(s.round);
+}
+
+// Joining as staff on an account: true, or why not. Adds 'not_your_round' for
+// a scoped reader while the room is reading someone else's round.
+async function accountModeratorOk(room, sessionToken) {
+  const a = await accountRoomAccess(room, sessionToken);
+  if (a.reason) return a.reason;
+  if (a.rounds !== ALL_ROUNDS) {
+    const live = await roomLiveRound(room);
+    if (live && !a.rounds.has(live)) return 'not_your_round';
+  }
+  return true;
+}
+
+// The rounds a REST caller may see in this room: ALL_ROUNDS (a staff token,
+// or a full moderator), a Set (a scoped reader), or null (not staff here).
+async function roomRounds(room, token, sessionToken) {
+  if (roomStaffOk(room, token)) return ALL_ROUNDS;
+  const a = await accountRoomAccess(room, sessionToken);
+  return a.reason ? null : a.rounds;
 }
 
 // Room-scoped MODAQ artifact calls take either credential.
 async function roomModOk(room, token, sessionToken) {
-  if (roomStaffOk(room, token)) return true;
-  return (await accountModeratorOk(room, sessionToken)) === true;
+  return (await roomRounds(room, token, sessionToken)) != null;
 }
 
 const publicDir = path.join(__dirname, '..', 'public');
@@ -602,11 +652,13 @@ app.post('/api/tournaments/:code/access', ah(async (req, res) => {
 app.get('/api/tournaments/:code/access', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   const account = accounts.accountForSession(req.query.sessionToken);
-  const memberStatus = account
-    ? await artifacts.memberStatus({ kind: 't', code: t.code }, account.id)
-    : null;
-  if (!t.requireReaderAccounts) return res.json({ required: false, status: 'approved', memberStatus });
-  res.json({ required: true, status: account ? memberStatus : null, memberStatus });
+  const member = account ? await artifacts.getMember({ kind: 't', code: t.code }, account.id) : null;
+  const memberStatus = member?.status || null;
+  // What they may moderate: everywhere, or the rounds and rooms assigned.
+  const scope = member?.status === 'approved' ? (member.scope === 'assigned' ? 'assigned' : 'all') : null;
+  const assignments = scope === 'assigned' ? (member.assignments || []) : undefined;
+  if (!t.requireReaderAccounts) return res.json({ required: false, status: 'approved', memberStatus, scope, assignments });
+  res.json({ required: true, status: account ? memberStatus : null, memberStatus, scope, assignments });
 }));
 
 // Director lists / approves / denies reader accounts.
@@ -634,6 +686,22 @@ app.put('/api/tournaments/:code/members/:accountId', ah(async (req, res) => {
   if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
   const m = await artifacts.setMemberStatus({ kind: 't', code: t.code }, req.params.accountId, req.body?.status);
   if (!m) return res.status(404).json({ error: 'not_found' });
+  if (m.status !== 'approved') revokeAccountStaff(t, m.accountId);
+  res.json({ member: m });
+}));
+
+// Director sets what an approved moderator may read: every room (scope 'all',
+// the default) or only some rounds in some rooms (scope 'assigned', with
+// assignments [{ round, room }]) — a player who reads on their byes.
+app.put('/api/tournaments/:code/members/:accountId/access', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const m = await artifacts.setMemberAccess({ kind: 't', code: t.code }, req.params.accountId, {
+    scope: req.body?.scope, assignments: req.body?.assignments
+  });
+  if (!m) return res.status(404).json({ error: 'not_found' });
+  // Screens open under the old rules rejoin under the new ones.
+  revokeAccountStaff(t, m.accountId);
   res.json({ member: m });
 }));
 
@@ -1020,6 +1088,50 @@ async function tournamentRoundNumbers(bucket) {
   return roundNumbers(await artifacts.listPackets(bucket));
 }
 
+// Games numbered by their place in the round's full packet, for anything that
+// looks questions up in the stored packet. A MASSINGER room read a packet with
+// its bans taken out, so MODAQ's numbers are places in THAT (see
+// packetNumbers.js). Stored games keep MODAQ's numbering; this is export-only.
+// `matches` are [{ qbj, ... }]; returns them renumbered, plus any game whose
+// questions couldn't all be found in its packet.
+async function inPacketNumbers(matches, packetsByRound) {
+  const boards = new Map();
+  const boardFor = async (room, round) => {
+    const key = `${room}\u0000${round}`;
+    if (!boards.has(key)) boards.set(key, await artifacts.getMassinger(room, round).catch(() => null));
+    return boards.get(key);
+  };
+  const warnings = [];
+  const out = [];
+  for (const m of matches) {
+    const qbj = m?.qbj;
+    const round = String(qbj?._round ?? '');
+    const packet = packetsByRound.get(round);
+    if (!qbj || !packet) { out.push(m); continue; }
+    const board = qbj._room ? await boardFor(String(qbj._room), round) : null;
+    const r = toPacketNumbers(qbj, packet, board);
+    if (r.unmatched) {
+      warnings.push({ round, room: String(qbj._room ?? ''),
+        teams: (qbj.match_teams || []).map((mt) => mt?.team?.name ?? ''),
+        questionsNotInPacket: r.unmatched, massinger: !!board });
+    }
+    out.push(r.qbj === qbj ? m : { ...m, qbj: r.qbj });
+  }
+  return { matches: out, warnings };
+}
+
+// Every round's stored packet, by round label (a damaged one is left out).
+async function packetsByRoundFor(bucket) {
+  const map = new Map();
+  for (const p of await artifacts.listPackets(bucket)) {
+    try {
+      const text = await artifacts.getPacket(bucket, p.round);
+      if (text != null) map.set(String(p.round), JSON.parse(text));
+    } catch { /* skip a bad packet */ }
+  }
+  return map;
+}
+
 // One game's QBJ as stock MODAQ would have saved it, for buzzpoints and
 // anything else built on MODAQ's files: Round_<N>_<team>_<team>.qbj, with
 // `packets` naming the packet file the round was uploaded from. A game from
@@ -1031,6 +1143,7 @@ async function exportDownload(bucket, filename, text) {
   const round = String(qbj?._round ?? '');
   const number = (await tournamentRoundNumbers(bucket)).get(round);
   if (!number || !Array.isArray(qbj.match_teams)) return { name: filename, text };
+  ({ matches: [{ qbj }] } = await inPacketNumbers([{ qbj }], await packetsByRoundFor(bucket)));
   return {
     name: `${gameFileName(qbj, number)}.qbj`,
     text: JSON.stringify(buzzpointsGame(qbj, round), null, 2)
@@ -1359,16 +1472,20 @@ function packetsAlwaysOpen(t) {
 
 app.get('/api/rooms/:code/packets', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
   if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
   const list = await artifacts.listPackets(store.bucketForRoom(room));
   const open = packetsAlwaysOpen(room.tournamentCode ? store.getTournament(room.tournamentCode) : null);
-  res.json({ packets: list.filter((p) => p.visible || open).map((p) => p.round) });
+  // A reader assigned to rounds sees only theirs.
+  res.json({ packets: list.filter((p) => (p.visible || open) && roundAllowed(rounds, p.round)).map((p) => p.round) });
 }));
 
 app.post('/api/rooms/:code/packets', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
+  if (!roundAllowed(rounds, req.body?.round)) return res.status(403).json({ error: 'not_your_round' });
   const packet = typeof req.body?.packet === 'string' ? req.body.packet : JSON.stringify(req.body?.packet);
   const bucket = store.bucketForRoom(room);
   // In a tournament the packets are shared by every room, so a moderator's
@@ -1391,7 +1508,9 @@ app.post('/api/rooms/:code/packets', ah(async (req, res) => {
 
 app.get('/api/rooms/:code/packets/:round', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
+  if (!roundAllowed(rounds, req.params.round)) return res.status(403).json({ error: 'not_your_round' });
   if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
   const bucket = store.bucketForRoom(room);
   // Enforce visibility: a moderator can only fetch a round the director released.
@@ -1466,27 +1585,32 @@ app.get('/api/rooms/:code/scorecard', ah(async (req, res) => {
 // Previous games of this room (staff only): summaries, and one full record.
 app.get('/api/rooms/:code/games', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
-  res.json({ games: (await artifacts.listGames(room.code)).filter((g) => ownGame(room, g)) });
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
+  res.json({ games: (await artifacts.listGames(room.code)).filter((g) => ownGame(room, g) && roundAllowed(rounds, g.round)) });
 }));
 
 app.get('/api/rooms/:code/games/:id', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
   // The archived game carries the packet: same account gate as packet reads.
   if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
   const game = await artifacts.getGame(room.code, req.params.id);
-  if (!game || !ownGame(room, game)) return res.status(404).json({ error: 'not_found' });
+  if (!game || !ownGame(room, game) || !roundAllowed(rounds, game.round)) return res.status(404).json({ error: 'not_found' });
   res.json({ game });
 }));
 
 // The shared MODAQ game for this room (staff only — it contains the packet).
 app.get('/api/rooms/:code/modaq-state', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
   // The shared game carries the packet: same account gate as packet reads.
   if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
-  res.json({ state: await modaqStateFor(room) });
+  // Someone else's round is no game of a scoped reader's: as if there were none.
+  const state = await modaqStateFor(room);
+  res.json({ state: state && roundAllowed(rounds, state.round) ? state : null });
 }));
 
 // The persisted MASSINGER pick/ban board for a round (null body if none).
@@ -1494,15 +1618,21 @@ app.get('/api/rooms/:code/modaq-state', ah(async (req, res) => {
 // packet before handing it to MODAQ.
 app.get('/api/rooms/:code/massinger/:round', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
+  if (!roundAllowed(rounds, req.params.round)) return res.status(403).json({ error: 'not_your_round' });
   res.json({ massinger: await artifacts.getMassinger(room.code, req.params.round) });
 }));
 
 // Released tiebreaker questions the moderator can sub in.
 app.get('/api/rooms/:code/tiebreakers', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
   if (!(await readerAccessOk(room, reqSession(req)))) return res.status(403).json(ACCESS_DENIED);
+  // A scoped reader sees the tiebreakers only while reading one of their own
+  // rounds here: their team may need those questions later.
+  if (rounds !== ALL_ROUNDS && !roundAllowed(rounds, await roomLiveRound(room))) return res.json({ tiebreakers: [] });
   res.json({ tiebreakers: await artifacts.getTiebreakerTossups(store.bucketForRoom(room)) });
 }));
 
@@ -1528,7 +1658,9 @@ async function flushBuzzPoints(room) {
 
 app.post('/api/rooms/:code/export', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
+  if (!roundAllowed(rounds, req.body?.round)) return res.status(403).json({ error: 'not_your_round' });
   if (req.body?.qbj == null) return res.status(400).json({ error: 'missing_qbj' });
   res.json(await syncRoomExport(room, {
     round: req.body?.round, qbj: req.body.qbj, inProgress: req.body?.inProgress === true,
@@ -1593,15 +1725,22 @@ async function maybeAutoRelease(room, round) {
 
 app.get('/api/rooms/:code/exports', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
-  res.json({ exports: await artifacts.listExports(store.bucketForRoom(room)) });
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
+  res.json({ exports: (await artifacts.listExports(store.bucketForRoom(room))).filter((x) => roundAllowed(rounds, x.round)) });
 }));
 
 app.get('/api/rooms/:code/exports/:filename', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
   const text = await artifacts.getExport(store.bucketForRoom(room), req.params.filename);
   if (text == null) return res.status(404).json({ error: 'not_found' });
+  if (rounds !== ALL_ROUNDS) {
+    let round = null;
+    try { round = JSON.parse(text)?._round; } catch { /* unreadable: not theirs */ }
+    if (!roundAllowed(rounds, round)) return res.status(404).json({ error: 'not_found' });
+  }
   res.type('application/json').send(text);
 }));
 
@@ -1610,7 +1749,7 @@ app.get('/api/rooms/:code/exports/:filename', ah(async (req, res) => {
 // game played on it with every buzz. See shootout.buzzpointsExport.
 app.get('/api/rooms/:code/shootout/export.zip', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  if ((await roomRounds(room, reqToken(req), reqSession(req))) !== ALL_ROUNDS) return res.status(403).json({ error: 'forbidden' });
   const session = room.shootoutSession;
   if (!room.settings.shootout || !session) return res.status(404).json({ error: 'no_session' });
   const bucket = store.bucketForRoom(room);
@@ -1635,13 +1774,16 @@ app.get('/api/rooms/:code/shootout/export.zip', ah(async (req, res) => {
 
 app.get('/api/rooms/:code/errata', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
-  res.json({ errata: await artifacts.getErrata(store.bucketForRoom(room)) });
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
+  res.json({ errata: (await artifacts.getErrata(store.bucketForRoom(room))).filter((e) => roundAllowed(rounds, e.round)) });
 }));
 
 app.put('/api/rooms/:code/errata', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
-  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
+  if (!roundAllowed(rounds, req.body?.round)) return res.status(403).json({ error: 'not_your_round' });
   const merged = await artifacts.replaceErrataForScope(
     store.bucketForRoom(room),
     { room: room.code, round: req.body?.round },
@@ -1730,14 +1872,9 @@ async function buzzpointsFor(code) {
   const bucket = { kind: 't', code: t.code };
   let matches = [];
   try { matches = await artifacts.readAllExports(bucket); } catch { matches = []; }
-  const packetsByRound = new Map();
-  try {
-    for (const p of await artifacts.listPackets(bucket)) {
-      const text = await artifacts.getPacket(bucket, p.round);
-      if (text == null) continue;
-      try { packetsByRound.set(String(p.round), JSON.parse(text)); } catch { /* skip bad packet */ }
-    }
-  } catch { /* no packets: lengths/answers just come up empty */ }
+  let packetsByRound = new Map();
+  try { packetsByRound = await packetsByRoundFor(bucket); } catch { /* no packets: lengths/answers just come up empty */ }
+  ({ matches } = await inPacketNumbers(matches, packetsByRound));
   return { t, data: computeBuzzpoints(matches, packetsByRound) };
 }
 
@@ -1781,13 +1918,23 @@ app.get('/t/:code/buzzpoints.zip', ah(async (req, res) => {
   // mirror of someone else's set): each names its packet by the file the
   // round was uploaded from, which is that set's own packet name.
   const gamesOnly = req.query.games === '1';
-  const { files, games } = tournamentBuzzpointsExport(t, rounds, await artifacts.readAllExports(bucket), { gamesOnly });
+  const byRound = new Map(rounds.filter((r) => r.packet).map((r) => [String(r.round), r.packet]));
+  const { matches, warnings } = await inPacketNumbers(await artifacts.readAllExports(bucket), byRound);
+  const { files, games } = tournamentBuzzpointsExport(t, rounds, matches, { gamesOnly });
   if (games === 0) return res.status(404).send(gamesOnly ? 'No finished games yet.' : 'No finished games with a packet yet.');
   // Every buzz attempt Klaxon kept, including the ones that lost the race,
   // which no QBJ holds. Beside data/, so the importer never reads it.
   if (!gamesOnly) {
     const all = await allBuzzAttempts(t);
     if (all.buzzes.length) files.push({ name: 'klaxon_all_buzz_attempts.json', data: JSON.stringify(all, null, 2) });
+  }
+  // Games with questions that aren't in their packet as stored (edited after
+  // the game, or a pick/ban board that no longer matches): worth a look before
+  // uploading. Beside data/, so the importer never reads it.
+  if (warnings.length) {
+    files.push({ name: 'klaxon_numbering_warnings.json', data: JSON.stringify({
+      note: 'These games read questions whose text is not in the stored packet. Their buzzes on those questions may be on the wrong question.',
+      games: warnings }, null, 2) });
   }
   const base = (t.name || t.code).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || t.code;
   res.setHeader('Content-Disposition', `attachment; filename="${base}_${gamesOnly ? 'games' : 'quizbowlbuzzpoints'}.zip"`);
@@ -2453,6 +2600,39 @@ function resultsOnlyQbj(qbj) {
   };
 }
 
+// A scoped reader's staff screen in this room, now that it is reading a
+// round they weren't assigned: no longer staff here. Their page goes to their
+// assignments (see join.js); a later round of theirs lets them back in.
+function revokeStaffSocket(room, sid, ctx, reason) {
+  const sk = io.sockets.sockets.get(sid);
+  if (sk) { sk.emit('staff_revoked', { reason, tournamentCode: room.tournamentCode || null }); sk.leave(room.code); }
+  ctx.roomCode = null;
+  ctx.playerId = null;
+  ctx.staffRole = null;
+  ctx.staffRounds = null;
+  ctx.packetOk = false;
+}
+
+function revokeOtherRounds(room, round) {
+  for (const [sid, ctx] of sock) {
+    if (ctx.roomCode === room.code && ctx.staffRole && ctx.staffRounds instanceof Set && !ctx.staffRounds.has(String(round ?? ''))) {
+      revokeStaffSocket(room, sid, ctx, 'not_your_round');
+    }
+  }
+}
+
+// The director changed what an account may moderate: its staff screens in
+// this tournament rejoin under the new rules.
+function revokeAccountStaff(t, accountId) {
+  for (const [sid, ctx] of sock) {
+    if (!ctx.staffRole || ctx.accountId !== accountId || !ctx.roomCode || !t.roomCodes?.has(ctx.roomCode)) continue;
+    // Only screens that are staff on the account's strength: a reader link stays a reader link.
+    if (ctx.staffRounds === ALL_ROUNDS && ctx.viaToken) continue;
+    const room = store.getRoom(ctx.roomCode);
+    if (room) revokeStaffSocket(room, sid, ctx, 'access_changed');
+  }
+}
+
 // Eject a player's live socket(s) from a room (after the reader removes them).
 function kickPlayer(room, playerId, reason) {
   for (const [sid, ctx] of sock) {
@@ -2517,15 +2697,22 @@ io.on('connection', (socket) => {
     let staffRole = null;
     let staffDenied = false;
     let denyReason = null;
+    // ALL_ROUNDS for a staff token or a full moderator; a Set for a reader
+    // assigned to rounds of this room (see accountRoomAccess).
+    let staffRounds = null;
     if (requested === 'spectator') {
       role = 'spectator';
     } else if (requested === 'reader' || requested === 'co-reader') {
-      if (token && token === room.readerToken) role = staffRole = 'reader';
-      else if (token && token === room.coReaderToken) role = staffRole = 'co-reader';
+      if (token && token === room.readerToken) { role = staffRole = 'reader'; staffRounds = ALL_ROUNDS; }
+      else if (token && token === room.coReaderToken) { role = staffRole = 'co-reader'; staffRounds = ALL_ROUNDS; }
       else {
         let viaAccount = 'error';
         try { viaAccount = await accountModeratorOk(room, payload?.sessionToken); } catch { /* fall through */ }
-        if (viaAccount === true) role = staffRole = 'reader';
+        if (viaAccount === true) {
+          role = staffRole = 'reader';
+          try { staffRounds = (await accountRoomAccess(room, payload?.sessionToken)).rounds || null; } catch { staffRounds = null; }
+          if (!staffRounds) { role = 'spectator'; staffRole = null; staffDenied = true; denyReason = 'error'; }
+        }
         else { role = 'spectator'; staffDenied = true; denyReason = viaAccount; }
       }
     }
@@ -2611,6 +2798,8 @@ io.on('connection', (socket) => {
       roomCode: room.code,
       playerId: member.id,
       staffRole,
+      staffRounds,
+      viaToken: !!token && (token === room.readerToken || token === room.coReaderToken),
       packetOk,
       // Whose account this is (if logged in): the games a moderator scores,
       // and the games a player plays in, are found again from it (see the
@@ -3014,6 +3203,9 @@ io.on('connection', (socket) => {
       case 'massinger_cancel':
         store.massingerCancel(room);
         break;
+      case 'massinger_lobby':
+        store.massingerLobby(room, payload);
+        break;
       // The teams a moderator entered in MODAQ's New Game dialog become this
       // room's roster, so every buzz can be reported as a real MODAQ player.
       case 'set_modaq_teams': {
@@ -3081,7 +3273,7 @@ io.on('connection', (socket) => {
         // The live stats file, when the reader asks for it here rather than
         // with a separate POST /export (see syncRoomExport).
         if (payload.qbj && payload.export && typeof payload.export === 'object' && !room.correctionOf) {
-          syncRoomExport(room, {
+          if (roundAllowed(ctx.staffRounds ?? ALL_ROUNDS, payload.export.round)) syncRoomExport(room, {
             round: payload.export.round, qbj: payload.qbj, inProgress: payload.export.inProgress === true,
             currentQuestion: payload.currentQuestion
           }).catch((e) => console.error('live export failed:', e));
@@ -3135,6 +3327,7 @@ io.on('connection', (socket) => {
           json = json.replace(marker, () => text);
         }
         if (json && json.length > MODAQ_STATE_MAX) return ack?.({ error: 'too_large' });
+        if (json && !roundAllowed(ctx.staffRounds ?? ALL_ROUNDS, payload.round)) return ack?.({ error: 'not_your_round' });
         const prev = await modaqStateFor(room);
         const next = {
           seq: (prev?.seq || 0) + 1,
@@ -3152,6 +3345,9 @@ io.on('connection', (socket) => {
         // current page that already holds this packet gets the placeholder
         // form and fills it in itself; anyone else gets the whole game.
         const compact = json && ref ? payload.json : null;
+        // Before anything goes out: a reader assigned to other rounds stops
+        // being staff here, so this round's game never reaches them.
+        if (json) revokeOtherRounds(room, next.round);
         for (const [sid, c] of sock) {
           if (sid === socket.id || c.roomCode !== room.code || !c.staffRole || !c.packetOk) continue;
           const sk = io.sockets.sockets.get(sid);

@@ -1746,6 +1746,11 @@ export function publicState(room) {
     // MASSINGER pick/ban board (null outside the pick/ban phase). Fully
     // public: players watch the same board the moderator drives.
     massinger: room.massinger || null,
+    // The moderator is setting up the teams for a MASSINGER round (before the
+    // board exists): { round, at } or null. Players are told to wait for it.
+    // (A finished board from an earlier round doesn't hide the next one's.)
+    massingerLobby: room.massingerLobby && Date.now() - room.massingerLobby.at < MASSINGER_LOBBY_TTL
+      && (!room.massinger || String(room.massinger.round ?? '') !== room.massingerLobby.round) ? room.massingerLobby : null,
     // Live scoresheet of the MODAQ game (null when there's no game, or the
     // tournament turned it off). Built by buildPlayerScoresheet(): only what the
     // players in the room have already heard.
@@ -2775,6 +2780,17 @@ export function massingerSetControl(room, control) {
 
 export function massingerCancel(room) {
   room.massinger = null;
+  room.massingerLobby = null;
+  return { ok: true };
+}
+
+// A lobby the moderator walked away from without saying so (closed the tab)
+// shouldn't tell players to wait forever.
+const MASSINGER_LOBBY_TTL = 2 * 60 * 60 * 1000;
+
+/** The moderator opened (or left) the teams step before a pick/ban. */
+export function massingerLobby(room, { open, round } = {}) {
+  room.massingerLobby = open === true ? { round: String(round ?? '').slice(0, 80), at: Date.now() } : null;
   return { ok: true };
 }
 

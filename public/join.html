@@ -56,8 +56,13 @@
       </div>
 
       <div id="j-approved" class="hidden">
-        <p><strong>You're approved to moderate.</strong> Open the room you're reading in:</p>
+        <p id="j-approved-full"><strong>You're approved to moderate.</strong> Open the room you're reading in:</p>
+        <div id="j-approved-assigned" class="hidden">
+          <p><strong>You read these rounds.</strong> Open the room when your round starts. Every other
+            round you're a player: join your game from its player link as usual.</p>
+        </div>
         <ul id="j-rooms" class="players"></ul>
+        <p id="j-no-assignments" class="hint hidden">The director hasn't given you a round to read yet.</p>
         <p id="j-no-rooms" class="hint hidden">The director hasn't made any rooms yet. Ask them which room is
           yours, and come back here once it exists.</p>
       </div>

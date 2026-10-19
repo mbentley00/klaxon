@@ -30,8 +30,9 @@ async function render() {
 
   // memberStatus, not status: an open tournament reports everyone as able to
   // read packets, but only a member can moderate without a reader link.
-  const { memberStatus } = await api('GET', `/api/tournaments/${code}/access?sessionToken=${encodeURIComponent(s)}`);
-  if (memberStatus === 'approved') return showRooms();
+  const access = await api('GET', `/api/tournaments/${code}/access?sessionToken=${encodeURIComponent(s)}`);
+  const { memberStatus } = access;
+  if (memberStatus === 'approved') return showRooms(access);
   if (memberStatus === 'denied') return show('#j-denied');
   if (memberStatus === 'pending') {
     show('#j-pending');
@@ -41,18 +42,36 @@ async function render() {
   show('#j-ask');
 }
 
-function showRooms() {
+const roomName = (room) => {
+  const name = tournament?.roomNames?.[room];
+  return name ? `${name} · ${room}` : `Room ${room}`;
+};
+// The room page joins as reader on an approved account when it finds this.
+const readHere = (room) => {
+  const a = el('a', { className: 'btnlink tiny primary', href: `/r/${room}` }, 'Read here');
+  a.onclick = () => remember('staffRole:' + room, 'reader');
+  return a;
+};
+
+function showRooms(access) {
   show('#j-approved');
-  const rooms = tournament?.rooms || [];
-  $('#j-no-rooms').classList.toggle('hidden', rooms.length > 0);
-  $('#j-rooms').replaceChildren(...rooms.map((room) => {
-    const a = el('a', { className: 'btnlink tiny primary', href: `/r/${room}` }, 'Read here');
-    // The room page joins as reader on an approved account when it finds this.
-    a.onclick = () => remember('staffRole:' + room, 'reader');
-    const name = tournament?.roomNames?.[room];
-    return el('li', {}, el('span', { className: 'pname' }, name ? `${name} · ${room}` : `Room ${room}`), a);
-  }));
-  // A director adding rooms later shouldn't need a reload here.
+  // Assigned rounds only (a player who reads on their byes): just those.
+  const assigned = access?.scope === 'assigned';
+  $('#j-approved-full').classList.toggle('hidden', assigned);
+  $('#j-approved-assigned').classList.toggle('hidden', !assigned);
+  if (assigned) {
+    const list = access.assignments || [];
+    $('#j-no-rooms').classList.add('hidden');
+    $('#j-no-assignments').classList.toggle('hidden', list.length > 0);
+    $('#j-rooms').replaceChildren(...list.map((a) =>
+      el('li', {}, el('span', { className: 'pname' }, el('strong', {}, `Round ${a.round}`), ` · ${roomName(a.room)}`), readHere(a.room))));
+  } else {
+    const rooms = tournament?.rooms || [];
+    $('#j-no-assignments').classList.add('hidden');
+    $('#j-no-rooms').classList.toggle('hidden', rooms.length > 0);
+    $('#j-rooms').replaceChildren(...rooms.map((room) => el('li', {}, el('span', { className: 'pname' }, roomName(room)), readHere(room))));
+  }
+  // A director adding rooms (or assigning rounds) later shouldn't need a reload here.
   pollTimer = setTimeout(async () => {
     try { tournament = await api('GET', `/api/tournaments/${code}`); } catch { /* keep the old list */ }
     render();

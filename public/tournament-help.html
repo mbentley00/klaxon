@@ -38,6 +38,7 @@
           <li><a href="#before">Before the day</a></li>
           <li><a href="#day">On the day</a></li>
           <li><a href="#after">After the games</a></li>
+          <li><a href="#massinger">MASSINGER (pick/ban) tournaments</a></li>
           <li><a href="#shootout">Shootouts</a></li>
           <li><a href="#faq">Questions</a></li>
         </ol>
@@ -149,6 +150,12 @@
           their email or username. Once approved, a moderator can read in any room of the tournament
           without a reader link: the invite page lists the rooms, each with a <em>Read here</em> button.</li>
       </ul>
+      <p><strong>Players who read on their byes.</strong> Approve them like any moderator, then change
+        <em>Full moderator</em> to <em>Assigned rounds only</em> under their name and add each round
+        and room they read. They see only those packets, and only while their room is idle or on
+        their round. In every other round they're a player. Their invite page lists just their rounds.
+        <em>Assigned readers by round</em>, under the list, shows any round with nobody assigned.
+        A reader link handed to them still opens everything, so give them the invite link instead.</p>
 
       <h4>6. Links for players</h4>
       <p>On <strong>Moderators &amp; links</strong>:</p>
@@ -261,6 +268,47 @@
         <li><strong>Temporary share links</strong> let you share the stats or buzzpoints with someone
           for 7 days. You can revoke a link at any time.</li>
       </ul>
+    </section>
+
+    <!-- ============================== MASSINGER ============================== -->
+    <section class="panel" id="massinger">
+      <h3>MASSINGER (pick/ban) tournaments</h3>
+      <p>Before each game, the two teams take turns protecting or banning subcategories until 20
+        tossups are left. Then the game is read on those 20.</p>
+
+      <h4>Set up</h4>
+      <ol>
+        <li><strong>Create the tournament</strong> as a team tournament. Under the scoring format, tick
+          <em>MASSINGER pick/ban before each game</em>, then choose who picks (each team's captain,
+          anyone on the team, or the moderator only) and the timer (seconds per pick, 0 for none).</li>
+        <li><strong>Check the packets.</strong> Each round needs more than 20 tossups, and every tossup
+          needs its subcategory as the last part of its metadata, after the last comma
+          (<code>&lt;Author, Science - Biology&gt;</code>), with at least two different subcategories.
+          A packet that doesn't qualify is read in full, without a pick/ban.</li>
+        <li><strong>Upload the roster</strong> (Packets &amp; roster). Moderators then choose teams from it
+          instead of typing names. With roster joining on, players also pick their team and name when
+          they join, so they're already on the right team.</li>
+        <li><strong>Make the rooms</strong> and line up moderators as usual (above).</li>
+      </ol>
+
+      <h4>Each game</h4>
+      <ol>
+        <li><strong>Release the round.</strong> The moderator picks it on the setup screen and clicks
+          <em>Start reading</em>.</li>
+        <li><strong>Teams.</strong> The moderator chooses the two teams and puts every connected player on
+          one, marking a captain for each team if captains pick. Meanwhile players see
+          <em>Starting soon</em> above their buzzer, with the team they're on.</li>
+        <li><strong>Pick/ban.</strong> The moderator chooses which team picks first and clicks
+          <em>Begin pick/ban</em>. Players pick on their own screens. When the timer runs out, a
+          random ban is made. The moderator can undo or edit picks.</li>
+        <li><strong>Read.</strong> <em>Continue to the game</em> starts the game straight away with the
+          lobby's teams and players. The pick/ban result stays folded above the game.</li>
+      </ol>
+
+      <h4>Afterwards</h4>
+      <p>Stats work as usual. The buzzpoints download puts every buzz on the right question of the full
+        packet, even though each room read a different 20. If a packet was edited after a game was
+        played on it, <code>klaxon_numbering_warnings.json</code> in the zip lists the games to check.</p>
     </section>
 
     <!-- ============================== SHOOTOUT ============================== -->

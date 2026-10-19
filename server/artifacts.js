@@ -868,6 +868,39 @@ export async function memberStatus(bucket, accountId) {
   return members.find((x) => x.accountId === accountId)?.status || null;
 }
 
+export async function getMember(bucket, accountId) {
+  const members = await getMembers(bucket);
+  return members.find((x) => x.accountId === accountId) || null;
+}
+
+/**
+ * What an approved moderator may read. scope 'all' (the default, and what
+ * every member had before this existed): any room, any round. scope
+ * 'assigned': only the { round, room } pairs listed — someone who plays and
+ * reads on their byes, who must never open a packet their team still plays.
+ */
+export async function setMemberAccess(bucket, accountId, { scope, assignments } = {}) {
+  const members = await getMembers(bucket);
+  const m = members.find((x) => x.accountId === accountId);
+  if (!m) return null;
+  m.scope = scope === 'assigned' ? 'assigned' : 'all';
+  const seen = new Set();
+  m.assignments = (Array.isArray(assignments) ? assignments : [])
+    .map((a) => ({ round: String(a?.round ?? '').trim().slice(0, 80), room: String(a?.room ?? '').trim().toUpperCase().slice(0, 12) }))
+    .filter((a) => a.round && a.room && !seen.has(`${a.room}|${a.round}`) && seen.add(`${a.room}|${a.round}`))
+    .slice(0, 300);
+  await saveMembers(bucket, members);
+  return m;
+}
+
+/** A room's stored game for one round (the stats file), or null. */
+export async function getRoomRoundExport(bucket, room, round) {
+  const file = path.join(bucketDir(bucket), 'exports', `${safeName(room, 'room')}-${safeName(round, 'r')}.qbj`);
+  const text = await readTextOrNull(file);
+  if (text == null) return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
 export const _internal = { bucketDir, safeName };
 
 // --- the game archive ----------------------------------------------------------

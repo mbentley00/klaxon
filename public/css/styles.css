@@ -682,7 +682,12 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
 .massinger .ms-hint { margin: .1em 0 .7em; font-size: .85rem; color: var(--muted); }
 .ms-board .ms-pick { display: flex; gap: 4px; margin-left: auto; }
 .ms-board .ms-pick button { padding: .15em .5em; font-size: .72rem; box-shadow: 2px 2px 0 var(--shadow-ink); }
-/* Tournament code in the room's tournament strip: a real link. */
+/* Above the buzzer now: a gap before it. "Starting soon" is the loud state. */
+#massinger-view { margin-bottom: 18px; }
+#massinger-view.lobby { border-color: var(--accent); }
+.massinger .ms-status.soon { color: var(--accent); font-size: 1.15rem; }
+.massinger.lobby .ms-hint { font-size: 1rem; color: var(--ink); }
+.ms-board-wrap > summary { cursor: pointer; font-size: .85rem; color: var(--muted); margin-bottom: 6px; }/* Tournament code in the room's tournament strip: a real link. */
 .tournament h3 .tlink { color: var(--accent); text-decoration: none; border-bottom: 1.5px solid var(--accent); }
 .tournament h3 .tlink:hover { color: var(--ink); border-bottom-color: var(--ink); }
 
@@ -1491,3 +1496,21 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .help details { border-top: 1px solid var(--soft); }
 .help details summary { margin: 10px 0; }
 .help details p { margin-top: 0; margin-bottom: 12px; }
+
+/* A row of equal buttons: they share the width, and stack on a phone. */
+.row.even > .btnlink, .row.even > button { flex: 1 1 220px; justify-content: center; text-align: center; }
+/* A quiet "read more" link under a row of buttons. */
+.help-link { margin: 12px 0 0; font-weight: 600; }
+
+/* Director console: what an approved moderator may read (full, or assigned rounds). */
+.member-access { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.member-access > select { align-self: flex-start; max-width: 100%; }
+.assign-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.assign-chips li { display: inline-flex; align-items: center; gap: 4px; border: 1.5px solid var(--line); border-radius: 6px; padding: 1px 2px 1px 8px; font-size: .85rem; background: var(--surface); }
+.assign-chips li.hint { border: 0; padding: 0; background: none; }
+.assign-chips button { box-shadow: none; padding: .05em .45em; }
+.assign-add select { min-width: 0; flex: 1 1 120px; }
+.assign-by-round { margin-top: 14px; }
+.assign-rounds { list-style: none; margin: 4px 0 0; padding: 0; font-size: .9rem; }
+.assign-rounds li { padding: 3px 0; border-bottom: 1px solid var(--soft); }
+#members-list li { flex-wrap: wrap; }

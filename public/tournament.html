@@ -285,12 +285,16 @@
       <p class="hint">Send this to your moderators. They sign in or create an account and ask to join;
         their requests show up below for you to approve. Once approved they can read in any room
         of this tournament without a reader link.</p>
+      <p class="hint">Players who read on their byes: set them to <strong>Assigned rounds only</strong> and
+        give them the round and room they read. They see only those packets, and are players
+        everywhere else.</p>
       <div class="sound-row">
         <input id="member-add-id" placeholder="Email or username of a registered account" />
         <button id="member-add" class="primary tiny">Add moderator</button>
       </div>
       <ul id="members-list" class="players"></ul>
       <p id="members-empty" class="hint">No access requests yet.</p>
+      <div id="assign-by-round" class="assign-by-round hidden"></div>
     </section>
 
     <!-- Public live stats + YellowFruit report (no token needed to view) -->

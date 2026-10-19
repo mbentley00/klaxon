@@ -1168,6 +1168,7 @@ async function refreshMembers() {
     $('#members-count').textContent = members.length ? `(${pending} pending / ${members.length})` : '';
     $('#members-empty').classList.toggle('hidden', members.length > 0);
     const ul = $('#members-list');
+    const choices = await assignmentChoices();
     ul.innerHTML = '';
     // Pending first.
     const order = { pending: 0, approved: 1, denied: 2 };
@@ -1185,9 +1186,94 @@ async function refreshMembers() {
       if (m.status !== 'approved') actions.append(mkBtn('Approve', 'tiny primary', () => setStatus('approved')));
       if (m.status !== 'denied') actions.append(mkBtn('Deny', 'tiny ghost', () => setStatus('denied')));
       li.append(actions);
+      if (m.status === 'approved' && !m.director) li.append(memberAccessEditor(m, choices));
       ul.append(li);
     }
+    renderAssignmentsByRound(members, choices);
   } catch { /* ignore */ }
+}
+
+// The rounds (in the director's order) and rooms a moderator can be assigned.
+async function assignmentChoices() {
+  const [{ packets }, t] = await Promise.all([
+    api('GET', `/api/tournaments/${code}/packets?directorToken=${qt(directorToken)}`).catch(() => ({ packets: [] })),
+    api('GET', `/api/tournaments/${code}`).catch(() => null)
+  ]);
+  const rooms = (t?.rooms || []).map((c) => ({ code: c, name: t.roomNames?.[c] || '' }));
+  return { rounds: packets.map((p) => String(p.round)), rooms };
+}
+const roomLabel = (rooms, rc) => { const r = rooms.find((x) => x.code === rc); return r?.name ? `${r.name} (${rc})` : `Room ${rc}`; };
+
+// Full moderator (any room, any round: how every moderator worked before), or
+// only the rounds and rooms assigned here: a player who reads on their byes
+// never sees a packet their team still has to play.
+function memberAccessEditor(m, { rounds, rooms }) {
+  const box = el('div', { className: 'member-access' });
+  const assigned = m.scope === 'assigned';
+  const list = [...(m.assignments || [])];
+  const save = async (scope, assignments) => {
+    try {
+      await api('PUT', `/api/tournaments/${code}/members/${m.accountId}/access`, { directorToken, scope, assignments });
+      refreshMembers();
+    } catch (e) { msay('Could not change access: ' + e.message, false); }
+  };
+
+  const mode = el('select');
+  mode.setAttribute('aria-label', `What ${m.username} may moderate`);
+  mode.append(
+    el('option', { value: 'all' }, 'Full moderator: any room, any round'),
+    el('option', { value: 'assigned' }, 'Assigned rounds only (plays the rest)')
+  );
+  mode.value = assigned ? 'assigned' : 'all';
+  mode.onchange = () => save(mode.value, list);
+  box.append(mode);
+  if (!assigned) return box;
+
+  const chips = el('ul', { className: 'assign-chips' });
+  if (!list.length) chips.append(el('li', { className: 'hint' }, 'No rounds yet: they can\'t moderate anywhere until you add one.'));
+  for (const a of list) {
+    const x = mkBtn('×', 'tiny ghost', () => save('assigned', list.filter((y) => y !== a)));
+    x.title = 'Remove'; x.setAttribute('aria-label', `Remove round ${a.round} in ${roomLabel(rooms, a.room)}`);
+    chips.append(el('li', {}, el('span', {}, `Round ${a.round} · ${roomLabel(rooms, a.room)}`), x));
+  }
+  box.append(chips);
+
+  const round = el('select');
+  round.setAttribute('aria-label', 'Round');
+  round.append(el('option', { value: '' }, 'Round…'), ...rounds.map((r) => el('option', { value: r }, `Round ${r}`)));
+  const room = el('select');
+  room.setAttribute('aria-label', 'Room');
+  room.append(el('option', { value: '' }, 'Room…'), ...rooms.map((r) => el('option', { value: r.code }, roomLabel(rooms, r.code))));
+  const add = mkBtn('Assign', 'tiny primary', () => {
+    if (!round.value || !room.value) return msay('Pick a round and a room to assign.', false);
+    if (list.some((a) => a.round === round.value && a.room === room.value)) return;
+    save('assigned', [...list, { round: round.value, room: room.value }]);
+  });
+  box.append(el('div', { className: 'row assign-add' }, round, room, add));
+  if (!rounds.length || !rooms.length) {
+    box.append(el('p', { className: 'hint' }, !rounds.length ? 'Upload the packets first: rounds come from the Packets tab.' : 'Add rooms first.'));
+  }
+  return box;
+}
+
+// Who reads where, round by round, for the assigned readers: the gaps show.
+function renderAssignmentsByRound(members, { rounds, rooms }) {
+  const box = $('#assign-by-round');
+  const scoped = members.filter((m) => m.status === 'approved' && m.scope === 'assigned');
+  box.classList.toggle('hidden', scoped.length === 0);
+  if (!scoped.length) return;
+  const byRound = new Map();
+  for (const m of scoped) for (const a of m.assignments || []) {
+    if (!byRound.has(a.round)) byRound.set(a.round, []);
+    byRound.get(a.round).push(`${roomLabel(rooms, a.room)}: ${m.username}`);
+  }
+  const order = [...rounds, ...[...byRound.keys()].filter((r) => !rounds.includes(r))];
+  const ul = el('ul', { className: 'assign-rounds' });
+  for (const r of order) {
+    const who = byRound.get(r);
+    ul.append(el('li', {}, el('strong', {}, `Round ${r}`), ' ', who ? who.join(' · ') : el('span', { className: 'hint' }, 'nobody assigned')));
+  }
+  box.replaceChildren(el('h4', {}, 'Assigned readers by round'), ul);
 }
 function mkBtn(text, className, onclick) {
   const b = el('button', { className }, text);
