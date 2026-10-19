@@ -655,7 +655,9 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
 .export-chips .chip { font-size: .78rem; padding: .2em .55em; }
 /* One game: its room chip, the matchup, and Remove/Restore. */
 .export-game { display: inline-flex; align-items: center; gap: 6px; }
-.export-teams { font-size: .78rem; color: var(--muted); }
+/* Only the matchup wraps; the chip and buttons stay one line tall. */
+.export-game .chip, .export-game .export-remove { flex: 0 0 auto; white-space: nowrap; }
+.export-teams { font-size: .78rem; color: var(--muted); min-width: 0; }
 .export-game .export-remove { font-size: .7rem; padding: .15em .45em; box-shadow: none; }
 .export-game.removed .chip, .export-game.removed .export-teams { opacity: .45; text-decoration: line-through; }
 
@@ -1473,3 +1475,19 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .evening-table th, .evening-table td { padding: 4px 6px; border-bottom: 1px solid var(--ss-line, var(--line)); text-align: left; overflow-wrap: anywhere; }
 .evening-table th:nth-child(n+3), .evening-table td:nth-child(n+3) { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .evening-table tr.ev-me td { font-weight: 700; }
+
+/* ---------- help pages (tournament-help.html) ----------
+   Long-form text inside ordinary panels: subheads, lists, and an FAQ of
+   <details>. Scoped to .help so nothing else on the site changes. */
+.help .panel { scroll-margin-top: 64px; }
+.help .panel > p, .help details p { margin: .5em 0; }
+.help h4 { font-family: var(--display); font-size: 1rem; margin: 1.1em 0 .3em; }
+.help h3 + h4 { margin-top: .4em; }
+.help ul, .help ol { margin: .4em 0; padding-left: 1.3em; }
+.help li { margin: .3em 0; }
+.help code { font-family: var(--mono); font-size: .88em; overflow-wrap: anywhere; }
+.help .help-toc { columns: 2 12em; column-gap: 24px; }
+.help .help-toc li { break-inside: avoid; }
+.help details { border-top: 1px solid var(--soft); }
+.help details summary { margin: 10px 0; }
+.help details p { margin-top: 0; margin-bottom: 12px; }

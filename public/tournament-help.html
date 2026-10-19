@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <script src="/js/theme.js"></script>
+  <link rel="icon" href="/favicon.ico?v=2" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=2" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=2" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+  <title>How tournaments work — Klaxon</title>
+  <link rel="preload" href="/fonts/bricolage-800.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/css/fonts.css" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="room">
+  <header class="bar">
+    <nav class="bar-left crumbs" aria-label="Breadcrumb">
+      <a class="crumb crumb-mark" href="/">Klaxon</a>
+      <span class="crumb-sep">›</span>
+      <a class="crumb" href="/tournament-mode">Tournament mode</a>
+      <span class="crumb-sep">›</span>
+      <span class="crumb" aria-current="page">How tournaments work</span>
+    </nav>
+  </header>
+
+  <main class="stage help">
+    <section class="panel">
+      <h3>How tournaments work</h3>
+      <p>A tournament is a set of Klaxon rooms run together: one packet list, one roster, one
+        scoring format, and one set of stats. You (the director) run it from the
+        <strong>director console</strong>; moderators read in MODAQ; players use the
+        ordinary Klaxon buzzer.</p>
+      <nav aria-label="On this page">
+        <ol class="help-toc">
+          <li><a href="#overview">The two kinds, and who does what</a></li>
+          <li><a href="#before">Before the day</a></li>
+          <li><a href="#day">On the day</a></li>
+          <li><a href="#after">After the games</a></li>
+          <li><a href="#shootout">Shootouts</a></li>
+          <li><a href="#faq">Questions</a></li>
+        </ol>
+      </nav>
+      <div class="row">
+        <a class="btnlink" href="/new-tournament">Create a tournament →</a>
+      </div>
+    </section>
+
+    <!-- ============================== OVERVIEW ============================== -->
+    <section class="panel" id="overview">
+      <h3>The two kinds, and who does what</h3>
+      <h4>Teams or shootout</h4>
+      <ul>
+        <li><strong>Teams</strong>: scheduled games between teams, in as many rooms as you need.
+          You get rosters, round packets you release one at a time, live stats, errata and
+          protests.</li>
+        <li><strong>Shootout</strong>: everyone plays for themselves, made with Discord nights in mind.
+          It has a buzz queue, typed answers and a chat, and scores can carry across packets.
+          It starts with one room. See <a href="#shootout">Shootouts</a>.</li>
+      </ul>
+      <p class="hint">You choose the kind when you create the tournament, and you can't change it afterwards.</p>
+
+      <h4>Who's who</h4>
+      <ul>
+        <li><strong>Director</strong>: creates the tournament and runs the console. The console is
+          at <code>/t/CODE</code>, where CODE is the 5-character tournament code.</li>
+        <li><strong>Moderator (reader)</strong>: reads one room in MODAQ and scores it. They get in
+          with that room's reader link, or with a Klaxon account you've approved.</li>
+        <li><strong>Co-reader</strong>: a second person in the same game, for example a scorekeeper.
+          They can score buzzes and bonus parts too.</li>
+        <li><strong>Players</strong>: join a room with its code or player link and buzz.</li>
+      </ul>
+    </section>
+
+    <!-- ============================== BEFORE ============================== -->
+    <section class="panel" id="before">
+      <h3>Before the day</h3>
+
+      <h4>1. Create the tournament</h4>
+      <p><strong>Sign in to a Klaxon account first.</strong> If you create the tournament while signed in,
+        your account can open the director console on any device. If you create it signed out, only the
+        browser you used holds the director key, so don't clear that browser's site data.</p>
+      <p>On <a href="/new-tournament">Create a tournament</a>, fill in:</p>
+      <ul>
+        <li><strong>Name and date.</strong> Leave <em>List on Klaxon's public tournament directory</em>
+          ticked if you want moderators browsing <a href="/tournaments">Tournaments</a> to find you.</li>
+        <li><strong>Scoring format</strong>: the tossup point scheme, whether there are bonuses, the
+          players' live scoresheet, whether to show categories and question text after they're read,
+          and <em>Record every buzz</em>, which also keeps the buzzes that lost the race. Turn that
+          last one on before play starts, because buzzes aren't kept while it's off.</li>
+        <li><strong>Round packets, roster and default room settings.</strong> These are all optional
+          here, and all can be done later in the console.</li>
+      </ul>
+      <p>Once it's created, use <strong>Edit settings</strong> in the console to change the name, date,
+        listing, scoring and bonus format, scoresheet and question display, buzz recording, the default
+        settings for new rooms, and shootout options. The one thing you can't change is Teams vs Shootout.</p>
+
+      <h4>2. Upload packets</h4>
+      <p>Packets are uploaded on the console's <strong>Packets &amp; roster</strong> tab, as MODAQ
+        <code>.json</code> files. You can select several at once.</p>
+      <ul>
+        <li>Each file's name becomes the round's label. Name them simply, e.g. <code>1.json</code>,
+          <code>2.json</code>.</li>
+        <li>For Word files, convert them first with the <a href="/yapp">packet parser</a>. It also
+          checks the packet for common problems.</li>
+        <li>A new round starts <strong>hidden</strong>. Moderators can't see it until you release it.</li>
+        <li>Drag rounds by their handle to put them in order. The order sets each round's number,
+          what moderators see, and which round is released next.</li>
+        <li>Upload spare questions with <em>tiebreaker</em> ticked. They become a pool that moderators
+          can sub in. <em>Split</em> turns a tiebreaker round into one round per question, so you can
+          release them one at a time.</li>
+      </ul>
+      <p class="hint">By default, moderators need a director-approved account to load the tournament's
+        packets, even if they have a reader link. You can switch that off when you create the tournament.</p>
+
+      <h4>3. Add the roster</h4>
+      <p>Copy the rows from your registration spreadsheet, header row included (Team Name, Player 1,
+        Player 2…). Click <strong>Paste or edit roster</strong> and paste them in. You can fix names,
+        add a player or remove a team, then click <strong>Save roster</strong>. Uploading a registration
+        <code>.qbj</code> also works.</p>
+      <p>MODAQ fills its teams from this roster. By default, players also pick their team and name from it
+        when they join. Anyone who joins under a name that isn't on the roster is listed under
+        <em>Players not on the roster</em> so you can follow up.</p>
+
+      <h4>4. Make the rooms</h4>
+      <p>On the <strong>Rooms</strong> tab, enter a name prefix and a number and click <strong>Add</strong>.
+        You get "Room 1", "Room 2" and so on. Each room has three links:</p>
+      <ul>
+        <li><strong>Players</strong> (<code>/r/CODE</code>): for the teams.</li>
+        <li><strong>Reader</strong>: private, for that room's moderator.</li>
+        <li><strong>Co-reader</strong>: private, for a second scorer.</li>
+      </ul>
+      <p><strong>Copy for spreadsheet</strong> copies every room's links as rows you can paste into a sheet.
+        New rooms start with the tournament's default room settings, and each room's moderator can still
+        change their own room's options.</p>
+
+      <h4>5. Line up moderators</h4>
+      <p>You have two options:</p>
+      <ul>
+        <li><strong>Hand out reader links</strong> from the Rooms tab, one per room. This is quick and
+          needs no accounts, but if the tournament requires approved accounts, the moderator still has
+          to sign in with one to load packets.</li>
+        <li><strong>Approve accounts.</strong> On <strong>Moderators &amp; links</strong>, copy the
+          <em>Moderator invite link</em> (<code>/t/CODE/join</code>) and send it to your moderators.
+          They sign in or create an account and click <em>Request to moderate</em>. Their requests show up
+          in that same panel, where you click <em>Approve</em> (or <em>Deny</em>). If your account has an
+          email address, Klaxon also emails you about each request. You can also add someone directly by
+          their email or username. Once approved, a moderator can read in any room of the tournament
+          without a reader link: the invite page lists the rooms, each with a <em>Read here</em> button.</li>
+      </ul>
+
+      <h4>6. Links for players</h4>
+      <p>On <strong>Moderators &amp; links</strong>:</p>
+      <ul>
+        <li><strong>Player links</strong>: a schedule URL and a Discord invite. They're shown to players
+          in every room.</li>
+        <li><strong>Player landing page</strong>: a secret link to one page with every room and its
+          code, the live stats, and your schedule and Discord links. The tournament code alone
+          doesn't open it.</li>
+      </ul>
+    </section>
+
+    <!-- ============================== ON THE DAY ============================== -->
+    <section class="panel" id="day">
+      <h3>On the day</h3>
+
+      <h4>Release each round</h4>
+      <p>Moderators can only load rounds you've released. On <strong>Packets &amp; roster</strong>:</p>
+      <ul>
+        <li><strong>Release next packet</strong> releases the first hidden round in your list. The button
+          names the round it will release.</li>
+        <li>To release or re-hide a particular round, tick or untick its <em>Visible</em> box.</li>
+        <li>With <strong>auto-release when a round finishes</strong> on, Klaxon releases the next round
+          by itself once every room that has played has a finished game for the current round.</li>
+      </ul>
+
+      <h4>What moderators do</h4>
+      <ol>
+        <li>Open the reader link, or <em>Read here</em> on the invite page. If the tournament requires
+          approved accounts, sign in first.</li>
+        <li>In the setup screen, pick the released round under <em>Packet</em> and click
+          <strong>Start reading</strong>.</li>
+        <li>In MODAQ's New Game dialog, pick the two teams. The tournament roster fills in their players.</li>
+        <li>Read. Buzzes appear in the Klaxon buzz panel beside the question, labelled with the
+          player's name, and scores go to the director's console as the moderator reads.</li>
+        <li>When the moderator reaches the last question, the game counts as finished. MODAQ's
+          <em>Finish &amp; save to Klaxon</em> export also finishes it, even if the game ended early.</li>
+        <li><strong>Next game</strong> goes back to the setup screen for the next round and teams. The
+          room stays open across rounds, and players don't have to rejoin.</li>
+      </ol>
+      <p class="hint">If a moderator's laptop dies, they can open the same link on another device
+        and the game resumes where it was.</p>
+
+      <h4>What players do</h4>
+      <ul>
+        <li>Open their room's player link, or type the room code on the Klaxon home page. Then pick
+          their team and name from the roster.</li>
+        <li>Players who arrive early for a later game see a grey <em>NEXT GAME</em> buzzer. It turns on
+          when the moderator starts the game with their team in it.</li>
+        <li>Players see a live scoresheet of the questions already read, unless you've turned it off.
+          From any played row they can choose <em>Protest this question</em>.</li>
+        <li>If the buzzer looks stuck, a player can tap <em>Buzzer isn't clear — alert the moderator</em>.</li>
+      </ul>
+
+      <h4>Keeping in touch</h4>
+      <ul>
+        <li><strong>Message readers</strong> (Rooms tab) sends a note to one room's moderator or to all
+          of them, for example an erratum or "hold for the last room". Players never see these messages,
+          and a moderator who connects later still gets them.</li>
+        <li><strong>Games in progress</strong> (Stats tab) shows every room's score, which question it's
+          on, and how long it has been running.</li>
+        <li>When a player lodges a protest, it appears under <em>Results → Protests</em> right away.
+          Turn on <em>Notify me</em> there to get a browser notification for each new one.</li>
+      </ul>
+
+      <h4>Errata and tiebreakers</h4>
+      <p>Moderators log errata and thrown-out questions from MODAQ's errata tools. Both appear on
+        your <strong>Results</strong> tab. When a moderator uses a tiebreaker question,
+        <em>Tiebreakers used</em> on the Packets tab records which teams have already heard it.</p>
+    </section>
+
+    <!-- ============================== AFTER ============================== -->
+    <section class="panel" id="after">
+      <h3>After the games</h3>
+
+      <h4>Results</h4>
+      <p>The <strong>Results</strong> tab shows every game, grouped by round, as it's played. Click a room
+        to download that game's <code>.qbj</code>; the Stats tab has the whole tournament's downloads.
+        Each game has two buttons:</p>
+      <ul>
+        <li><strong>Edit</strong> opens the game in MODAQ in a private correction room. Use it to move a
+          buzz to the right player or fix a ruling. Changes save straight back into the stats.</li>
+        <li><strong>Remove</strong> leaves the game out of standings, box scores and downloads, for
+          example a test game or a forfeit. It stays saved, and <strong>Restore</strong> puts it back.</li>
+      </ul>
+      <p>If you fixed games in YellowFruit instead, use <strong>Import YellowFruit file</strong>. Games that
+        match by round and teams replace the stored ones, and new games are added.</p>
+
+      <h4>Protests</h4>
+      <p>A protest becomes something you can rule on once the moderator records it in MODAQ and the game
+        is final. Click <strong>Rule…</strong> and pick a resolution: denied, answer accepted, or
+        question thrown out. Klaxon shows exactly what would change in the score before you apply it.
+        If the resolution means a question still has to be played, use <strong>Apply and open a replay
+        room</strong>. You get a reader link and a player link to bring both teams back.</p>
+
+      <h4>Stats and downloads</h4>
+      <ul>
+        <li><strong>Public stats link</strong> (Stats tab, <code>/t/CODE/stats</code>) shows live
+          standings, individual stats and box scores, without answer lines. Anyone can open it, and
+          the tournament code on its own (<code>klaxonbuzz.com/CODE</code>) goes there too.</li>
+        <li><strong>Tournament structure</strong>: group rounds into phases (Prelims, Playoffs) and
+          teams into divisions, so the stats are split the way YellowFruit splits them.</li>
+        <li><strong>Download YellowFruit report (.zip)</strong> is the stats as HTML pages.
+          <strong>Download for YellowFruit</strong> (Packets tab) gives you the whole tournament as a
+          <code>.yft</code> file to open in YellowFruit, plus the roster as a <code>.qbj</code>.</li>
+        <li><strong>Buzzpoints</strong> shows every scored buzz with its answer line, so it's for you only. You
+          can open it as a report, as CSV, or as a zip laid out for quizbowlbuzzpoints.com. Turn on
+          <em>record every buzz attempt</em> below them and the zip also carries the buzzes that lost the
+          race, as <code>klaxon_all_buzz_attempts.json</code> (only ones made while it was on).</li>
+        <li><strong>Temporary share links</strong> let you share the stats or buzzpoints with someone
+          for 7 days. You can revoke a link at any time.</li>
+      </ul>
+    </section>
+
+    <!-- ============================== SHOOTOUT ============================== -->
+    <section class="panel" id="shootout">
+      <h3>Shootouts</h3>
+      <p>A shootout tournament works mostly like a team one, with these differences:</p>
+      <ul>
+        <li><strong>No teams or roster.</strong> Every player is their own team. Whoever opens the
+          room's link is in the game. With <em>Add players to MODAQ as they buzz in</em> on (the default),
+          a player who joins mid-packet plays from the next question.</li>
+        <li><strong>You set the rules once</strong>, when you create the shootout: the scoring, whether
+          bonuses are read, the score carrying across packets, typed answers, how withdrawing a buzz
+          works, and notes for the players. Each room's moderator sees these and confirms them.</li>
+        <li><strong>One room to start.</strong> It's created with the tournament. With only one room,
+          every packet you upload is ready for it straight away, in your list order, with nothing to
+          release. If you add a second room, you release rounds one at a time, as in a team tournament.</li>
+        <li><strong>The console is smaller.</strong> The Packets tab only has packets, and there's no
+          Stats tab. The score is the room's leaderboard, and players chat beside the buzzer.</li>
+      </ul>
+    </section>
+
+    <!-- ============================== FAQ ============================== -->
+    <section class="panel" id="faq">
+      <h3>Questions</h3>
+      <details>
+        <summary>I opened the console on another computer and can't change anything.</summary>
+        <p>The console's director tools need the director key. Sign in with the account you used when
+          you created the tournament, or the account you had signed in the first time you opened the
+          console, and the console picks the key up from that account. Without an account, only the
+          browser that created the tournament has the key.</p>
+      </details>
+      <details>
+        <summary>A moderator says there are no packets.</summary>
+        <p>Either the round isn't released yet (check <em>Visible</em> on the Packets tab), or the
+          tournament requires approved accounts and they aren't signed in to one you've approved.
+          Look under <em>Moderators &amp; links → Reader accounts</em>.</p>
+      </details>
+      <details>
+        <summary>A moderator shared their own address bar with the players. Can players now moderate?</summary>
+        <p>No. Klaxon removes the private part of a reader link from the address bar, so what a
+          moderator copies from it is only the player link. Reader and co-reader links come from your
+          console, and you hand them out.</p>
+      </details>
+      <details>
+        <summary>A team turned up in the wrong room.</summary>
+        <p>They're shown <em>NEXT GAME</em> until the moderator starts a game with their team, so they
+          can't buzz into someone else's game. Point them to the right room from the player landing
+          page, or from the room list shown in every room.</p>
+      </details>
+      <details>
+        <summary>Somebody's score is wrong in a finished game.</summary>
+        <p>Use <strong>Edit</strong> on that game under Results. To leave the game out of the stats
+          entirely, use <strong>Remove</strong>, which you can undo.</p>
+      </details>
+      <details>
+        <summary>Can I close a tournament room between rounds?</summary>
+        <p>No need. Tournament rooms can't be ended, because the next round reads in the same room.
+          They stay open for the whole tournament.</p>
+      </details>
+    </section>
+  </main>
+</body>
+</html>

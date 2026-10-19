@@ -326,6 +326,29 @@ export function createTournament({ name, schedule = [], defaults = {}, format = 
   return t;
 }
 
+// A director changing settings after creation (the settings page). Each field
+// is optional. The kind (teams or shootout) is kept whatever is sent: the
+// rooms, packets and stats already made were made for it. Defaults merge over
+// the old ones, so a field this page doesn't show (a shootout's typed-answer
+// window, say) survives the save.
+export function updateTournament(t, { name, date, listed, requireReaderAccounts, format, defaults } = {}) {
+  if (typeof name === 'string' && name.trim()) t.name = name.trim().slice(0, 80);
+  if (typeof date === 'string') t.date = date.slice(0, 10);
+  if (typeof listed === 'boolean') t.listed = listed;
+  if (typeof requireReaderAccounts === 'boolean') t.requireReaderAccounts = requireReaderAccounts;
+  if (format && typeof format === 'object') {
+    t.format = normalizeFormat({ ...t.format, ...format, kind: t.format?.kind });
+  }
+  if (defaults && typeof defaults === 'object') {
+    const merged = normalizeRoomDefaults({ ...t.roomDefaults, ...defaults });
+    // A shootout's rooms are always shootout rooms.
+    if (t.format?.kind === 'shootout') merged.shootout = true;
+    t.roomDefaults = merged;
+  }
+  persistTournament(t);
+  return t;
+}
+
 // The four supported tossup point schemes.
 export const TOSSUP_SCHEMES = ['15/10/-5', '20/15/10/-5', '20/10/0', '10/-5'];
 

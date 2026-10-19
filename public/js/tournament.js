@@ -84,6 +84,11 @@ function rememberVisit(name, date) {
 async function init() {
   // Making rooms is the director's job; everyone else just sees the rooms.
   if (!directorToken) $('#add-rooms')?.closest('section')?.classList.add('hidden');
+  if (directorToken) {
+    const edit = $('#t-edit-settings');
+    edit.href = `/new-tournament?edit=${code}`;
+    edit.classList.remove('hidden');
+  }
   try {
     const t = await api('GET', `/api/tournaments/${code}`);
     roomNames = t.roomNames || {};
@@ -283,12 +288,10 @@ function initBuzzPoints(t) {
   const cb = $('#buzz-points');
   if (!cb) return;
   const note = $('#buzz-points-note');
-  const dl = $('#buzz-points-download');
   const show = (on) => {
-    dl.disabled = !on;
     note.textContent = on
-      ? 'Every buzz in every room of this tournament, as JSON.'
-      : 'Turn this on before the tournament — buzzes are only kept centrally while it is on.';
+      ? 'Included in the quizbowlbuzzpoints.com zip, as klaxon_all_buzz_attempts.json.'
+      : 'Turn this on before play: buzz attempts are only kept while it is on.';
   };
   cb.checked = t.buzzPoints === true;
   show(cb.checked);
@@ -304,10 +307,6 @@ function initBuzzPoints(t) {
       cb.checked = !cb.checked;
       show(cb.checked);
     }
-  };
-  // The endpoint sets Content-Disposition, so navigating to it downloads it.
-  dl.onclick = () => {
-    window.location = `/api/tournaments/${code}/buzz-points?directorToken=${qt(directorToken)}`;
   };
 }
 
@@ -729,10 +728,6 @@ function initModaq() {
   };
   refreshMembers();
   setInterval(refreshMembers, 20000);
-  $('#exports-download-all').onclick = () => {
-    // The endpoint sets Content-Disposition, so navigating to it downloads the file.
-    window.location = `/api/tournaments/${code}/stats?directorToken=${qt(directorToken)}`;
-  };
 
   // Stats sync live from moderators, so keep the exports + errata + protest
   // lists fresh without the director having to click Refresh. Packets refresh

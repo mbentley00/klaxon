@@ -165,9 +165,23 @@ export async function savePacket(bucket, round, jsonText, opts = {}) {
     // Rounds uploaded before this was recorded simply don't have it.
     tossups: packet.tossups.length,
     uploadedAt: Date.now(),
+    // The room whose moderator uploaded it, or null for the director's. A
+    // moderator may replace only their own room's upload (see packetOwner).
+    uploadedBy: opts.uploadedBy !== undefined ? opts.uploadedBy : (prev.uploadedBy ?? null),
   };
   await setPacketMeta(bucket, meta);
   return { round: name, visible: meta[name].visible, tiebreaker: meta[name].tiebreaker, tossups: meta[name].tossups };
+}
+
+// Is there already a packet under this round label, and who put it there?
+// { exists, uploadedBy } — uploadedBy is a room code, or null for the director
+// (and for rounds stored before uploads were attributed, which were nearly
+// all the director's).
+export async function packetOwner(bucket, round) {
+  const name = safeName(round, 'round');
+  const meta = await getPacketMeta(bucket);
+  const exists = !!meta[name] || (await readTextOrNull(path.join(bucketDir(bucket), 'packets', `${name}.json`))) != null;
+  return { exists, uploadedBy: meta[name]?.uploadedBy ?? null };
 }
 
 // Rounds the director has placed come first, in that order; the rest follow by

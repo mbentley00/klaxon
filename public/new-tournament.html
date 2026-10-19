@@ -25,7 +25,8 @@
 
   <main class="stage">
     <section class="panel">
-      <h3>Create a tournament</h3>
+      <h3 id="page-title">Create a tournament</h3>
+      <p id="edit-note" class="hint hidden"></p>
       <fieldset class="create-format">
         <legend>What kind?</legend>
         <label class="toggle"><input type="radio" name="t-kind" value="teams" checked />
@@ -122,17 +123,21 @@
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel create-only">
       <h3>Round packets <span class="optional">optional</span></h3>
       <p class="hint">Upload several <code>.json</code> packets at once — each file's name becomes the round
         label. <span class="teams-only">Rounds start hidden from moderators; release them from the director console.</span><span class="shootout-only hidden">With one room (the usual shootout) it can read them right away, in this order; with more, you release them as in a team tournament.</span> Still have
         <code>.docx</code> files? The <a href="/yapp" target="_blank" rel="noopener">packet parser</a> converts them.</p>
       <input type="file" id="t-packet-files" accept=".json,application/json" multiple />
-      <label class="toggle"><input type="checkbox" id="t-require-accounts" checked /> Require readers to have a
-        director-approved account to access these packets</label>
     </section>
 
-    <section class="panel teams-only">
+    <section class="panel">
+      <h3>Moderator access</h3>
+      <label class="toggle"><input type="checkbox" id="t-require-accounts" checked /> Require readers to have a
+        director-approved account to access the packets</label>
+    </section>
+
+    <section class="panel teams-only create-only">
       <h3>Roster <span class="optional">optional</span></h3>
       <p class="hint">Paste from your registration spreadsheet, or upload a registration QBJ. MODAQ rooms
         default to it, and you can edit it later in the director console.</p>
@@ -147,7 +152,7 @@
     <section class="panel teams-only">
       <h3>Default room settings</h3>
       <fieldset class="opt-defaults">
-        <legend>Every room created in this tournament starts with</legend>
+        <legend id="defaults-legend">Every room created in this tournament starts with</legend>
         <label class="select-label" for="t-def-modaq-mode">Moderator view</label>
         <select id="t-def-modaq-mode">
           <option value="off">Standard buzzer</option>
@@ -166,6 +171,7 @@
 
     <div class="form-actions">
       <button id="create-tournament" class="primary">Create tournament</button>
+      <a id="edit-cancel" class="btnlink hidden">Cancel</a>
       <p id="msg" class="msg" role="status"></p>
     </div>
   </main>

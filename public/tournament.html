@@ -23,6 +23,10 @@
       <a class="room-code" id="t-code" href="#">·····</a>
       <span class="room-name" id="t-name"></span>
     </nav>
+    <div class="bar-right t-head-links">
+      <a id="t-edit-settings" class="btnlink tiny ghost hidden">Edit settings</a>
+      <a class="btnlink tiny ghost" href="/tournament-help" target="_blank" rel="noopener">Help</a>
+    </div>
   </header>
 
   <main class="stage">
@@ -121,15 +125,6 @@
       </div>
 
       <div class="modaq-block">
-        <label class="vol"><input type="checkbox" id="buzz-points" />
-          record buzz points for every room, including buzzes that lost the race to the lock</label>
-        <div class="sound-row">
-          <button id="buzz-points-download" class="ghost tiny">Download buzz points</button>
-          <span class="hint" id="buzz-points-note"></span>
-        </div>
-      </div>
-
-      <div class="modaq-block">
         <h4>Roster <span id="roster-status" class="muted-count"></span></h4>
         <div id="roster-alerts" class="roster-alerts hidden">
           <h5>Players not on the roster <span id="roster-alerts-count" class="muted-count"></span></h5>
@@ -180,9 +175,7 @@
       <h3>Results</h3>
 
       <div class="modaq-block">
-        <h4>Match stats <span id="exports-count" class="muted-count"></span>
-          <button id="exports-download-all" class="tiny primary">Download all stats</button>
-          <button id="exports-refresh" class="tiny ghost">Refresh</button></h4>
+        <h4>Match stats <span id="exports-count" class="muted-count"></span>          <button id="exports-refresh" class="tiny ghost">Refresh</button></h4>
         <p class="hint">Moderators' MODAQ stats sync here live as they read — one QBJ per match, always
           current. Grouped by round; click a room to download that match.</p>
         <ul id="exports-list" class="players export-rounds"></ul>
@@ -308,8 +301,7 @@
         <ul id="live-list" class="players"></ul>
         <p id="live-empty" class="hint">No games in progress right now.</p>
       </div>
-      <p class="hint">A public YellowFruit-style stat report, built live from moderators' MODAQ games.
-        Anyone with this link can view standings, individuals, and box scores — packet answers stay private.</p>
+      <p class="hint">Standings, individuals and box scores, live. Public; no answer lines.</p>
       <label class="share-row">
         <span>Public stats link</span>
         <span class="copy-field">
@@ -322,27 +314,23 @@
 
       <div class="modaq-block">
         <h4>Buzzpoints</h4>
-        <p class="hint">Where every buzz came in every tossup, with answer lines — so unlike the stat
-          report it is <strong>not</strong> public. View it here, or hand out a temporary link below.</p>
+        <p class="hint">Every scored buzz, with answer lines. Private.</p>
         <div class="row">
-          <a id="buzzpoints-open" class="btnlink tiny" target="_blank" rel="noopener">Open buzzpoints report</a>
-          <a id="buzzpoints-csv" class="btnlink tiny ghost">Download CSV</a>
-          <a id="buzzpoints-zip" class="btnlink tiny ghost">Download for quizbowlbuzzpoints.com (.zip)</a>
+          <a id="buzzpoints-open" class="btnlink tiny" target="_blank" rel="noopener">Open report</a>
+          <a id="buzzpoints-csv" class="btnlink tiny ghost">CSV</a>
+          <a id="buzzpoints-zip" class="btnlink tiny ghost"
+            title="The data/ folder buzzpoint-migrator builds quizbowlbuzzpoints.com from: packets as JSON, games as .qbj, and index files. Fill in difficulty and level in its two index.json files.">quizbowlbuzzpoints.com (.zip)</a>
+          <a id="buzzpoints-games" class="btnlink tiny ghost"
+            title="For a set already on quizbowlbuzzpoints.com: just the games, as Round_N_Team_Team.qbj (N = the round's place in the Packets list), naming packets by the files you uploaded.">Games only (.zip)</a>
         </div>
-        <p class="hint">The .zip is the <code>data/</code> folder
-          <a href="https://github.com/JemCasey/buzzpoint-migrator" target="_blank" rel="noopener">buzzpoint-migrator</a>
-          builds the site from: the packets as JSON, every finished game as a MODAQ .qbj, and the index files
-          tying them together. Fill in the difficulty and level in its two <code>index.json</code> files.</p>
-        <p class="hint">Mirroring a set that's already on the site?
-          <a id="buzzpoints-games">Download just the games (.zip)</a>: each is
-          <code>Round_N_Team_Team.qbj</code>, N being the round's place in the Packets list, and names its
-          packet by the file you uploaded it from — so upload the set's own packet files.</p>
+        <label class="vol" style="margin-top: 14px"><input type="checkbox" id="buzz-points" />
+          also record every buzz attempt, including ones that lost the race to the lock</label>
+        <p class="hint" id="buzz-points-note"></p>
       </div>
 
       <div class="modaq-block">
         <h4>Temporary share links</h4>
-        <p class="hint">Expiring links you can hand to coaches or players and revoke any time.
-          Stats links show the YellowFruit report; buzzpoint links include answer lines.</p>
+        <p class="hint">Expire in 7 days; revoke any time. Buzzpoint links show answer lines.</p>
         <div class="row">
           <button id="share-new-stats" class="tiny">New stats link (7 days)</button>
           <button id="share-new-buzzpoints" class="tiny">New buzzpoints link (7 days)</button>

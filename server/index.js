@@ -21,6 +21,7 @@ import { tournamentBuzzpointsExport, roundNumbers, gameFileName, buzzpointsGame 
 import { sendEmail, emailEnabled, feedbackBody, FEEDBACK_TO } from './email.js';
 import { startWatchdog } from './watchdog.js';
 import { startBackups } from './backup.js';
+import { roundSummary } from './scorecard.js';
 import { buildZip } from './zip.js';
 import * as accounts from './accounts.js';
 import { parseYellowFruit, planImport } from './yfimport.js';
@@ -482,6 +483,7 @@ app.get('/api/tournaments/:code', (req, res) => {
     // code -> friendly name ("Room 1"), for pages that list the rooms
     roomNames: Object.fromEntries([...t.roomCodes].map((c) => [c, store.describeRoom(c)?.name || ''])),
     defaults: t.roomDefaults, format: t.format, requireReaderAccounts: !!t.requireReaderAccounts,
+    listed: !!t.listed,
     links: t.links || { schedule: '', discord: '' },
     autoRelease: t.autoRelease === true,
     playerScoresheet: t.playerScoresheet !== false,
@@ -709,37 +711,32 @@ app.post('/api/tournaments/:code/message', (req, res) => {
 app.put('/api/tournaments/:code/player-scoresheet', (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
-  const on = store.setPlayerScoresheet(t, req.body?.enabled !== false);
-  // Rooms show or hide the sheet straight away.
-  for (const code of t.roomCodes) { const room = store.getRoom(code); if (room) emitState(room); }
-  res.json({ playerScoresheet: on });
+  res.json({ playerScoresheet: applyPlayerScoresheet(t, req.body?.enabled !== false) });
 });
 
-// Name each tossup's category on that scoresheet. Off by default; the server
-// still only releases a category once the room is past the cycle (store's
-// category gate), so turning this on mid-round can't reveal anything ahead.
-app.put('/api/tournaments/:code/scoresheet-categories', (req, res) => {
-  const t = tournamentOr(res, req.params.code); if (!t) return;
-  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
-  const on = store.setScoresheetCategories(t, req.body?.enabled === true);
+// Each tournament-wide display toggle, with what the running rooms need to
+// hear when it changes. Shared by its own route and the settings page's save.
+function eachRoom(t, fn) {
+  for (const code of t.roomCodes) { const room = store.getRoom(code); if (room) fn(room); }
+}
+function applyPlayerScoresheet(t, enabled) {
+  const on = store.setPlayerScoresheet(t, enabled);
+  // Rooms show or hide the sheet straight away.
+  eachRoom(t, emitState);
+  return on;
+}
+function applyScoresheetCategories(t, enabled) {
+  const on = store.setScoresheetCategories(t, enabled);
   // Categories only appear (or disappear) on the reader's next game update, so
   // clear them from the sheet the rooms are showing right now.
-  for (const code of t.roomCodes) {
-    const room = store.getRoom(code);
-    if (!room) continue;
-    if (!on && room.scoresheet) {
-      for (const row of room.scoresheet.rows || []) row.category = null;
-    }
+  eachRoom(t, (room) => {
+    if (!on && room.scoresheet) for (const row of room.scoresheet.rows || []) row.category = null;
     emitState(room);
-  }
-  res.json({ scoresheetCategories: on });
-});
-
-// Collect every room's buzz log for the whole tournament (see store.buzzPoints).
-app.put('/api/tournaments/:code/buzz-points', ah(async (req, res) => {
-  const t = tournamentOr(res, req.params.code); if (!t) return;
-  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
-  const on = store.setBuzzPoints(t, req.body?.enabled === true);
+  });
+  return on;
+}
+async function applyBuzzPoints(t, enabled) {
+  const on = store.setBuzzPoints(t, enabled);
   // Turning it on mid-tournament shouldn't lose what the running rooms have
   // already collected — they keep the whole log in memory, so flush it now.
   if (on) {
@@ -748,7 +745,69 @@ app.put('/api/tournaments/:code/buzz-points', ah(async (req, res) => {
       if (room) await flushBuzzPoints(room).catch(() => {});
     }
   }
-  res.json({ buzzPoints: on });
+  return on;
+}
+function applyShowQuestions(t, enabled, lag) {
+  const out = store.setShowQuestions(t, enabled, lag);
+  // Text already on a scoresheet doesn't belong there any more once this is
+  // off (or the lag grew), so clear what the rooms are showing.
+  eachRoom(t, (room) => {
+    if (room.scoresheet) for (const row of room.scoresheet.rows || []) row.question = null;
+    emitState(room);
+  });
+  return out;
+}
+
+// Name each tossup's category on that scoresheet. Off by default; the server
+// still only releases a category once the room is past the cycle (store's
+// category gate), so turning this on mid-round can't reveal anything ahead.
+app.put('/api/tournaments/:code/scoresheet-categories', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  res.json({ scoresheetCategories: applyScoresheetCategories(t, req.body?.enabled === true) });
+});
+
+// Collect every room's buzz log for the whole tournament (see store.buzzPoints).
+app.put('/api/tournaments/:code/buzz-points', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  res.json({ buzzPoints: await applyBuzzPoints(t, req.body?.enabled === true) });
+}));
+
+// The settings page (the create page, reopened with ?edit=CODE) saves here.
+// Only what is safe to change once a tournament exists:
+// - Teams vs shootout never changes: rooms, packets and stats are built for one.
+// - Packets and the roster have their own tools in the console, and aren't here.
+// - Scoring format applies to games started from now on; games already filed
+//   keep the format they were read with.
+// - Room defaults apply to rooms added from now on. Existing rooms keep their
+//   own settings, which their moderator may have changed since.
+// Every field is optional: what isn't sent is left as it is.
+app.patch('/api/tournaments/:code/settings', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  const b = req.body || {};
+  if (!directorOk(t, b.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  store.updateTournament(t, {
+    name: b.name, date: b.date, listed: b.listed,
+    requireReaderAccounts: b.requireReaderAccounts,
+    format: b.format, defaults: b.defaults
+  });
+  if (typeof b.playerScoresheet === 'boolean' && b.playerScoresheet !== (t.playerScoresheet !== false)) {
+    applyPlayerScoresheet(t, b.playerScoresheet);
+  }
+  if (typeof b.scoresheetCategories === 'boolean' && b.scoresheetCategories !== (t.scoresheetCategories === true)) {
+    applyScoresheetCategories(t, b.scoresheetCategories);
+  }
+  if (typeof b.buzzPoints === 'boolean' && b.buzzPoints !== (t.buzzPoints === true)) {
+    await applyBuzzPoints(t, b.buzzPoints);
+  }
+  if (typeof b.showQuestions === 'boolean'
+    && (b.showQuestions !== (t.showQuestions === true) || (b.questionLag != null && Number(b.questionLag) !== t.questionLag))) {
+    applyShowQuestions(t, b.showQuestions, b.questionLag);
+  }
+  // The name shows in every room's tournament strip.
+  eachRoom(t, emitState);
+  res.json({ ok: true });
 }));
 
 // Every buzz attempt in every room of the tournament, including the ones that
@@ -758,6 +817,13 @@ app.put('/api/tournaments/:code/buzz-points', ah(async (req, res) => {
 app.get('/api/tournaments/:code/buzz-points', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  res.setHeader('Content-Disposition', `attachment; filename="klaxon_${t.code}_buzz_points.json"`);
+  res.json(await allBuzzAttempts(t));
+}));
+
+// The record behind that download (and the file of it in the
+// quizbowlbuzzpoints.com zip).
+async function allBuzzAttempts(t) {
   const live = new Map();
   for (const code of t.roomCodes) {
     const room = store.getRoom(code);
@@ -771,32 +837,22 @@ app.get('/api/tournaments/:code/buzz-points', ah(async (req, res) => {
     for (const b of rec.buzzes) buzzes.push({ room: rec.room, roomName: rec.name, ...b });
   }
   buzzes.sort((a, b) => a.at - b.at);
-  res.setHeader('Content-Disposition', `attachment; filename="klaxon_${t.code}_buzz_points.json"`);
-  res.json({
+  return {
     format: 'klaxon-tournament-buzzpoints-1',
     tournament: t.code,
     name: t.name,
     rooms: [...live.keys()],
     exportedAt: Date.now(),
     buzzes
-  });
-}));
+  };
+}
 
 // Show players each question's full text once the room is done with it, and
 // how many questions behind the room to run.
 app.put('/api/tournaments/:code/show-questions', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
-  const out = store.setShowQuestions(t, req.body?.enabled === true, req.body?.lag);
-  // Text already on a scoresheet doesn't belong there any more once this is
-  // off (or the lag grew), so clear what the rooms are showing.
-  for (const code of t.roomCodes) {
-    const room = store.getRoom(code);
-    if (!room) continue;
-    if (room.scoresheet) for (const row of room.scoresheet.rows || []) row.question = null;
-    emitState(room);
-  }
-  res.json(out);
+  res.json(applyShowQuestions(t, req.body?.enabled === true, req.body?.lag));
 }));
 
 // Turn a tournament into a playtest, or back.
@@ -877,7 +933,7 @@ app.post('/api/tournaments/:code/packets', ah(async (req, res) => {
   // is ready for it at once (see packetsAlwaysOpen).
   const visible = typeof req.body?.visible === 'boolean' ? req.body.visible : packetsAlwaysOpen(t);
   const tiebreaker = typeof req.body?.tiebreaker === 'boolean' ? req.body.tiebreaker : false;
-  const saved = await artifacts.savePacket({ kind: 't', code: t.code }, req.body?.round, packet, { visible, tiebreaker });
+  const saved = await artifacts.savePacket({ kind: 't', code: t.code }, req.body?.round, packet, { visible, tiebreaker, uploadedBy: null });
   res.json(saved);
 }));
 
@@ -1314,8 +1370,22 @@ app.post('/api/rooms/:code/packets', ah(async (req, res) => {
   const room = roomOr(res, req.params.code); if (!room) return;
   if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   const packet = typeof req.body?.packet === 'string' ? req.body.packet : JSON.stringify(req.body?.packet);
+  const bucket = store.bucketForRoom(room);
+  // In a tournament the packets are shared by every room, so a moderator's
+  // file must never replace one that is already there: it would swap out the
+  // director's packet, and release it, for every room at once. Their own
+  // room's earlier upload (a fixed file) is theirs to replace.
+  if (bucket.kind === 't') {
+    const owner = await artifacts.packetOwner(bucket, req.body?.round);
+    if (owner.exists && owner.uploadedBy !== room.code) {
+      return res.status(409).json({
+        error: `"${req.body?.round}" already has a packet in this tournament, so yours wasn't saved. `
+          + 'To read that one, clear the file you chose and start again. To read your own, give it a different round name.'
+      });
+    }
+  }
   // A moderator uploading their own round makes it usable (visible) right away.
-  const saved = await artifacts.savePacket(store.bucketForRoom(room), req.body?.round, packet, { visible: true });
+  const saved = await artifacts.savePacket(bucket, req.body?.round, packet, { visible: true, uploadedBy: room.code });
   res.json(saved);
 }));
 
@@ -1380,6 +1450,17 @@ app.get('/api/rooms/:code/fullbuzz', ah(async (req, res) => {
   if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
   res.setHeader('Content-Disposition', `attachment; filename="klaxon_${room.code}_full_buzz.json"`);
   res.json(store.fullBuzzExport(room));
+}));
+
+// Experimental moderator scorecard: the room's side of this round (see
+// server/scorecard.js). Staff only; the moderator's screen adds its own timings.
+app.get('/api/rooms/:code/scorecard', ah(async (req, res) => {
+  const room = roomOr(res, req.params.code); if (!room) return;
+  if (!(await roomModOk(room, reqToken(req), reqSession(req)))) return res.status(403).json({ error: 'forbidden' });
+  const round = typeof req.query.round === 'string' && req.query.round ? req.query.round.slice(0, 40) : null;
+  const errata = await artifacts.getErrata(store.bucketForRoom(room)).catch(() => []);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(roundSummary(room, { since: Number(req.query.since) || 0, round, errata }));
 }));
 
 // Previous games of this room (staff only): summaries, and one full record.
@@ -1702,6 +1783,12 @@ app.get('/t/:code/buzzpoints.zip', ah(async (req, res) => {
   const gamesOnly = req.query.games === '1';
   const { files, games } = tournamentBuzzpointsExport(t, rounds, await artifacts.readAllExports(bucket), { gamesOnly });
   if (games === 0) return res.status(404).send(gamesOnly ? 'No finished games yet.' : 'No finished games with a packet yet.');
+  // Every buzz attempt Klaxon kept, including the ones that lost the race,
+  // which no QBJ holds. Beside data/, so the importer never reads it.
+  if (!gamesOnly) {
+    const all = await allBuzzAttempts(t);
+    if (all.buzzes.length) files.push({ name: 'klaxon_all_buzz_attempts.json', data: JSON.stringify(all, null, 2) });
+  }
   const base = (t.name || t.code).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || t.code;
   res.setHeader('Content-Disposition', `attachment; filename="${base}_${gamesOnly ? 'games' : 'quizbowlbuzzpoints'}.zip"`);
   res.type('application/zip').send(buildZip(files));
@@ -1822,6 +1909,7 @@ app.get('/advanced', (_req, res) => res.redirect(301, '/create'));
 
 // tournament hub: create / open / browse, plus reader accounts
 app.get('/tournament-mode', (_req, res) => res.sendFile(path.join(publicDir, 'tournament-mode.html')));
+app.get('/tournament-help', (_req, res) => res.sendFile(path.join(publicDir, 'tournament-help.html')));
 
 // create-tournament page
 app.get('/new-tournament', (_req, res) => res.sendFile(path.join(publicDir, 'new-tournament.html')));

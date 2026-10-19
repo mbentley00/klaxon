@@ -1,4 +1,4 @@
-import { api, remember, readFileText, $ } from './util.js';
+import { api, remember, recall, readFileText, $ } from './util.js';
 import { parseSpreadsheet, toStoredRoster } from './roster-parse.js';
 
 const msg = $('#msg');
@@ -113,6 +113,164 @@ function shootoutDefaults() {
   };
 }
 
+// --- editing an existing tournament (/new-tournament?edit=CODE) --------------
+// The same form, filled in from the tournament, saving what is safe to change
+// (see PATCH /api/tournaments/:code/settings for what that is and why).
+const editCode = (new URLSearchParams(location.search).get('edit') || '').toUpperCase() || null;
+let editToken = null;
+let gamesPlayed = 0;
+let loadedScoring = '';
+const scoringNow = () => kind() === 'shootout'
+  ? `${$('#so-scheme').value}|${$('#so-bonuses').checked}`
+  : `${$('#fmt-scheme').value}|${$('#fmt-bonuses').checked}`;
+
+async function directorTokenFor(code) {
+  const kept = recall('directorToken:' + code);
+  if (kept) return kept;
+  // On another device, a signed-in director's account brings it (as in the console).
+  const s = localStorage.getItem('bz_sessionToken');
+  if (!s) return null;
+  try {
+    const { tournaments } = await api('GET', `/api/accounts/me/tournaments?sessionToken=${encodeURIComponent(s)}`);
+    const mine = tournaments.find((x) => x.code === code && x.directorToken);
+    if (mine) remember('directorToken:' + code, mine.directorToken);
+    return mine?.directorToken || null;
+  } catch { return null; }
+}
+
+async function startEditing() {
+  const btn = $('#create-tournament');
+  btn.disabled = true;
+  document.title = 'Tournament settings — Klaxon';
+  $('#page-title').textContent = 'Tournament settings';
+  document.querySelector('.crumb[aria-current]').textContent = 'Settings';
+  for (const x of document.querySelectorAll('.create-only')) x.classList.add('hidden');
+  btn.textContent = 'Save changes';
+  const cancel = $('#edit-cancel');
+  cancel.href = '/t/' + editCode;
+  cancel.classList.remove('hidden');
+
+  editToken = await directorTokenFor(editCode);
+  if (!editToken) return say(`Only ${editCode}'s director can change its settings. Open it from the browser that created it, or sign in to the account that did.`, false);
+  let t;
+  try { t = await api('GET', `/api/tournaments/${editCode}`); } catch (e) { return say('Could not load the tournament: ' + e.message, false); }
+  try {
+    const { exports } = await api('GET', `/api/tournaments/${editCode}/exports?directorToken=${encodeURIComponent(editToken)}`);
+    gamesPlayed = exports.length;
+  } catch { /* the warning is a courtesy */ }
+
+  // Teams vs shootout is fixed once the tournament exists.
+  const shootout = t.format?.kind === 'shootout';
+  document.querySelector(`input[name=t-kind][value=${shootout ? 'shootout' : 'teams'}]`).checked = true;
+  for (const r of document.querySelectorAll('input[name=t-kind]')) r.disabled = true;
+  showKind();
+  // After showKind, which would otherwise show the roster again.
+  for (const x of document.querySelectorAll('.create-only')) x.classList.add('hidden');
+
+  const d = t.defaults || {}, f = t.format || {};
+  $('#tournament-name').value = t.name || '';
+  $('#t-date').value = t.date || '';
+  $('#t-listed').checked = t.listed === true;
+  $('#t-require-accounts').checked = t.requireReaderAccounts === true;
+  $('#t-require-accounts').dataset.touched = '1';
+  if (shootout) {
+    $('#so-carry').checked = d.shootoutCarry === true;
+    $('#so-autoadd').checked = d.shootoutAutoAdd !== false;
+    $('#so-typed').checked = d.typedAnswers === true;
+    const mode = d.lockedAnswers ? 'typed' : d.allowWithdraw === false ? 'none' : d.withdrawCooldown > 0 ? 'rationed' : 'free';
+    document.querySelector(`input[name=so-withdraw][value=${mode}]`).checked = true;
+    if (d.withdrawCooldown > 0) $('#so-cooldown').value = d.withdrawCooldown;
+    showCooldown();
+    $('#so-scheme').value = f.tossupScheme || '15/10/-5';
+    $('#so-bonuses').checked = f.hasBonuses === true;
+    $('#so-notes').value = f.notes || '';
+  } else {
+    $('#fmt-scheme').value = f.tossupScheme || '15/10/-5';
+    $('#fmt-bonuses').checked = f.hasBonuses !== false;
+    $('#fmt-player-scoresheet').checked = t.playerScoresheet !== false;
+    $('#fmt-scoresheet-categories').checked = t.scoresheetCategories === true;
+    $('#fmt-show-questions').checked = t.showQuestions === true;
+    $('#fmt-question-lag').value = t.questionLag ?? 2;
+    showLag();
+    $('#fmt-buzz-points').checked = t.buzzPoints === true;
+    $('#fmt-massinger').checked = f.massinger === true;
+    $('#fmt-massinger-timer').value = f.massingerTimerSec ?? 30;
+    $('#fmt-massinger-control').value = f.massingerControl || 'captain';
+    showMassingerOptions();
+    $('#t-def-modaq-mode').value = !d.modaqMode ? 'off' : d.modaqLite ? 'lite' : 'full';
+    $('#t-def-queue').checked = d.queueMode === true;
+    $('#t-def-withdraw').checked = d.allowWithdraw === true;
+    $('#t-def-autoclear').checked = d.autoClear === true;
+    $('#t-def-require-team').checked = d.requireTeam === true;
+    $('#t-def-roster-join').checked = d.rosterJoin === true;
+    $('#t-def-player-alerts').checked = d.playerAlerts !== false;
+  }
+  loadedScoring = scoringNow();
+
+  const rooms = t.rooms?.length || 0;
+  $('#edit-note').textContent = `${t.code} · ${shootout ? 'Shootout' : 'Teams'} (can't be changed).`
+    + ' Display and buzz-recording changes reach every room at once. Scoring applies to games started after you save.'
+    + (rooms ? ` Room settings apply to rooms you add from now on; the ${rooms} existing room${rooms === 1 ? ' keeps' : 's keep'} their own.` : '')
+    + ' Packets and the roster are in the director console.';
+  $('#edit-note').classList.remove('hidden');
+  $('#defaults-legend').textContent = 'Rooms added from now on start with';
+  btn.disabled = false;
+}
+
+async function saveEdits() {
+  if (gamesPlayed && scoringNow() !== loadedScoring
+    && !confirm(`${gamesPlayed} game${gamesPlayed === 1 ? ' has' : 's have'} already been scored. They keep the format they were read with; only games started from now on use the new scoring.\n\nSave the new scoring?`)) {
+    return;
+  }
+  const body = {
+    directorToken: editToken,
+    name: $('#tournament-name').value.trim(),
+    date: $('#t-date').value,
+    listed: $('#t-listed').checked,
+    requireReaderAccounts: $('#t-require-accounts').checked
+  };
+  if (kind() === 'shootout') {
+    body.defaults = shootoutDefaults();
+    body.format = { tossupScheme: $('#so-scheme').value, hasBonuses: $('#so-bonuses').checked, notes: $('#so-notes').value };
+  } else {
+    Object.assign(body, teamSettings());
+  }
+  await api('PATCH', `/api/tournaments/${editCode}/settings`, body);
+  say('Saved. Opening the director console…');
+  location.href = '/t/' + editCode;
+}
+
+// What a team tournament's form says, shared by Create and Save.
+function teamSettings() {
+  const modaqMode = $('#t-def-modaq-mode').value; // off | lite | full
+  return {
+    defaults: {
+      queueMode: $('#t-def-queue').checked,
+      allowWithdraw: $('#t-def-withdraw').checked,
+      autoClear: $('#t-def-autoclear').checked,
+      requireTeam: $('#t-def-require-team').checked,
+      rosterJoin: $('#t-def-roster-join').checked,
+      playerAlerts: $('#t-def-player-alerts').checked,
+      modaqMode: modaqMode !== 'off',
+      modaqLite: modaqMode === 'lite'
+    },
+    format: {
+      hasBonuses: $('#fmt-bonuses').checked,
+      tossupScheme: $('#fmt-scheme').value,
+      massinger: $('#fmt-massinger').checked,
+      massingerTimerSec: Number($('#fmt-massinger-timer').value),
+      massingerControl: $('#fmt-massinger-control').value
+    },
+    playerScoresheet: $('#fmt-player-scoresheet').checked,
+    scoresheetCategories: $('#fmt-scoresheet-categories').checked,
+    buzzPoints: $('#fmt-buzz-points').checked,
+    showQuestions: $('#fmt-show-questions').checked,
+    questionLag: Number($('#fmt-question-lag').value)
+  };
+}
+
+if (editCode) startEditing();
+
 $('#create-tournament').addEventListener('click', async () => {
   const btn = $('#create-tournament');
   const nameBox = $('#tournament-name');
@@ -123,39 +281,20 @@ $('#create-tournament').addEventListener('click', async () => {
     return say('Give the tournament a name.', false);
   }
   btn.disabled = true;
+  if (editCode) {
+    try { await saveEdits(); } catch (err) { say('Could not save: ' + err.message, false); }
+    btn.disabled = false;
+    return;
+  }
   try {
     if (kind() === 'shootout') return await createShootout();
-    const modaqMode = $('#t-def-modaq-mode').value; // off | lite | full
-    const defaults = {
-      queueMode: $('#t-def-queue').checked,
-      allowWithdraw: $('#t-def-withdraw').checked,
-      autoClear: $('#t-def-autoclear').checked,
-      requireTeam: $('#t-def-require-team').checked,
-      rosterJoin: $('#t-def-roster-join').checked,
-      playerAlerts: $('#t-def-player-alerts').checked,
-      modaqMode: modaqMode !== 'off',
-      modaqLite: modaqMode === 'lite'
-    };
-    const format = {
-      hasBonuses: $('#fmt-bonuses').checked,
-      tossupScheme: $('#fmt-scheme').value,
-      massinger: $('#fmt-massinger').checked,
-      massingerTimerSec: Number($('#fmt-massinger-timer').value),
-      massingerControl: $('#fmt-massinger-control').value
-    };
     const r = await api('POST', '/api/tournaments', {
       name: $('#tournament-name').value.trim() || undefined,
-      defaults,
-      format,
+      ...teamSettings(),
       requireReaderAccounts: $('#t-require-accounts').checked,
       date: $('#t-date').value || undefined,
       listed: $('#t-listed').checked,
-      playerScoresheet: $('#fmt-player-scoresheet').checked,
-      scoresheetCategories: $('#fmt-scoresheet-categories').checked,
-      buzzPoints: $('#fmt-buzz-points').checked,
       playtest: $('#fmt-playtest').checked,
-      showQuestions: $('#fmt-show-questions').checked,
-      questionLag: Number($('#fmt-question-lag').value),
       // Signed in, the creator is approved to read in their own tournament.
       sessionToken: localStorage.getItem('bz_sessionToken') || undefined
     });
