@@ -1,3 +1,5 @@
+import { massingerPicksCsv } from './massingerRecord.js';
+
 // --- A tournament's buzz points for quizbowlbuzzpoints.com ------------------
 // The site is built by JemCasey's buzzpoint-migrator, which reads one `data/`
 // folder: the question set (its packets, as JSON) and the tournament (its
@@ -93,6 +95,7 @@ export function tournamentBuzzpointsExport(t, rounds, matches, { gamesOnly = fal
   const pad = rounds.length >= 100 ? 3 : 2;
   let games = 0;
   let packets = 0;
+  const picked = [];   // MASSINGER games, for the pick/ban CSV
   rounds.forEach((r, i) => {
     const number = i + 1;
     const roundGames = matches
@@ -121,11 +124,16 @@ export function tournamentBuzzpointsExport(t, rounds, matches, { gamesOnly = fal
       if (used.has(name)) name = `${base}_${underscored(game._room || 'Room')}`;
       for (let n = 2; used.has(name); n++) name = `${base}_${n}`;
       used.add(name);
+      if (qbj.massinger) picked.push({ round: r.round, number, file: `${name}.qbj`, qbj });
       files.push({ name: `${gamesOnly ? '' : `${tournament}/`}game_files/${name}.qbj`, data: JSON.stringify(qbj, null, 2) });
       games++;
     }
   });
   if (games === 0) return { files: [], games, packets };
+  // Who banned and protected what, one row per pick (each game file also has
+  // it as `massinger`). Beside data/, so the importer never reads it.
+  const picks = massingerPicksCsv(picked);
+  if (picks) files.push({ name: 'klaxon_massinger_picks.csv', data: picks });
   if (gamesOnly) return { files, games, packets };
 
   const hasBonuses = t.format?.hasBonuses !== false;

@@ -18,6 +18,7 @@ import * as shootout from './shootout.js';
 import { renderReport, PAGES } from './yellowfruit.js';
 import { computeBuzzpoints, renderBuzzpointsCsv, renderBuzzpointsHtml } from './buzzpoints.js';
 import { tournamentBuzzpointsExport, roundNumbers, gameFileName, buzzpointsGame } from './buzzpointsZip.js';
+import { massingerRecord } from './massingerRecord.js';
 import { sendEmail, emailEnabled, feedbackBody, FEEDBACK_TO } from './email.js';
 import { startWatchdog } from './watchdog.js';
 import { startBackups } from './backup.js';
@@ -1174,18 +1175,22 @@ async function inPacketNumbers(matches, packetsByRound) {
   const warnings = [];
   const out = [];
   for (const m of matches) {
-    const qbj = m?.qbj;
+    let qbj = m?.qbj;
     const round = String(qbj?._round ?? '');
-    const packet = packetsByRound.get(round);
-    if (!qbj || !packet) { out.push(m); continue; }
+    if (!qbj || typeof qbj !== 'object') { out.push(m); continue; }
     const board = qbj._room ? await boardFor(String(qbj._room), round) : null;
+    // Which categories each team banned and protected goes out with the game.
+    const record = massingerRecord(board, qbj);
+    if (record) qbj = { ...qbj, massinger: record };
+    const packet = packetsByRound.get(round);
+    if (!packet) { out.push(qbj === m.qbj ? m : { ...m, qbj }); continue; }
     const r = toPacketNumbers(qbj, packet, board);
     if (r.unmatched) {
       warnings.push({ round, room: String(qbj._room ?? ''),
         teams: (qbj.match_teams || []).map((mt) => mt?.team?.name ?? ''),
         questionsNotInPacket: r.unmatched, massinger: !!board });
     }
-    out.push(r.qbj === qbj ? m : { ...m, qbj: r.qbj });
+    out.push(r.qbj === m.qbj ? m : { ...m, qbj: r.qbj });
   }
   return { matches: out, warnings };
 }
@@ -1691,7 +1696,10 @@ app.get('/api/rooms/:code/massinger/:round', ah(async (req, res) => {
   const rounds = await roomRounds(room, reqToken(req), reqSession(req));
   if (!rounds) return res.status(403).json({ error: 'forbidden' });
   if (!roundAllowed(rounds, req.params.round)) return res.status(403).json({ error: 'not_your_round' });
-  res.json({ massinger: await artifacts.getMassinger(room.code, req.params.round) });
+  const board = await artifacts.getMassinger(room.code, req.params.round);
+  // `record`: the finished pick/ban as exports carry it (massingerRecord.js),
+  // for the backup the moderator downloads at the end of a game.
+  res.json({ massinger: board, record: massingerRecord(board, null) });
 }));
 
 // Released tiebreaker questions the moderator can sub in.
