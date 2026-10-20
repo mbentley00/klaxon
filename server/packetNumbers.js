@@ -1,8 +1,9 @@
 // --- A game's question numbers, as places in the full packet ---------------
 // MODAQ numbers questions by their place in the packet it was GIVEN. A
 // MASSINGER game is given the packet less its banned questions (see
-// applyMassinger in MODAQ's moderator.tsx), so its "question 5" can be the
-// full packet's question 7. Anything that looks a game's questions up in the
+// applyMassinger in MODAQ's moderator.tsx), with the banned ones after them
+// as tiebreakers, so its "question 5" can be the full packet's question 7 and
+// its "question 21" the first question banned. Anything that looks a game's questions up in the
 // stored, full packet (the buzzpoints zip, the per-game download, the
 // buzzpoint report) has to renumber it first, or every buzz after the first
 // ban silently lands on the wrong question.
@@ -56,13 +57,16 @@ export function bannedIndexes(board) {
   return removed;
 }
 
-// question number as read (1-based) -> number in the full packet. Numbers past
-// the filtered packet were questions added mid-game (tiebreakers): they stay
-// past the end of the full packet too, so nothing mistakes them for a real one.
-function numberMap(total, removed) {
-  const kept = [];
-  for (let i = 0; i < total; i++) if (!removed.has(i)) kept.push(i);
-  return (n) => (n >= 1 && n <= kept.length ? kept[n - 1] + 1 : n > kept.length ? n - kept.length + total : n);
+// question number as read (1-based) -> number in the full packet. MODAQ is
+// given the kept tossups and then the banned ones, in packet order, as
+// tiebreakers (`withBanned`; bonuses don't get them back). Numbers past all
+// of that were questions added mid-game: they stay past the end of the full
+// packet too, so nothing mistakes them for a real one.
+function numberMap(total, removed, withBanned) {
+  const order = [];
+  for (let i = 0; i < total; i++) if (!removed.has(i)) order.push(i);
+  if (withBanned) for (let i = 0; i < total; i++) if (removed.has(i)) order.push(i);
+  return (n) => (n >= 1 && n <= order.length ? order[n - 1] + 1 : n > order.length ? n - order.length + total : n);
 }
 
 // Put one question reference (a tossup_question or a bonus's question) at its
@@ -98,10 +102,10 @@ export function toPacketNumbers(qbj, packet, board) {
   const tossups = Array.isArray(packet.tossups) ? packet.tossups : [];
   const bonuses = Array.isArray(packet.bonuses) ? packet.bonuses : [];
   const removed = bannedIndexes(board);
-  const tossupMap = removed && removed.size ? numberMap(tossups.length, removed) : null;
+  const tossupMap = removed && removed.size ? numberMap(tossups.length, removed, true) : null;
   // applyMassinger only takes bonuses out alongside their tossups when the two
   // line up one-to-one; otherwise MODAQ was given every bonus.
-  const bonusMap = tossupMap && bonuses.length === tossups.length ? numberMap(bonuses.length, removed) : null;
+  const bonusMap = tossupMap && bonuses.length === tossups.length ? numberMap(bonuses.length, removed, false) : null;
 
   // Hash -> index, for hashes that occur once (a duplicated question can't say
   // which copy was read).

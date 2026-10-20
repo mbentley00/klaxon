@@ -3453,6 +3453,8 @@ io.on('connection', (socket) => {
     const result = store.massingerPick(room, {
       type: payload?.type,
       label: payload?.label,
+      step: payload?.step,
+      player: true,
       by: store.displayName(member)
     });
     if (result.error) return ack?.(result);

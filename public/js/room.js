@@ -1237,7 +1237,10 @@ let msLastTick = null;
 function renderMassingerClock(m, ourPick) {
   const box = $('#ms-clock');
   if (m.status !== 'active' || !m.deadline) { box.classList.add('hidden'); return; }
-  const ms = Math.max(0, m.deadline - clock.now());
+  // During the same-team pause the deadline is a little further off than the
+  // turn's time; the clock holds at full until the pause ends.
+  const full = m.timerSec > 0 ? m.timerSec * 1000 : Infinity;
+  const ms = Math.min(full, Math.max(0, m.deadline - clock.now()));
   const left = Math.ceil(ms / 1000);
   box.classList.remove('hidden');
   box.querySelector('.ms-clock-num').textContent = left > 0 ? String(left) : 'TIME’S UP';
@@ -2475,9 +2478,17 @@ function renderMassinger(s) {
     big.querySelector('.ms-turnbig-kind').textContent = kind.toUpperCase();
   }
 
+  // Just after this team's ban, its protect is held back for a moment (the
+  // server refuses it too), so a teammate's late click can't land on it.
+  const pauseLeft = m.status === 'active' && m.pauseUntil ? m.pauseUntil - clock.now() : 0;
+  const paused = pauseLeft > 0;
+  clearTimeout(msPauseOff);
+  if (paused) msPauseOff = setTimeout(() => { if (state.snapshot) renderMassinger(state.snapshot); }, pauseLeft + 50);
   const hint = $('#ms-hint');
   if (m.status === 'done') {
     hint.textContent = '';
+  } else if (mine && paused) {
+    hint.textContent = `Get ready: your ${due?.type || 'pick'} opens in a moment.`;
   } else if (mine) {
     const what = due ? due.type
       : canBan && canProtect ? 'protect or ban' : canBan ? 'ban (no protects left)' : 'protect (no bans left)';
@@ -2517,10 +2528,13 @@ function renderMassinger(s) {
     li.append(el('span', { className: 'ms-mark', textContent: mark }));
     if (mine && left > 0 && sc.protectedBy == null) {
       const actions = el('span', { className: 'ms-pick' });
-      if (canProtect) actions.append(el('button', { className: 'tiny', textContent: 'Protect',
-        onclick: () => sendMassingerPick('protect', sc.label) }));
-      if (canBan) actions.append(el('button', { className: 'tiny', textContent: 'Ban',
-        onclick: () => sendMassingerPick('ban', sc.label) }));
+      // The pick names the step this screen is showing, so a click on a
+      // screen that's behind is refused instead of landing on the next pick.
+      const seen = m.actions.length;
+      if (canProtect) actions.append(el('button', { className: 'tiny', textContent: 'Protect', disabled: paused,
+        onclick: () => sendMassingerPick('protect', sc.label, seen) }));
+      if (canBan) actions.append(el('button', { className: 'tiny', textContent: 'Ban', disabled: paused,
+        onclick: () => sendMassingerPick('ban', sc.label, seen) }));
       li.append(actions);
     }
     return li;
@@ -2552,14 +2566,23 @@ const MASSINGER_PICK_ERRORS = {
   no_protects_left: 'Your team has used all its protects.',
   ban_now: 'This pick is a ban.',
   protect_now: 'This pick is a protect.',
+  stale: 'That pick was already made. Check the board and try again.',
+  wait: 'Hold on: your next pick opens in a moment.',
   not_active: 'The pick/ban has already finished.'
 };
 
-function sendMassingerPick(type, label) {
+let msPauseOff = null;
+
+function sendMassingerPick(type, label, step) {
   const hint = $('#ms-hint');
   hint.textContent = 'Sending\u2026';
-  socket.emit('massinger_pick', { type, label }, (resp) => {
-    if (resp?.error) hint.textContent = MASSINGER_PICK_ERRORS[resp.error] || `Couldn\u2019t pick: ${resp.error}`;
+  // One pick per click: the buttons stay off until the board comes back.
+  document.querySelectorAll('#ms-board .ms-pick button').forEach((b) => { b.disabled = true; });
+  socket.emit('massinger_pick', { type, label, step }, (resp) => {
+    if (!resp?.error) return;
+    // Refused: redraw from the latest board (buttons back on), then say why.
+    if (state.snapshot) renderMassinger(state.snapshot);
+    hint.textContent = MASSINGER_PICK_ERRORS[resp.error] || `Couldn\u2019t pick: ${resp.error}`;
   });
 }
 

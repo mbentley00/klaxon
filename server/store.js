@@ -2609,11 +2609,20 @@ function clampNum(v, lo, hi, fallback) {
 const massingerRemaining = (m) =>
   m.subcats.reduce((sum, sc) => sum + (sc.indexes.length - sc.banned), 0);
 
-// (Re)arm the per-turn clock. timerSec 0 disables the timer.
-function massingerArm(m, now = Date.now()) {
-  m.turnStartedAt = now;
-  m.deadline = m.timerSec > 0 ? now + m.timerSec * 1000 : null;
+// (Re)arm the per-turn clock. timerSec 0 disables the timer. A pause (see
+// MASSINGER_SAME_TEAM_PAUSE_MS) holds the next pick back for a moment; the
+// clock starts after it, so the team still gets its full time.
+function massingerArm(m, now = Date.now(), pauseMs = 0) {
+  m.pauseUntil = pauseMs > 0 ? now + pauseMs : null;
+  m.turnStartedAt = now + pauseMs;
+  m.deadline = m.timerSec > 0 ? now + pauseMs + m.timerSec * 1000 : null;
 }
+
+// When a team picks twice in a row (a ban, then its protect), players can't
+// make the second pick for this long. A teammate's late or doubled click
+// would otherwise land on the next pick: the Ban button they aimed at has
+// just become a Protect button in the same place.
+export const MASSINGER_SAME_TEAM_PAUSE_MS = 2500;
 
 // Each team gets this many bans and this many protects.
 export const MASSINGER_MAX_PER_TEAM = 3;
@@ -2663,6 +2672,7 @@ function massingerFinishIfDone(m) {
     || (step !== undefined && !bansAhead)) {
     m.status = 'done';
     m.deadline = null;
+    m.pauseUntil = null;
   }
 }
 
@@ -2712,9 +2722,15 @@ export function massingerRestore(room, saved) {
   return { ok: true };
 }
 
-export function massingerPick(room, { type, label, by } = {}) {
+// `step` is how many picks the picker's screen had seen; a pick made on a
+// screen that's behind is refused rather than applied to a pick it wasn't
+// meant for. `player` picks also wait out the same-team pause (the moderator
+// and the timer don't).
+export function massingerPick(room, { type, label, by, step: seen, player } = {}) {
   const m = room.massinger;
   if (!m || m.status !== 'active') return { error: 'not_active' };
+  if (Number.isInteger(seen) && seen !== m.actions.length) return { error: 'stale' };
+  if (player === true && m.pauseUntil && Date.now() < m.pauseUntil) return { error: 'wait' };
   const sc = m.subcats.find((x) => x.label === label);
   if (!sc) return { error: 'no_subcat' };
   if (sc.protectedBy != null) return { error: 'protected' };
@@ -2729,10 +2745,12 @@ export function massingerPick(room, { type, label, by } = {}) {
   }
   if (type === 'protect') sc.protectedBy = m.turn;
   else sc.banned += 1;
-  m.actions.push({ type, label, team: m.turn, at: Date.now(), by: by || 'moderator' });
+  const team = m.turn;
+  m.actions.push({ type, label, team, at: Date.now(), by: by || 'moderator' });
   if (step) massingerSyncTurn(m);
   else m.turn = 1 - m.turn;
-  massingerArm(m);
+  const again = step && massingerStep(m)?.team === team;
+  massingerArm(m, Date.now(), again ? MASSINGER_SAME_TEAM_PAUSE_MS : 0);
   massingerFinishIfDone(m);
   return { ok: true };
 }
