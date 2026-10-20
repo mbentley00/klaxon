@@ -1,4 +1,4 @@
-import { api, remember, recall, readFileText, $ } from './util.js';
+import { api, remember, recall, readFileText, $, el } from './util.js';
 import { parseSpreadsheet, toStoredRoster } from './roster-parse.js';
 
 const msg = $('#msg');
@@ -195,7 +195,7 @@ async function startEditing() {
     $('#fmt-buzz-points').checked = t.buzzPoints === true;
     $('#fmt-massinger').checked = f.massinger === true;
     $('#fmt-massinger-timer').value = f.massingerTimerSec ?? 30;
-    $('#fmt-massinger-control').value = f.massingerControl || 'captain';
+    $('#fmt-massinger-control').value = f.massingerControl || 'anyone';
     showMassingerOptions();
     $('#t-def-modaq-mode').value = !d.modaqMode ? 'off' : d.modaqLite ? 'lite' : 'full';
     $('#t-def-queue').checked = d.queueMode === true;
@@ -206,6 +206,18 @@ async function startEditing() {
     $('#t-def-player-alerts').checked = d.playerAlerts !== false;
   }
   loadedScoring = scoringNow();
+
+  // Room names: one box per room, its code as the placeholder.
+  const roomList = $('#room-names');
+  roomList.replaceChildren(...(t.rooms || []).map((rc) => {
+    const row = el('label', { className: 'room-name-row' });
+    row.append(el('code', { textContent: rc }),
+      el('input', { type: 'text', maxLength: 60, value: t.roomNames?.[rc] || '', placeholder: rc }));
+    row.querySelector('input').setAttribute('aria-label', `Name for room ${rc}`);
+    row.querySelector('input').dataset.room = rc;
+    return row;
+  }));
+  $('#room-names-panel').classList.toggle('hidden', !(t.rooms || []).length);
 
   const rooms = t.rooms?.length || 0;
   $('#edit-note').textContent = `${t.code} · ${shootout ? 'Shootout' : 'Teams'} (can't be changed).`
@@ -229,6 +241,8 @@ async function saveEdits() {
     listed: $('#t-listed').checked,
     requireReaderAccounts: $('#t-require-accounts').checked
   };
+  body.roomNames = Object.fromEntries([...document.querySelectorAll('#room-names input')]
+    .map((i) => [i.dataset.room, i.value.trim()]));
   if (kind() === 'shootout') {
     body.defaults = shootoutDefaults();
     body.format = { tossupScheme: $('#so-scheme').value, hasBonuses: $('#so-bonuses').checked, notes: $('#so-notes').value };

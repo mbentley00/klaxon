@@ -886,6 +886,14 @@ app.patch('/api/tournaments/:code/settings', ah(async (req, res) => {
     && (b.showQuestions !== (t.showQuestions === true) || (b.questionLag != null && Number(b.questionLag) !== t.questionLag))) {
     applyShowQuestions(t, b.showQuestions, b.questionLag);
   }
+  // Room names (blank: the room shows its code). Only this tournament's rooms.
+  if (b.roomNames && typeof b.roomNames === 'object') {
+    for (const [rc, name] of Object.entries(b.roomNames)) {
+      if (!t.roomCodes.has(String(rc).toUpperCase())) continue;
+      const room = store.getRoom(rc);
+      if (room) store.setRoomName(room, name);
+    }
+  }
   // The name shows in every room's tournament strip.
   eachRoom(t, emitState);
   res.json({ ok: true });
@@ -2809,7 +2817,7 @@ io.on('connection', (socket) => {
     let rosterTeam = payload?.rosterTeam, rosterPlayer = payload?.rosterPlayer;
     if (role === 'player' && room.tournamentCode && !room.settings.shootout) {
       await tournamentTeamsFor(room);
-      const playing = new Set(room.rosterTeams || []);
+      const playing = new Set(store.playingTeamNames(room));
       if (rosterTeam && !playing.has(rosterTeam) &&
           (room.tournamentTeams || []).some((t) => t.name === rosterTeam)) {
         joinName = rosterPlayer || joinName;
@@ -3267,6 +3275,9 @@ io.on('connection', (socket) => {
         break;
       case 'massinger_lobby':
         store.massingerLobby(room, payload);
+        // Who is "playing now" vs "next game" follows the lobby's teams.
+        await tournamentTeamsFor(room);
+        store.refreshWaiting(room);
         break;
       // The teams a moderator entered in MODAQ's New Game dialog become this
       // room's roster, so every buzz can be reported as a real MODAQ player.

@@ -128,7 +128,7 @@ button, .btnlink {
   background: var(--surface); color: var(--ink); padding: .6em 1.1em;
   box-shadow: 3px 3px 0 var(--shadow-ink); transition: transform .05s, box-shadow .05s, background .12s;
 }
-.btnlink { display: inline-flex; align-items: center; text-decoration: none; }
+.btnlink { display: inline-flex; align-items: center; text-decoration: none; line-height: normal; } /* same height as a <button> */
 button:hover, .btnlink:hover { background: var(--surface-hover); }
 button:active, .btnlink:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--shadow-ink); }
 button:disabled { opacity: .45; cursor: not-allowed; box-shadow: 3px 3px 0 var(--soft); border-color: var(--soft); }
@@ -483,6 +483,10 @@ body.compact .queue-how { display: none; }
 /* Round packets: a handle to drag a row into a new place. */
 .packet-row { gap: 8px; }
 .packet-row .pname { flex: 1 1 auto; min-width: 0; }
+/* Its toggles and buttons stay together on one line, at the right; on a
+   narrow screen the whole group moves under the name instead of splitting. */
+.packet-row { flex-wrap: wrap; align-items: center; }
+.packet-row > .sound-row { flex: 0 0 auto; flex-wrap: nowrap; margin-left: auto; gap: 8px; }
 /* The file a round came from, after its number: "Round 3  UW Fall 3". */
 .packet-file { margin-left: .5em; color: var(--muted); font-weight: 400; }
 .packet-file::before { content: '· '; }
@@ -677,7 +681,11 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
 .ms-board li.banned { opacity: .45; }
 .ms-board li.banned .ms-label { text-decoration: line-through; }
 .ms-board li.protected { background: var(--ok-bg); border-color: var(--ok-deep); }
+.ms-board li { flex-wrap: wrap; row-gap: 2px; }
+.ms-board .ms-label { min-width: 0; overflow-wrap: anywhere; }
 .ms-board .ms-mark { font-size: .78rem; color: var(--muted); white-space: nowrap; }
+/* A protect names the team, which can be long: its own line, wrapping. */
+.ms-board li.protected .ms-mark { flex-basis: 100%; white-space: normal; overflow-wrap: anywhere; }
 .massinger .ms-status.mine { color: var(--accent); }
 .massinger .ms-hint { margin: .1em 0 .7em; font-size: .85rem; color: var(--muted); }
 .ms-board .ms-pick { display: flex; gap: 4px; margin-left: auto; }
@@ -1604,3 +1612,9 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .assign-rounds li { padding: 3px 0; border-bottom: 1px solid var(--soft); }
 .assign-rounds li:last-child { border-bottom: 0; }
 #members-list li { flex-wrap: wrap; }
+
+/* Settings page: a box per room to name it. */
+.room-names { display: grid; gap: 6px; }
+.room-name-row { display: flex; align-items: center; gap: 10px; }
+.room-name-row code { flex: 0 0 4.5em; font-weight: 700; }
+.room-name-row input { flex: 1; min-width: 0; }

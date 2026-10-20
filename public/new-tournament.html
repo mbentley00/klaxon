@@ -113,8 +113,8 @@
       <div id="massinger-options" class="hidden">
         <label class="select-label" for="fmt-massinger-control">Who makes the pick/ban picks</label>
         <select id="fmt-massinger-control">
+          <option value="anyone" selected>Anyone on the team</option>
           <option value="captain">Each team's captain</option>
-          <option value="anyone">Anyone on the team</option>
           <option value="moderator">Moderator only</option>
         </select>
         <label class="select-label" for="fmt-massinger-timer">Pick/ban timer (seconds per pick, 0 = no timer)</label>
@@ -147,6 +147,12 @@
       <p id="t-roster-paste-note" class="hint"></p>
       <label class="select-label" for="t-roster-file">Or upload a QBJ</label>
       <input type="file" id="t-roster-file" accept=".qbj,.json,application/json" />
+    </section>
+
+    <section id="room-names-panel" class="panel hidden">
+      <h3>Room names</h3>
+      <p class="hint">What players and moderators see for each room. Leave one blank to show its code.</p>
+      <div id="room-names" class="room-names"></div>
     </section>
 
     <section class="panel teams-only">

@@ -196,10 +196,11 @@
           <em>Starting soon</em> above their buzzer meanwhile.</li>
         <li>Read. Buzzes appear in the Klaxon buzz panel beside the question, labelled with the
           player's name, and scores go to the director's console as the moderator reads.</li>
-        <li>When the moderator reaches the last question, the game counts as finished. MODAQ's
-          <em>Finish &amp; save to Klaxon</em> export also finishes it, even if the game ended early.</li>
-        <li><strong>Next game</strong> goes back to the setup screen for the next round and teams. The
-          room stays open across rounds, and players don't have to rejoin.</li>
+        <li><strong>Save &amp; next game</strong> (top right, or the last question's button) files
+          the game with Klaxon as finished, even if it ended early, and downloads a backup copy to the
+          moderator's computer: the game and every buzz in it. Then it goes back to the setup screen
+          for the next round and teams. The room stays open across rounds, and players don't have to
+          rejoin.</li>
       </ol>
       <p class="hint">If a moderator's laptop dies, they can open the same link on another device
         and the game resumes where it was.</p>
@@ -287,8 +288,9 @@
       <h4>Set up</h4>
       <ol>
         <li><strong>Create the tournament</strong> as a team tournament. Under the scoring format, tick
-          <em>MASSINGER pick/ban before each game</em>, then choose who picks (each team's captain,
-          anyone on the team, or the moderator only) and the timer (seconds per pick, 0 for none).</li>
+          <em>MASSINGER pick/ban before each game</em>, then choose who picks (anyone on the team, the
+          default; each team's captain; or the moderator only) and the timer (seconds per pick, 0 for
+          none). Both can be changed later in the tournament's settings, and per game by the moderator.</li>
         <li><strong>Check the packets.</strong> Each round needs more than 20 tossups (26 uses all six bans), and every tossup
           needs its subcategory as the last part of its metadata, after the last comma
           (<code>&lt;Author, Science - Biology&gt;</code>), with at least two different subcategories.
@@ -305,10 +307,11 @@
           <em>Start reading</em>.</li>
         <li><strong>Teams.</strong> The same <em>Set up the game</em> screen as any tournament game: the
           two teams, who plays, and every connected player on a team (all of them, since players make
-          the picks), plus a captain for each team if captains pick. Then <em>Continue to
-          pick/ban</em>.</li>
-        <li><strong>Pick/ban.</strong> Who picks first is a coin flip unless the moderator chooses a
-          team. The moderator clicks <em>Begin pick/ban</em>, and players pick on their own screens.
+          the picks), plus a captain for each team if captains pick. The pick/ban options are on the
+          same screen: who picks first (a coin flip unless the moderator chooses a team), who makes
+          the picks, and the seconds per pick.</li>
+        <li><strong>Pick/ban.</strong> The moderator clicks <em>Begin pick/ban</em>, and players pick
+          on their own screens.
           When the timer runs out, a random pick of the due kind (ban or protect) is made. The
           moderator can undo or edit picks.</li>
         <li><strong>Read.</strong> <em>Continue to the game</em> starts the game straight away with the

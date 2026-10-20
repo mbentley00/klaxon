@@ -1275,10 +1275,21 @@ function announceMassingerPick(m, a) {
 }
 
 // The last pick, as a bar: what, which subcategory, which team (and how).
+const MS_DONE_LASTPICK_MS = 5000;
+let msLastPickOff = null;
+
 function renderMassingerLastPick(m) {
   const box = $('#ms-lastpick');
   const a = m.actions[m.actions.length - 1];
   if (!a) { box.classList.add('hidden'); return; }
+  // Once the pick/ban is over, the last pick shows for a few seconds and then
+  // goes: during the game it's just in the way (the board below has it all).
+  clearTimeout(msLastPickOff);
+  if (m.status === 'done') {
+    const left = (a.at || 0) + MS_DONE_LASTPICK_MS - clock.now();
+    if (left <= 0) { box.classList.add('hidden'); return; }
+    msLastPickOff = setTimeout(() => box.classList.add('hidden'), left);
+  }
   const ban = a.type === 'ban';
   const how = a.by === 'timeout' ? ' · time ran out, random pick' : a.by === 'random' ? ' · random pick'
     : a.by && a.by !== 'moderator' ? ` · ${a.by}` : ' · by the moderator';
@@ -3797,11 +3808,13 @@ function renderTournament() {
   nextEl.innerHTML = '';
   if (next) {
     nextEl.append(el('a', { className: 'jump', href: `/r/${next.room}` },
-      `Round ${next.round}: go to room ${next.room} →`));
+      `Round ${next.round}: go to ${t.roomNames?.[next.room] || `room ${next.room}`} →`));
   }
   const rooms = $('#t-rooms');
   rooms.innerHTML = '';
   for (const rc of t.rooms) {
-    rooms.append(el('a', { className: 'chip' + (rc === code ? ' here' : ''), href: `/r/${rc}` }, rc));
+    // Its name ("Room 1"), with the code in the tooltip; the code when unnamed.
+    const name = t.roomNames?.[rc];
+    rooms.append(el('a', { className: 'chip' + (rc === code ? ' here' : ''), href: `/r/${rc}`, title: name ? rc : '' }, name || rc));
   }
 }

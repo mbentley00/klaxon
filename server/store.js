@@ -368,7 +368,7 @@ function normalizeFormat(f = {}) {
     massinger: f.massinger === true,
     massingerTimerSec: clampNum(f.massingerTimerSec, 0, 300, 30),
     // Who makes the picks by default: 'moderator' | 'captain' | 'anyone'.
-    massingerControl: MASSINGER_CONTROLS.includes(f.massingerControl) ? f.massingerControl : 'captain'
+    massingerControl: MASSINGER_CONTROLS.includes(f.massingerControl) ? f.massingerControl : 'anyone'
   };
 }
 
@@ -617,7 +617,7 @@ export function setOwnTeam(room, playerId, team) {
   const member = room.members.get(playerId);
   if (!member || member.role !== 'player') return { error: 'no_member' };
   if (room.tournamentCode || room.settings.shootout || room.settings.rosterJoin) return { error: 'not_allowed' };
-  const name = String(team ?? '').trim().slice(0, 60);
+  const name = String(team ?? '').trim().slice(0, 100);
   if (!name && room.settings.requireTeam) return { error: 'team_required' };
   const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   if (norm(effectiveTeam(member)) !== norm(name)) member.isCaptain = false;
@@ -775,7 +775,7 @@ export function joinRoom(room, { playerId, name, role, team, rosterTeam, rosterP
     id,
     name: (name || 'Player').slice(0, 40),
     role: normRole,
-    team: team ? String(team).slice(0, 40) : null,
+    team: team ? String(team).slice(0, 100) : null,
     // Set by the reader from the loaded roster (see assignRosterPlayer).
     rosterTeam: null,
     rosterPlayer: null,
@@ -793,7 +793,7 @@ export function joinRoom(room, { playerId, name, role, team, rosterTeam, rosterP
       member.name = name.slice(0, 40);
       member.knownAs = null;      // a new name of their own beats the old game's
     }
-    if (team !== undefined) member.team = team ? String(team).slice(0, 40) : null;
+    if (team !== undefined) member.team = team ? String(team).slice(0, 100) : null;
     member.role = normRole; // reflect (re)authorized role on reconnect
     member.connected = true;
   }
@@ -912,7 +912,7 @@ const activeTeamCap = (room) => (room.settings?.shootout ? Infinity : MAX_ACTIVE
 function normalizeRoster(roster) {
   const teams = (Array.isArray(roster?.teams) ? roster.teams : [])
     .map((t) => ({
-      name: String(t?.name ?? '').slice(0, 60),
+      name: String(t?.name ?? '').slice(0, 100),
       players: (Array.isArray(t?.players) ? t.players : []).map((p) => String(p ?? '').slice(0, 60))
     }))
     .filter((t) => t.name && t.players.length);
@@ -979,7 +979,7 @@ export function clearRoster(room) {
 export function setRosterFromGameTeams(room, teams) {
   const clean = [];
   for (const team of Array.isArray(teams) ? teams : []) {
-    const name = String(team?.name ?? '').trim().slice(0, 60);
+    const name = String(team?.name ?? '').trim().slice(0, 100);
     const players = (Array.isArray(team?.players) ? team.players : [])
       .map((p) => String(p ?? '').trim().slice(0, 60))
       .filter(Boolean);
@@ -1012,8 +1012,15 @@ export function setTournamentTeams(room, teams) {
   room.tournamentTeams = Array.isArray(teams) ? teams : [];
 }
 
+// The teams in this room's game: while the moderator is setting the next
+// game up, the two they've picked (the lobby); otherwise the game's roster.
+export function playingTeamNames(room) {
+  const lobby = room.massingerLobby?.teams;
+  return Array.isArray(lobby) && lobby.length ? lobby : room.rosterTeams || [];
+}
+
 function playingTeamKeys(room) {
-  return new Set((room.rosterTeams || []).map(normTeam));
+  return new Set(playingTeamNames(room).map(normTeam));
 }
 
 // Which tournament team this member says they are on, if it isn't one of the
@@ -1108,7 +1115,7 @@ export const effectiveTeam = (member) =>
 export function setMemberTeam(room, playerId, team) {
   const member = room.members.get(playerId);
   if (!member || member.role !== 'player') return { error: 'no_member' };
-  const name = String(team ?? '').trim().slice(0, 60);
+  const name = String(team ?? '').trim().slice(0, 100);
   if (name === '') {
     member.assignedTeam = null;
     member.isCaptain = false;         // a captain has to be on a team
@@ -1214,6 +1221,15 @@ export function activity() {
     members += connected;
   }
   return { rooms: rooms.size, roomsWithSomeoneIn: live, connectedMembers: members };
+}
+
+// The director renames a room (blank: no name, so its code shows).
+export function setRoomName(room, name) {
+  const next = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  if (next === (room.name || '')) return false;
+  room.name = next;
+  persistRooms();
+  return true;
 }
 
 export function describeRoom(code) {
@@ -1623,7 +1639,33 @@ function pushLog(room, entry) {
 // and their players, so a player can pick themselves rather than type a name
 // nobody can match. Only offered when the room asks players to join this way.
 export function joinRoster(room) {
-  if (!room.settings.rosterJoin || !room.roster) return null;
+  if (!room.settings.rosterJoin) return null;
+  // Before the room's first game it has no roster of its own: offer the whole
+  // tournament's, so an early player still picks their team and name instead
+  // of typing them. index.js seats a pick like that on the team (it isn't
+  // playing here yet), and the game's New Game links them to the roster.
+  // While the moderator is setting up the next game, the teams they've picked
+  // are the ones playing now (the room's roster is still the last game's).
+  const lobbyTeams = room.massingerLobby?.teams?.length ? room.massingerLobby.teams : null;
+  if (!room.roster || (lobbyTeams && !room.settings.shootout)) {
+    const all = room.settings.shootout ? []
+      : (room.tournamentTeams || []).length ? room.tournamentTeams
+      : (room.roster?.teams || []);
+    if (!all.length) return null;
+    const here = new Set();
+    for (const m of room.members.values()) {
+      if (m.role !== 'player') continue;
+      here.add(`${normTeam(m.team)}\u0000${normTeam(m.name)}`);
+      if (m.rosterTeam && m.rosterPlayer) here.add(`${normTeam(m.rosterTeam)}\u0000${normTeam(m.rosterPlayer)}`);
+    }
+    const keys = lobbyTeams ? new Set(lobbyTeams.map(normTeam)) : null;
+    const teams = all.map((t) => ({
+      name: t.name,
+      ...(keys && !keys.has(normTeam(t.name)) ? { later: true } : {}),
+      players: t.players.map((name) => ({ name, taken: here.has(`${normTeam(t.name)}\u0000${normTeam(name)}`) }))
+    }));
+    return { teams: [...teams.filter((t) => !t.later), ...teams.filter((t) => t.later)] };
+  }
   const active = room.rosterTeams.length ? room.rosterTeams : teamNames(room);
   const taken = new Set();
   for (const m of room.members.values()) {
@@ -1877,7 +1919,7 @@ export function createReplayRoom({ tournamentCode, round, teams, gameplay, prote
       type: protest?.type ?? null,
       question: Number(protest?.question) || null,
       part: Number(protest?.part) || null,
-      team: String(protest?.team ?? '').slice(0, 60)
+      team: String(protest?.team ?? '').slice(0, 100)
     },
     // What has to be played, in the order it has to be played (see
     // resolution.js) — a replacement tossup before the bonus that may follow.
@@ -2695,7 +2737,7 @@ export function massingerStart(room, { round, subcats, teams, timerSec, target, 
   const m = {
     round: String(round ?? '').slice(0, 60),
     status: 'active',
-    teams: [0, 1].map((i) => String(teams?.[i] ?? '').trim().slice(0, 60) || `Team ${'AB'[i]}`),
+    teams: [0, 1].map((i) => String(teams?.[i] ?? '').trim().slice(0, 100) || `Team ${'AB'[i]}`),
     turn: 0,
     timerSec: clampNum(timerSec, 0, 300, 30),
     target: clampNum(target, 1, total, 20),
@@ -2769,7 +2811,7 @@ export function massingerSetTurn(room, team) {
 export function massingerSetTeams(room, teams) {
   const m = room.massinger;
   if (!m) return { error: 'not_active' };
-  m.teams = [0, 1].map((i) => String(teams?.[i] ?? '').trim().slice(0, 60) || m.teams[i]);
+  m.teams = [0, 1].map((i) => String(teams?.[i] ?? '').trim().slice(0, 100) || m.teams[i]);
   return { ok: true };
 }
 
@@ -2870,9 +2912,13 @@ const MASSINGER_LOBBY_TTL = 2 * 60 * 60 * 1000;
 /** The moderator opened (or left) the teams step before a game (and, in
  * MASSINGER, its pick/ban: `pickban`). Older moderator pages don't say, and
  * only ever opened it for a pick/ban. */
-export function massingerLobby(room, { open, round, pickban } = {}) {
+export function massingerLobby(room, { open, round, pickban, teams } = {}) {
   room.massingerLobby = open === true
-    ? { round: String(round ?? '').slice(0, 80), at: Date.now(), pickban: pickban !== false }
+    ? {
+      round: String(round ?? '').slice(0, 80), at: Date.now(), pickban: pickban !== false,
+      // The two teams picked so far for the game being set up (may be empty).
+      teams: (Array.isArray(teams) ? teams : []).map((t) => String(t ?? '').trim().slice(0, 100)).filter(Boolean).slice(0, 2)
+    }
     : null;
   return { ok: true };
 }
