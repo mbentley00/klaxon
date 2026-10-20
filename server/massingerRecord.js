@@ -51,8 +51,8 @@ export function massingerRecord(board, qbj) {
       action: a.type,
       category: String(a.label),
       tossups,
-      // A player's name, "moderator", or "timeout" (the clock ran out and a
-      // pick was made at random).
+      // A player's name, "moderator", "timeout" (the clock ran out and a
+      // pick was made at random), or "random" (a random-bans game).
       by: a.by == null ? null : String(a.by),
       ...(Number.isFinite(a.at) ? { at: new Date(a.at).toISOString() } : {})
     });
@@ -67,9 +67,12 @@ export function massingerRecord(board, qbj) {
       protected_by: teamOf(board, sc.protectedBy ?? s.protectedBy)
     };
   });
+  const random = board.control === 'random';
   return {
+    // Random bans: drawn by Klaxon, not picked (every pick's team is null).
+    mode: random ? 'random_bans' : 'pick_ban',
     teams: boardTeams,                    // in pick order: [0] picked first
-    first_pick: { team: boardTeams[0] ?? null, coin_flip: board.coinFlip === true },
+    first_pick: random ? null : { team: boardTeams[0] ?? null, coin_flip: board.coinFlip === true },
     picks,
     categories,
     banned_tossups: categories.flatMap((c) => c.banned).sort((x, y) => x - y),
@@ -89,13 +92,13 @@ const csvCell = (v) => {
  * `games` are [{ round, number, file, qbj }] with qbj.massinger set.
  */
 export function massingerPicksCsv(games) {
-  const rows = [['round_number', 'round', 'game_file', 'team_1', 'team_2', 'pick', 'team', 'action', 'category', 'tossups', 'by', 'coin_flip']];
+  const rows = [['round_number', 'round', 'game_file', 'team_1', 'team_2', 'mode', 'pick', 'team', 'action', 'category', 'tossups', 'by', 'coin_flip']];
   for (const g of games) {
     const m = g.qbj?.massinger;
     if (!m) continue;
     const teams = (g.qbj.match_teams || []).map((mt) => mt?.team?.name ?? '');
     for (const p of m.picks) {
-      rows.push([g.number ?? '', g.round ?? '', g.file ?? '', teams[0] ?? '', teams[1] ?? '',
+      rows.push([g.number ?? '', g.round ?? '', g.file ?? '', teams[0] ?? '', teams[1] ?? '', m.mode,
         p.pick, p.team, p.action, p.category, p.tossups.join(' '), p.by, m.first_pick?.coin_flip ? 'yes' : 'no']);
     }
   }

@@ -1281,7 +1281,8 @@ let msLastPickOff = null;
 function renderMassingerLastPick(m) {
   const box = $('#ms-lastpick');
   const a = m.actions[m.actions.length - 1];
-  if (!a) { box.classList.add('hidden'); return; }
+  // Random bans are drawn all at once: the status line lists every one.
+  if (!a || m.control === 'random') { box.classList.add('hidden'); return; }
   // Once the pick/ban is over, the last pick shows for a few seconds and then
   // goes: during the game it's just in the way (the board below has it all).
   clearTimeout(msLastPickOff);
@@ -1291,7 +1292,7 @@ function renderMassingerLastPick(m) {
     msLastPickOff = setTimeout(() => box.classList.add('hidden'), left);
   }
   const ban = a.type === 'ban';
-  const how = a.by === 'timeout' ? ' · time ran out, random pick' : a.by === 'random' ? ' · random pick'
+  const how = m.control === 'random' ? 'random bans' : a.by === 'timeout' ? ' · time ran out, random pick' : a.by === 'random' ? ' · random pick'
     : a.by && a.by !== 'moderator' ? ` · ${a.by}` : ' · by the moderator';
   box.replaceChildren(
     el('span', { className: 'ms-lastpick-icon', textContent: ban ? '✕' : '🛡' }),
@@ -2452,7 +2453,11 @@ function renderMassinger(s) {
 
   const remaining = m.subcats.reduce((sum, sc) => sum + (sc.indexes.length - sc.banned), 0);
   const status = $('#ms-status');
-  if (m.status === 'done') {
+  if (m.status === 'done' && m.control === 'random') {
+    status.className = 'ms-status done';
+    const banned = m.actions.filter((a) => a.type === 'ban').map((a) => a.label);
+    status.textContent = `Random bans: ${banned.join(', ') || 'none'}. ${remaining} questions remain.`;
+  } else if (m.status === 'done') {
     status.className = 'ms-status done';
     status.textContent = `Pick/ban complete — ${remaining} questions remain.`;
   } else {
@@ -2569,6 +2574,7 @@ const MASSINGER_PICK_ERRORS = {
   not_your_turn: "It isn't your team's pick right now.",
   not_linked: "The room doesn't know which team this buzzer is on — ask the moderator to put you on your team.",
   moderator_only: 'The moderator is making every pick for this game.',
+  random_bans: 'This game’s bans are random: nobody picks.',
   not_captain: "Your team's picks are made by its captain.",
   not_a_player: 'Only players can pick.',
   protected: 'That subcategory is protected — it can\u2019t be banned.',

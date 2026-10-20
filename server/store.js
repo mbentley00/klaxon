@@ -352,8 +352,9 @@ export function updateTournament(t, { name, date, listed, requireReaderAccounts,
 // The four supported tossup point schemes.
 export const TOSSUP_SCHEMES = ['15/10/-5', '20/15/10/-5', '20/10/0', '10/-5'];
 
-// Who may make a MASSINGER pick (see massingerCanPick).
-export const MASSINGER_CONTROLS = ['moderator', 'captain', 'anyone'];
+// Who may make a MASSINGER pick (see massingerCanPick). 'random': nobody —
+// the bans are drawn at random when the board starts, with no protects.
+export const MASSINGER_CONTROLS = ['moderator', 'captain', 'anyone', 'random'];
 function normalizeFormat(f = {}) {
   return {
     // 'teams' (scheduled team games) or 'shootout' (Discord shootouts:
@@ -367,7 +368,8 @@ function normalizeFormat(f = {}) {
     // banning subcategories until `massingerTarget` tossups remain.
     massinger: f.massinger === true,
     massingerTimerSec: clampNum(f.massingerTimerSec, 0, 300, 30),
-    // Who makes the picks by default: 'moderator' | 'captain' | 'anyone'.
+    // Who makes the picks by default: 'moderator' | 'captain' | 'anyone' |
+    // 'random' (random bans, no picks at all).
     massingerControl: MASSINGER_CONTROLS.includes(f.massingerControl) ? f.massingerControl : 'anyone'
   };
 }
@@ -2719,8 +2721,9 @@ function massingerFinishIfDone(m) {
 }
 
 export function massingerStart(room, { round, subcats, teams, timerSec, target, control, randomFirst } = {}) {
+  const random = control === 'random';
   // Coin flip for who picks first, done here so no client decides it.
-  const flip = randomFirst === true && Math.random() < 0.5;
+  const flip = !random && randomFirst === true && Math.random() < 0.5;
   if (flip && Array.isArray(teams)) teams = [teams[1], teams[0]];
   const labels = new Set();
   const clean = [];
@@ -2744,15 +2747,44 @@ export function massingerStart(room, { round, subcats, teams, timerSec, target, 
     control: MASSINGER_CONTROLS.includes(control) ? control : 'captain',
     limits: { ban: MASSINGER_MAX_PER_TEAM, protect: MASSINGER_MAX_PER_TEAM - 1 },
     schedule: massingerSchedule(MASSINGER_MAX_PER_TEAM),
-    coinFlip: randomFirst === true,
+    coinFlip: !random && randomFirst === true,
     subcats: clean,
     actions: []
   };
-  massingerArm(m);
-  massingerFinishIfDone(m);
+  if (random) massingerDrawRandom(m);
+  else {
+    massingerArm(m);
+    massingerFinishIfDone(m);
+  }
   room.massinger = m;
   return { ok: true };
 }
+
+// Random bans: as many bans as a played pick/ban makes (3 a team), drawn at
+// random from what's bannable, stopping early at the target. No team made
+// them (team null) and nothing is protected. The board is finished at once.
+function massingerDrawRandom(m) {
+  m.schedule = null;
+  m.limits = null;
+  m.turn = null;
+  const bans = 2 * MASSINGER_MAX_PER_TEAM;
+  const now = Date.now();
+  for (let i = 0; i < bans && massingerRemaining(m) > m.target; i++) {
+    const pool = massingerBannable(m);
+    if (pool.length === 0) break;
+    const sc = pool[Math.floor(Math.random() * pool.length)];
+    sc.banned += 1;
+    m.actions.push({ type: 'ban', label: sc.label, team: null, at: now, by: 'random' });
+  }
+  m.status = 'done';
+  m.deadline = null;
+  m.pauseUntil = null;
+  m.turnStartedAt = null;
+}
+
+// A random-bans board is the draw: nobody picks, undoes or edits it (the
+// moderator redraws by restarting it).
+const massingerRandom = (m) => m?.control === 'random';
 
 // Load a previously persisted board (moderator reload / server restart).
 export function massingerRestore(room, saved) {
@@ -2770,6 +2802,7 @@ export function massingerRestore(room, saved) {
 // and the timer don't).
 export function massingerPick(room, { type, label, by, step: seen, player } = {}) {
   const m = room.massinger;
+  if (massingerRandom(m)) return { error: 'random_bans' };
   if (!m || m.status !== 'active') return { error: 'not_active' };
   if (Number.isInteger(seen) && seen !== m.actions.length) return { error: 'stale' };
   if (player === true && m.pauseUntil && Date.now() < m.pauseUntil) return { error: 'wait' };
@@ -2800,6 +2833,7 @@ export function massingerPick(room, { type, label, by, step: seen, player } = {}
 // The moderator decides which team is picking; auto-alternation is only the default.
 export function massingerSetTurn(room, team) {
   const m = room.massinger;
+  if (massingerRandom(m)) return { error: 'random_bans' };
   if (!m || m.status !== 'active') return { error: 'not_active' };
   if (team !== 0 && team !== 1) return { error: 'bad_team' };
   if (massingerStep(m)) return { error: 'scheduled' };   // the order is fixed
@@ -2820,6 +2854,7 @@ export function massingerSetTeams(room, teams) {
 export function massingerResetSubcat(room, label) {
   const m = room.massinger;
   if (!m) return { error: 'not_active' };
+  if (massingerRandom(m)) return { error: 'random_bans' };
   const sc = m.subcats.find((x) => x.label === label);
   if (!sc) return { error: 'no_subcat' };
   if (sc.protectedBy == null && sc.banned === 0) return { error: 'nothing_to_reset' };
@@ -2837,6 +2872,7 @@ export function massingerResetSubcat(room, label) {
 export function massingerUndo(room) {
   const m = room.massinger;
   if (!m) return { error: 'not_active' };
+  if (massingerRandom(m)) return { error: 'random_bans' };
   const last = m.actions.pop();
   if (!last) return { error: 'nothing_to_undo' };
   const sc = m.subcats.find((x) => x.label === last.label);
@@ -2854,6 +2890,7 @@ export function massingerUndo(room) {
 // for the team on the clock.
 export function massingerRandomBan(room, by) {
   const m = room.massinger;
+  if (massingerRandom(m)) return { error: 'random_bans' };
   if (!m || m.status !== 'active') return { error: 'not_active' };
   const step = massingerStep(m);
   const type = step ? step.type
@@ -2881,6 +2918,7 @@ export function massingerRandomBan(room, by) {
 export function massingerCanPick(room, member) {
   const m = room.massinger;
   if (!m || m.status !== 'active') return 'not_active';
+  if (m.control === 'random') return 'random_bans';
   if (m.control === 'moderator') return 'moderator_only';
   if (!member || member.role !== 'player') return 'not_a_player';
   if (!member.rosterPlayer && !member.assignedTeam) return 'not_linked';
@@ -2895,6 +2933,9 @@ export function massingerSetControl(room, control) {
   const m = room.massinger;
   if (!m) return { error: 'not_active' };
   if (!MASSINGER_CONTROLS.includes(control)) return { error: 'bad_control' };
+  // Random bans are drawn when the board starts; switching a board to or from
+  // them midway would leave it half one thing and half the other.
+  if (control === 'random' || massingerRandom(m)) return { error: 'restart_for_random' };
   m.control = control;
   return { ok: true };
 }

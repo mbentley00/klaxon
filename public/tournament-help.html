@@ -289,8 +289,10 @@
       <ol>
         <li><strong>Create the tournament</strong> as a team tournament. Under the scoring format, tick
           <em>MASSINGER pick/ban before each game</em>, then choose who picks (anyone on the team, the
-          default; each team's captain; or the moderator only) and the timer (seconds per pick, 0 for
-          none). Both can be changed later in the tournament's settings, and per game by the moderator.</li>
+          default; each team's captain; the moderator only; or nobody, for random bans) and the timer
+          (seconds per pick, 0 for none). With <em>random bans</em>, Klaxon bans 6 tossups at random when
+          the pick/ban starts (stopping early if only 20 are left), nothing is protected, and the teams
+          don't pick at all. Both can be changed later in the tournament's settings, and per game by the moderator.</li>
         <li><strong>Check the packets.</strong> Each round needs more than 20 tossups (26 uses all six bans), and every tossup
           needs its subcategory as the last part of its metadata, after the last comma
           (<code>&lt;Author, Science - Biology&gt;</code>), with at least two different subcategories.
