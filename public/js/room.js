@@ -1253,29 +1253,69 @@ function renderMassingerClock(m, ourPick) {
   }
 }
 
-// A pick lands: a big card over the page and a sound, for everyone watching.
-// The row it hit animates too; render() rebuilds the rows, so the row's
-// animation is resumed from how long ago the pick was (a negative delay).
+// A pick lands: the "last pick" bar (in the page, above the board) flashes,
+// with a sound, for everyone watching. The row it hit animates too; render()
+// rebuilds the rows, so the row's animation is resumed from how long ago the
+// pick was (a negative delay).
 let msSeen = null;                 // { round, n } actions already announced
 let msFlash = null;                // { label, type, at }
-let msFlashHide = null;
+let msFlashOff = null;
+let msFlashReplay = false;         // the bar's entrance should play (once)
 const MS_FLASH_MS = 2400;
 
 function announceMassingerPick(m, a) {
   msFlash = { label: a.label, type: a.type, at: Date.now() };
-  const box = $('#ms-flash');
-  const ban = a.type === 'ban';
-  const why = a.by === 'timeout' ? ' · time ran out — random pick' : a.by === 'random' ? ' · random pick' : '';
-  const card = el('div', { className: 'ms-flash-card ' + (ban ? 'ban' : 'protect') },
-    el('div', { className: 'ms-flash-icon', textContent: ban ? '✕' : '🛡' }),
-    el('div', { className: 'ms-flash-verb', textContent: ban ? 'BANNED' : 'PROTECTED' }),
-    el('div', { className: 'ms-flash-label', textContent: a.label }),
-    el('div', { className: 'ms-flash-by', textContent: `${m.teams[a.team] ?? ''}${why}` }));
-  box.replaceChildren(card);
-  box.classList.remove('hidden');
-  clearTimeout(msFlashHide);
-  msFlashHide = setTimeout(() => box.classList.add('hidden'), MS_FLASH_MS);
+  msFlashReplay = true;
+  clearTimeout(msFlashOff);
+  msFlashOff = setTimeout(() => $('#ms-lastpick')?.classList.remove('fresh'), MS_FLASH_MS);
   playMassingerPick(a.type);
+}
+
+// The last pick, as a bar: what, which subcategory, which team (and how).
+function renderMassingerLastPick(m) {
+  const box = $('#ms-lastpick');
+  const a = m.actions[m.actions.length - 1];
+  if (!a) { box.classList.add('hidden'); return; }
+  const ban = a.type === 'ban';
+  const how = a.by === 'timeout' ? ' · time ran out, random pick' : a.by === 'random' ? ' · random pick'
+    : a.by && a.by !== 'moderator' ? ` · ${a.by}` : ' · by the moderator';
+  box.replaceChildren(
+    el('span', { className: 'ms-lastpick-icon', textContent: ban ? '✕' : '🛡' }),
+    el('span', { className: 'ms-lastpick-verb', textContent: ban ? 'BANNED' : 'PROTECTED' }),
+    el('strong', { className: 'ms-lastpick-label', textContent: a.label }),
+    el('span', { className: 'ms-lastpick-by', textContent: `${m.teams[a.team] ?? ''}${how}` }));
+  box.classList.remove('hidden', 'ban', 'protect');
+  box.classList.add(ban ? 'ban' : 'protect');
+  if (msFlashReplay) {
+    msFlashReplay = false;
+    box.classList.remove('fresh');
+    void box.offsetWidth;            // restart the entrance animation
+    box.classList.add('fresh');
+  }
+}
+
+// Each team: who's on it (here now), picks left; the team picking stands out.
+function renderMassingerTeams(s, m) {
+  const box = $('#ms-counts');
+  const active = m.status === 'active';
+  box.classList.toggle('hidden', !active);
+  if (!active) return;
+  const limited = Number.isFinite(m.limits?.ban) || Number.isFinite(m.limits?.protect);
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  box.replaceChildren(...[0, 1].map((t) => {
+    const on = t === m.turn;
+    const members = (s.members || []).filter((x) => x.role === 'player' && x.connected && sameTeam(x.effectiveTeam, m.teams[t]));
+    const card = el('div', { className: 'ms-teamcard' + (on ? ' on' : '') + (sameTeam(myTeam(s), m.teams[t]) ? ' mine' : '') });
+    const head = el('div', { className: 'ms-teamcard-head' }, el('strong', {}, m.teams[t]));
+    if (on) head.append(el('span', { className: 'ms-teamcard-badge', textContent: 'PICKING' }));
+    card.append(head);
+    if (limited) card.append(el('div', { className: 'ms-teamcard-left', textContent: `${plural(msLeft(m, t, 'ban'), 'ban')} · ${plural(msLeft(m, t, 'protect'), 'protect')} left` }));
+    card.append(members.length
+      ? el('ul', {}, ...members.map((x) => el('li', {}, `${x.rosterPlayer || x.name}${x.id === state.me?.id ? ' (you)' : ''}`,
+        ...(x.isCaptain ? [el('span', { className: 'ms-cap', textContent: ' ★ captain' })] : []))))
+      : el('p', { className: 'ms-teamcard-empty', textContent: 'No players here' }));
+    return card;
+  }));
 }
 
 function noteMassingerActions(m) {
@@ -2330,22 +2370,27 @@ function renderMassingerLobby(s, lobby) {
   const view = $('#massinger-view');
   view.classList.remove('hidden');
   view.classList.add('lobby');
+  // Every tournament game passes through this step; only MASSINGER has a
+  // pick/ban after it.
+  const pickban = lobby.pickban !== false;
+  $('#ms-title').textContent = pickban ? 'MASSINGER pick/ban' : 'Next game';
   $('#ms-round').textContent = lobby.round ? `Round ${lobby.round}` : '';
   const status = $('#ms-status');
   status.className = 'ms-status soon';
   status.textContent = 'Starting soon — the moderator is setting the teams.';
+  for (const id of ['#ms-clock', '#ms-counts', '#ms-turnbig', '#ms-next', '#ms-lastpick']) $(id).classList.add('hidden');
+  const about = pickban ? 'Teams take turns protecting or banning categories before the first question.' : '';
   const hint = $('#ms-hint');
   if (state.role !== 'player') {
-    hint.textContent = 'Teams take turns protecting or banning categories before the first question.';
+    hint.textContent = about;
   } else {
     const team = myTeam(s);
     const me = (s.members || []).find((x) => x.id === state.me?.id);
     const vouched = !!me?.rosterPlayer || !!me?.assignedTeam;
     hint.textContent = !team
-      ? "You're not on a team yet. Tell the moderator which team you're on — only players on a team can pick."
+      ? `You're not on a team yet. Tell the moderator which team you're on${pickban ? ' — only players on a team can pick' : ''}.`
       : `You're on ${team}${vouched ? '' : ' (the moderator still has to confirm it)'}` +
-        `${me?.isCaptain ? ', and you make its picks' : ''}. ` +
-        'Teams take turns protecting or banning categories before the first question.';
+        `${pickban && me?.isCaptain ? ', and you make its picks' : ''}. ${about}`.trim();
   }
   $('#ms-board-wrap').classList.add('hidden');
   msShownStatus = 'lobby';
@@ -2369,6 +2414,7 @@ function renderMassinger(s) {
   }
   noteMassingerActions(m);
   view.classList.remove('hidden');
+  $('#ms-title').textContent = 'MASSINGER pick/ban';
   $('#ms-board-wrap').classList.remove('hidden');
   if (msShownStatus !== m.status) {
     $('#ms-board-wrap').open = m.status !== 'done';
@@ -2405,24 +2451,28 @@ function renderMassinger(s) {
   }
   renderMassingerClock(m, myTurn);
 
-  // Picks each team has left.
-  const counts = $('#ms-counts');
-  const limited = Number.isFinite(m.limits?.ban) || Number.isFinite(m.limits?.protect);
-  counts.classList.toggle('hidden', !limited || m.status !== 'active');
-  if (limited) {
-    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-    counts.replaceChildren(...[0, 1].map((t) => el('span', { className: 'ms-count' + (t === m.turn ? ' on' : '') },
-      el('strong', {}, m.teams[t]), ` ${plural(msLeft(m, t, 'ban'), 'ban')} · ${plural(msLeft(m, t, 'protect'), 'protect')} left`)));
-  }
+  renderMassingerTeams(s, m);
+  renderMassingerLastPick(m);
   // A fixed order (the board's schedule) says which kind is due; older boards
   // allow either while the team has some left.
   const due = Array.isArray(m.schedule) ? m.schedule[m.actions.length] : undefined;
   const canBan = due ? due.type === 'ban' : msLeft(m, m.turn, 'ban') > 0;
   const canProtect = due ? due.type === 'protect' : msLeft(m, m.turn, 'protect') > 0;
-  if (due && m.status === 'active') {
-    const next = m.schedule.slice(m.actions.length + 1, m.actions.length + 3)
-      .map((x) => `${m.teams[x.team]} ${x.type}`).join(', then ');
-    counts.append(el('span', { className: 'ms-next' }, next ? `Up next: ${next}` : 'Last pick'));
+  const nextLine = $('#ms-next');
+  const next = due && m.status === 'active'
+    ? m.schedule.slice(m.actions.length + 1, m.actions.length + 3).map((x) => `${m.teams[x.team]} ${x.type}`).join(', then ')
+    : null;
+  nextLine.classList.toggle('hidden', next == null);
+  if (next != null) nextLine.textContent = next ? `Up next: ${next}` : 'Last pick';
+
+  // Whose turn and what they're doing, as big as the clock.
+  const big = $('#ms-turnbig');
+  big.classList.toggle('hidden', m.status !== 'active');
+  if (m.status === 'active') {
+    const kind = canBan && canProtect ? 'pick' : canBan ? 'ban' : 'protect';
+    big.className = `ms-turnbig ${kind}${mine ? ' mine' : ''}`;
+    big.querySelector('.ms-turnbig-team').textContent = myTurn ? `${m.teams[m.turn]} (your team)` : m.teams[m.turn];
+    big.querySelector('.ms-turnbig-kind').textContent = kind.toUpperCase();
   }
 
   const hint = $('#ms-hint');
@@ -3490,8 +3540,22 @@ function playStuckAlert() {
   }
 }
 
-// MASSINGER: a ban is a heavy falling "slam", a protect a rising bright
-// chime, so the room can tell them apart without looking. Honors mute/volume.
+// MASSINGER: soft mallet notes, so the room can tell picks apart without
+// looking and without wincing: a ban falls (two notes down), a protect rises
+// (three up). Honors mute/volume.
+function massingerMallet(ctx, dest, t, freq, dur, peak) {
+  const o = ctx.createOscillator(), o2 = ctx.createOscillator(), g = ctx.createGain(), g2 = ctx.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(freq, t);
+  o2.type = 'sine'; o2.frequency.setValueAtTime(freq * 2, t);
+  for (const [gain, p, d] of [[g, peak, dur], [g2, peak * 0.15, dur * 0.6]]) {
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(p, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + d);
+  }
+  o.connect(g).connect(dest); o2.connect(g2).connect(dest);
+  o.start(t); o2.start(t); o.stop(t + dur + 0.05); o2.stop(t + dur + 0.05);
+}
+
 function playMassingerPick(type) {
   if (isMuted()) return;
   const ctx = ensureAudio();
@@ -3501,32 +3565,22 @@ function playMassingerPick(type) {
   master.gain.value = volume();
   master.connect(ctx.destination);
   if (type === 'ban') {
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = 'sawtooth';
-    o.frequency.setValueAtTime(320, t);
-    o.frequency.exponentialRampToValueAtTime(70, t + 0.5);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.9, t + 0.015);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
-    o.connect(g).connect(master); o.start(t); o.stop(t + 0.62);
-    note(ctx, master, t, 'square', 110, 0.25, 0.6);
+    massingerMallet(ctx, master, t, 659.3, 0.45, 0.4);          // E5
+    massingerMallet(ctx, master, t + 0.14, 440, 0.7, 0.4);      // down to A4
   } else {
-    [[523, 0], [659, 0.08], [784, 0.16], [1047, 0.24]].forEach(([f, dt]) => {
-      note(ctx, master, t + dt, 'sine', f, 0.5, 0.8);
-      note(ctx, master, t + dt, 'triangle', f * 2, 0.3, 0.25);
-    });
+    [523.3, 659.3, 784].forEach((f, i) => massingerMallet(ctx, master, t + i * 0.09, f, 0.6, 0.32)); // C E G
   }
 }
 
-// Last five seconds of the pick clock, for the team that's on it.
+// Last five seconds of the pick clock, for the team that's on it: a gentle tick.
 function playMassingerTick(secondsLeft) {
   if (isMuted()) return;
   const ctx = ensureAudio();
   if (!ctx || ctx.state !== 'running') return;
   const master = ctx.createGain();
-  master.gain.value = volume() * 0.6;
+  master.gain.value = volume();
   master.connect(ctx.destination);
-  note(ctx, master, ctx.currentTime, 'square', secondsLeft <= 2 ? 1320 : 990, 0.07, 0.7);
+  massingerMallet(ctx, master, ctx.currentTime, secondsLeft <= 2 ? 1046.5 : 880, 0.12, 0.18);
 }
 
 // ---- read the buzzing player's name aloud ----

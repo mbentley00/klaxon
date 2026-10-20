@@ -102,21 +102,25 @@
          both teams watch picks land live. Above the buzzer: nothing is read
          until it's done, and once it is, the board folds away. -->
     <section id="massinger-view" class="panel massinger hidden" aria-live="polite">
-      <h3>MASSINGER pick/ban <span id="ms-round" class="muted-count"></span></h3>
+      <h3><span id="ms-title">MASSINGER pick/ban</span> <span id="ms-round" class="muted-count"></span></h3>
       <div id="ms-status" class="ms-status"></div>
+      <!-- Whose turn and what they're doing, loudly. -->
+      <div id="ms-turnbig" class="ms-turnbig hidden"><span class="ms-turnbig-team"></span><span class="ms-turnbig-kind"></span></div>
       <div id="ms-clock" class="ms-clock hidden" aria-hidden="true">
         <div class="ms-clock-num"></div>
         <div class="ms-clock-bar"><span></span></div>
       </div>
-      <div id="ms-counts" class="ms-counts hidden"></div>
+      <!-- The two teams: who's on each, picks left; the one picking stands out. -->
+      <div id="ms-counts" class="ms-teamcards hidden"></div>
+      <p id="ms-next" class="ms-next hidden"></p>
       <p id="ms-hint" class="ms-hint"></p>
+      <!-- The last pick, in the page (it never covers the board); flashes when it lands. -->
+      <div id="ms-lastpick" class="ms-lastpick hidden" aria-live="polite"></div>
       <details id="ms-board-wrap" class="ms-board-wrap" open>
         <summary>The board</summary>
         <ul id="ms-board" class="ms-board"></ul>
       </details>
     </section>
-    <!-- A pick lands: shown over everything for a moment, with a sound. -->
-    <div id="ms-flash" class="ms-flash hidden" aria-live="assertive"></div>
     <div class="buzz-row">
       <section id="buzz-area">
         <div id="phase-label" class="phase ready">Ready to Buzz</div>

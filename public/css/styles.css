@@ -704,35 +704,55 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
 .ms-clock.expired .ms-clock-num { color: var(--bad); font-size: clamp(2.2rem, 9vw, 3.6rem); animation: ms-blink 1s steps(2) infinite; }
 @keyframes ms-pulse { from { transform: scale(1); } to { transform: scale(1.12); } }
 
-/* Picks left per team; the team on the clock stands out. */
-.ms-counts { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 .5em; font-size: .85rem; }
-.ms-count { border: 1.5px solid var(--line); border-radius: 6px; padding: 2px 8px; color: var(--muted); }
-.ms-count.on { border-color: var(--accent); color: var(--ink); }
-.ms-next { color: var(--muted); align-self: center; }
+/* Whose turn, and what they're doing: as loud as the clock. */
+.ms-turnbig {
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 4px 14px;
+  margin: .2em 0 .3em; padding: 10px 14px; border-radius: 10px; border: 2px solid var(--accent);
+  background: var(--surface); text-align: center;
+}
+.ms-turnbig-team { font-size: clamp(1.4rem, 6vw, 2.1rem); font-weight: 800; color: var(--ink); overflow-wrap: anywhere; }
+.ms-turnbig-kind { font-size: clamp(1.2rem, 5vw, 1.7rem); font-weight: 900; letter-spacing: .1em; color: var(--accent); }
+.ms-turnbig.ban { border-color: var(--bad); }
+.ms-turnbig.ban .ms-turnbig-kind { color: var(--bad); }
+.ms-turnbig.protect { border-color: var(--ok-deep); }
+.ms-turnbig.protect .ms-turnbig-kind { color: var(--ok-deep); }
+.ms-turnbig.mine { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); }
 
-/* A pick lands: a card over the page, and the row it hit. */
-.ms-flash { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; pointer-events: none; padding: 16px; }
-.ms-flash.hidden { display: none; }
-.ms-flash-card {
-  text-align: center; padding: 22px 34px; border-radius: 14px; border: 3px solid currentColor;
-  background: var(--surface); box-shadow: 0 18px 60px rgba(0,0,0,.35); max-width: min(560px, 100%);
-  animation: ms-flash-in 2.4s cubic-bezier(.2,1.4,.4,1) forwards;
+/* The two teams: who's on each, picks left; the team picking stands out. */
+.ms-teamcards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 .5em; }
+.ms-teamcard { border: 1.5px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--surface); opacity: .7; min-width: 0; }
+.ms-teamcard.on { border: 2.5px solid var(--accent); opacity: 1; }
+.ms-teamcard-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ms-teamcard-head strong { font-size: 1.05rem; overflow-wrap: anywhere; }
+.ms-teamcard.mine .ms-teamcard-head strong::after { content: ' (your team)'; font-weight: 400; color: var(--muted); font-size: .85rem; }
+.ms-teamcard-badge { font-size: .7rem; font-weight: 800; letter-spacing: .08em; color: #fff; background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+.ms-teamcard-left { font-size: .8rem; color: var(--muted); margin: 2px 0 4px; }
+.ms-teamcard ul { list-style: none; margin: 0; padding: 0; font-size: .88rem; }
+.ms-teamcard li { padding: 1px 0; overflow-wrap: anywhere; }
+.ms-teamcard .ms-cap { color: var(--warn); font-weight: 700; font-size: .78rem; }
+.ms-teamcard-empty { margin: 0; font-size: .82rem; color: var(--muted); }
+@media (max-width: 420px) { .ms-teamcards { grid-template-columns: 1fr; } }
+.ms-next { color: var(--muted); font-size: .85rem; margin: 0 0 .5em; }
+
+/* The last pick, in the page above the board (never over it); flashes as it lands. */
+.ms-lastpick {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+  margin: 0 0 .7em; padding: 8px 12px; border-radius: 8px; border: 2px solid currentColor; background: var(--surface);
 }
-.ms-flash-card.ban { color: var(--bad); }
-.ms-flash-card.protect { color: var(--ok-deep); }
-.ms-flash-icon { font-size: 3.4rem; line-height: 1; }
-.ms-flash-verb { font-size: clamp(1.8rem, 8vw, 3rem); font-weight: 900; letter-spacing: .08em; }
-.ms-flash-label { font-size: clamp(1.2rem, 5vw, 1.8rem); font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
-.ms-flash-by { font-size: .95rem; color: var(--muted); margin-top: 4px; }
-@keyframes ms-flash-in {
-  0% { opacity: 0; transform: scale(.4) rotate(-4deg); }
-  14% { opacity: 1; transform: scale(1.08) rotate(1deg); }
-  22% { transform: scale(1) rotate(0); }
-  80% { opacity: 1; transform: scale(1); }
-  100% { opacity: 0; transform: scale(.96); }
+.ms-lastpick.ban { color: var(--bad); }
+.ms-lastpick.protect { color: var(--ok-deep); }
+.ms-lastpick-icon { font-size: 1.3rem; line-height: 1; }
+.ms-lastpick-verb { font-weight: 900; letter-spacing: .08em; }
+.ms-lastpick-label { color: var(--ink); font-size: 1.1rem; overflow-wrap: anywhere; }
+.ms-lastpick-by { color: var(--muted); font-size: .85rem; }
+.ms-lastpick.fresh { animation: ms-lastpick-in 2.4s ease-out; }
+/* A pop and a tint that fades; the text stays dark on it throughout. */
+@keyframes ms-lastpick-in {
+  0% { transform: scale(.92); background: color-mix(in srgb, currentColor 30%, var(--surface)); }
+  8% { transform: scale(1.04); }
+  15% { transform: scale(1); background: color-mix(in srgb, currentColor 30%, var(--surface)); }
+  100% { background: var(--surface); }
 }
-.ms-flash-card.ban .ms-flash-icon { animation: ms-shake .45s .15s ease-in-out 2; }
-@keyframes ms-shake { 25% { transform: translateX(-8px) rotate(-6deg); } 75% { transform: translateX(8px) rotate(6deg); } }
 .ms-board li.just-banned { animation: ms-row-ban 1.6s ease-out; }
 .ms-board li.just-protected { animation: ms-row-protect 1.6s ease-out; }
 @keyframes ms-row-ban {
@@ -744,10 +764,8 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
   0%, 30% { background: var(--ok-deep); color: #fff; transform: scale(1.05); box-shadow: 0 0 0 4px var(--ok-bg); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ms-flash-card, .ms-flash-card .ms-flash-icon, .ms-board li.just-banned, .ms-board li.just-protected, .ms-clock-num { animation-duration: .01s !important; animation-iteration-count: 1 !important; }
-  .ms-flash-card { animation: ms-fade 2.4s forwards !important; }
+  .ms-lastpick.fresh, .ms-lastpick.fresh *, .ms-board li.just-banned, .ms-board li.just-protected, .ms-clock-num { animation: none !important; }
 }
-@keyframes ms-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
 /* Tournament code in the room's tournament strip: a real link. */
 .tournament h3 .tlink { color: var(--accent); text-decoration: none; border-bottom: 1.5px solid var(--accent); }
 .tournament h3 .tlink:hover { color: var(--ink); border-bottom-color: var(--ink); }

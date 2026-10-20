@@ -2619,17 +2619,18 @@ function massingerArm(m, now = Date.now()) {
 export const MASSINGER_MAX_PER_TEAM = 3;
 
 // The order of picks, by team index (0 = picks first) and kind: the first team
-// bans; then each team in turn bans and protects; the first team's last
-// protect closes it. With 3 of each:
+// bans; then each team in turn bans and protects; the last ban ends it (a
+// protect after it would change nothing). With 3 bans each:
 //   0 ban | 1 ban, 1 protect | 0 ban, 0 protect | 1 ban, 1 protect |
-//   0 ban, 0 protect | 1 ban, 1 protect | 0 protect
+//   0 ban, 0 protect | 1 ban
+// so each team makes 3 bans and 2 protects.
 export function massingerSchedule(per = MASSINGER_MAX_PER_TEAM) {
   const steps = [{ team: 0, type: 'ban' }];
   for (let i = 0; i < 2 * per - 1; i++) {
     const team = i % 2 === 0 ? 1 : 0;
     steps.push({ team, type: 'ban' }, { team, type: 'protect' });
   }
-  steps.push({ team: 0, type: 'protect' });
+  steps.pop();   // the protect after the last ban
   return steps;
 }
 
@@ -2651,14 +2652,15 @@ function massingerSyncTurn(m) {
   if (step) m.turn = step.team;
 }
 
-// Done when the schedule is used up, or nothing is left to pick, or the target
-// is reached and a ban is due (none may take it below; the protects after the
-// last ban still happen).
+// Done when the bans are over: the target is reached, nothing is left to ban,
+// or the schedule has no ban left in it (a protect after the last ban
+// changes nothing, so it isn't asked for).
 function massingerFinishIfDone(m) {
   const step = massingerStep(m);
-  const atTarget = massingerRemaining(m) <= m.target;
-  if (step === null || massingerBannable(m).length === 0
-    || (atTarget && (step === undefined || step.type === 'ban'))) {
+  const bansAhead = Array.isArray(m.schedule)
+    && m.schedule.slice(m.actions.length).some((s) => s.type === 'ban');
+  if (step === null || massingerBannable(m).length === 0 || massingerRemaining(m) <= m.target
+    || (step !== undefined && !bansAhead)) {
     m.status = 'done';
     m.deadline = null;
   }
@@ -2688,7 +2690,7 @@ export function massingerStart(room, { round, subcats, teams, timerSec, target, 
     timerSec: clampNum(timerSec, 0, 300, 30),
     target: clampNum(target, 1, total, 20),
     control: MASSINGER_CONTROLS.includes(control) ? control : 'captain',
-    limits: { ban: MASSINGER_MAX_PER_TEAM, protect: MASSINGER_MAX_PER_TEAM },
+    limits: { ban: MASSINGER_MAX_PER_TEAM, protect: MASSINGER_MAX_PER_TEAM - 1 },
     schedule: massingerSchedule(MASSINGER_MAX_PER_TEAM),
     coinFlip: randomFirst === true,
     subcats: clean,
@@ -2847,9 +2849,13 @@ export function massingerCancel(room) {
 // shouldn't tell players to wait forever.
 const MASSINGER_LOBBY_TTL = 2 * 60 * 60 * 1000;
 
-/** The moderator opened (or left) the teams step before a pick/ban. */
-export function massingerLobby(room, { open, round } = {}) {
-  room.massingerLobby = open === true ? { round: String(round ?? '').slice(0, 80), at: Date.now() } : null;
+/** The moderator opened (or left) the teams step before a game (and, in
+ * MASSINGER, its pick/ban: `pickban`). Older moderator pages don't say, and
+ * only ever opened it for a pick/ban. */
+export function massingerLobby(room, { open, round, pickban } = {}) {
+  room.massingerLobby = open === true
+    ? { round: String(round ?? '').slice(0, 80), at: Date.now(), pickban: pickban !== false }
+    : null;
   return { ok: true };
 }
 
