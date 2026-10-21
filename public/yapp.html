@@ -26,9 +26,8 @@
   <main class="stage">
     <section class="panel">
       <h3>Packet parser</h3>
-      <p class="hint">Turn a Word packet into the JSON a reader can load. Drop in a
-        <code>.docx</code>, or a <code>.zip</code> of them for a whole set. Nothing is stored —
-        the file is parsed and handed straight back to you.</p>
+      <p class="hint">Turns a <code>.docx</code> packet, or a <code>.zip</code> of them, into JSON.
+        Nothing is stored.</p>
 
       <label class="select-label" for="yapp-file">Packet file</label>
       <input type="file" id="yapp-file" accept=".docx,.zip,application/zip" />
@@ -39,16 +38,15 @@
       <h3>Output</h3>
       <label class="select-label" for="yapp-format">Format</label>
       <select id="yapp-format">
-        <option value="json">JSON — what MODAQ and Klaxon read</option>
-        <option value="yapp2">yapp2 JSON — adds pronunciation-guide anchors</option>
-        <option value="html">HTML — a packet to read on screen</option>
-        <option value="tiebreakers">Tiebreakers — one JSON per tossup</option>
+        <option value="json">JSON</option>
+        <option value="yapp2">yapp2 JSON (with guide anchors)</option>
+        <option value="html">HTML (to read on screen)</option>
+        <option value="tiebreakers">Tiebreakers (one JSON per tossup)</option>
       </select>
       <p class="hint" id="yapp-format-note"></p>
-      <label class="toggle"><input type="checkbox" id="yapp-pretty" checked /> Pretty-print it
-        (easier to read and diff; the file is bigger)</label>
-      <label class="toggle" id="yapp-merge-row"><input type="checkbox" id="yapp-merge" /> Zip files:
-        merge every packet into one file instead of a zip of separate ones</label>
+      <label class="toggle"><input type="checkbox" id="yapp-pretty" checked /> Pretty-print</label>
+      <label class="toggle" id="yapp-merge-row"><input type="checkbox" id="yapp-merge" /> Merge the zip
+        into one file</label>
     </section>
 
     <section class="panel">
@@ -69,9 +67,7 @@
          question is read before the Download button is clicked. -->
     <section class="panel hidden" id="yapp-checks-panel">
       <h3>Checks <span id="yapp-checks-meta" class="muted-count"></span></h3>
-      <p class="hint">The parser refuses a packet it can't read at all. These are the quieter failures — a numbered
-        question that never came through, a bonus that lost a part, a power marker that didn't survive Word, a
-        pronunciation guide that swallowed the rest of the sentence.</p>
+      <p class="hint">Problems the parser didn't catch.</p>
       <div id="yapp-checks"></div>
     </section>
 

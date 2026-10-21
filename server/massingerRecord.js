@@ -78,7 +78,7 @@ export function massingerRecord(board, qbj) {
     banned_tossups: categories.flatMap((c) => c.banned).sort((x, y) => x - y),
     protected_categories: categories.filter((c) => c.protected_by).map((c) => ({ category: c.category, team: c.protected_by })),
     // The banned tossups were the game's tiebreakers, in packet order.
-    note: 'Tossup numbers are places in the full packet. Banned tossups were read only as tiebreakers.'
+    note: 'Tossup numbers are full-packet positions. Banned tossups were read only as tiebreakers.'
   };
 }
 

@@ -30,39 +30,35 @@
       <fieldset class="create-format">
         <legend>What kind?</legend>
         <label class="toggle"><input type="radio" name="t-kind" value="teams" checked />
-          <span><strong>Teams</strong> <span class="hint">Scheduled games between teams, in as many rooms as you need.
-            Collects rosters, packets, live stats and errata.</span></span></label>
+          <span><strong>Teams</strong> <span class="hint">Scheduled team games in any number of rooms.</span></span></label>
         <label class="toggle"><input type="radio" name="t-kind" value="shootout" />
-          <span><strong>Shootout</strong> <span class="hint">Optimized for Discord: everyone for themselves, a buzz queue,
-            typed answers and a chat. Starts with one room; add more from the console.</span></span></label>
+          <span><strong>Shootout</strong> <span class="hint">Everyone for themselves, for Discord. Starts with one room.</span></span></label>
       </fieldset>
       <label class="select-label" for="tournament-name">Tournament name</label>
       <input id="tournament-name" placeholder="e.g. Fall Invitational" required aria-required="true" />
       <label class="select-label" for="t-date">Date</label>
       <input id="t-date" type="date" />
-      <label class="toggle"><input type="checkbox" id="t-listed" checked /> List on Klaxon's own public
-        tournament directory, so moderators browsing Klaxon can find this tournament and request to join it</label>
+      <label class="toggle"><input type="checkbox" id="t-listed" checked /> List on Klaxon's public
+        tournament directory</label>
     </section>
 
     <section class="panel shootout-only hidden">
       <h3>Shootout</h3>
       <label class="toggle"><input type="checkbox" id="so-carry" checked /> Cumulative scores across packets</label>
-      <label class="toggle"><input type="checkbox" id="so-autoadd" checked /> Add players to MODAQ as they buzz in
-        (someone who joins mid-packet plays from the next question)</label>
+      <label class="toggle"><input type="checkbox" id="so-autoadd" checked /> Add players to MODAQ as they buzz in</label>
       <label class="toggle"><input type="checkbox" id="so-typed" checked /> Players type their answers</label>
       <fieldset class="create-format so-withdraw-choice">
         <legend>Withdrawing a buzz</legend>
         <label class="toggle"><input type="radio" name="so-withdraw" value="free" checked />
-          <span><strong>Free withdraws</strong> <span class="hint">A player can take back a buzz at no cost.</span></span></label>
+          <span><strong>Free withdraws</strong> <span class="hint">Take back a buzz at no cost.</span></span></label>
         <label class="toggle"><input type="radio" name="so-withdraw" value="none" />
           <span><strong>No withdraws</strong> <span class="hint">A buzz stands once it's in.</span></span></label>
         <label class="toggle"><input type="radio" name="so-withdraw" value="typed" />
-          <span><strong>Type your answer first</strong> <span class="hint">Everyone waiting in the queue types their
-            answer before the player with the floor gives theirs. Withdrawing is only free if you hadn't committed to a
-            different answer.</span></span></label>
+          <span><strong>Type your answer first</strong> <span class="hint">The queue types answers before the player
+            with the floor answers.</span></span></label>
         <label class="toggle"><input type="radio" name="so-withdraw" value="rationed" />
-          <span><strong>One free withdraw, then a wait</strong> <span class="hint">Not twice in a row: for the next few
-            questions after one, a buzz is yours to answer.</span></span></label>
+          <span><strong>One free withdraw, then a wait</strong> <span class="hint">After a withdraw, wait a few questions
+            for the next.</span></span></label>
         <label class="select-label hidden" id="so-cooldown-row" for="so-cooldown">Questions to wait
           <input type="number" id="so-cooldown" value="5" min="1" max="40" style="width:5em" /></label>
       </fieldset>
@@ -76,9 +72,7 @@
       <label class="toggle"><input type="checkbox" id="so-bonuses" /> Read bonuses too</label>
       <label class="select-label" for="so-notes">Notes for the players <span class="optional">optional</span></label>
       <textarea id="so-notes" class="field" rows="3" maxlength="2000"
-        placeholder="What kind of questions these are, what you're playtesting, anything else the room should know."></textarea>
-      <p class="hint">Every room of the shootout reads with these, and the packets below in round order, as you
-        release them. The rooms don't change them.</p>
+        placeholder="e.g. what you're playtesting"></textarea>
     </section>
 
     <section class="panel teams-only">
@@ -91,10 +85,8 @@
         <option value="10/-5">10 / −5 &nbsp;(no powers)</option>
       </select>
       <label class="toggle"><input type="checkbox" id="fmt-bonuses" checked /> Bonuses</label>
-      <label class="toggle"><input type="checkbox" id="fmt-player-scoresheet" checked /> Live scoresheet for players
-        (questions already read)</label>
-      <label class="toggle"><input type="checkbox" id="fmt-scoresheet-categories" /> Show categories on the scoresheet
-        (after each cycle)</label>
+      <label class="toggle"><input type="checkbox" id="fmt-player-scoresheet" checked /> Live scoresheet for players</label>
+      <label class="toggle"><input type="checkbox" id="fmt-scoresheet-categories" /> Show categories on the scoresheet</label>
       <label class="toggle"><input type="checkbox" id="fmt-show-questions" /> Show question text after it's read</label>
       <div class="row hidden" id="fmt-question-lag-row">
         <label class="select-label" for="fmt-question-lag">...and keep it this many questions behind the room</label>
@@ -105,7 +97,6 @@
         cycle and collect feedback</label>
       <label class="toggle"><input type="checkbox" id="fmt-buzz-points" checked /> Record every buzz, including ones
         that lost the race</label>
-      <p class="hint">MODAQ uses this format by default.</p>
 
       <!-- MASSINGER last: most tournaments don't use it, and its two settings
            only appear once it's switched on (see new-tournament.js). -->
@@ -120,31 +111,29 @@
         </select>
         <label class="select-label" for="fmt-massinger-timer">Pick/ban timer (seconds per pick, 0 = no timer)</label>
         <input type="number" id="fmt-massinger-timer" value="30" min="0" max="300" style="width:6em" />
-        <p class="hint">MASSINGER needs packets whose tossups carry a subcategory in their metadata. <a href="/massinger-help" target="_blank" rel="noopener">How MASSINGER works →</a></p>
+        <p class="hint">Needs a subcategory on every tossup. <a href="/massinger-help" target="_blank" rel="noopener">How MASSINGER works →</a></p>
       </div>
     </section>
 
     <section class="panel create-only">
       <h3>Round packets <span class="optional">optional</span></h3>
-      <p class="hint">Upload several <code>.json</code> packets at once — each file's name becomes the round
-        label. <span class="teams-only">Rounds start hidden from moderators; release them from the director console.</span><span class="shootout-only hidden">With one room (the usual shootout) it can read them right away, in this order; with more, you release them as in a team tournament.</span> Still have
-        <code>.docx</code> files? The <a href="/yapp" target="_blank" rel="noopener">packet parser</a> converts them.</p>
+      <p class="hint"><code>.json</code> packets. File name = round label. <span class="teams-only">New rounds start hidden.</span><span class="shootout-only hidden">With one room, they're ready in this order.</span>
+        Convert <code>.docx</code> with the <a href="/yapp" target="_blank" rel="noopener">packet parser</a>.</p>
       <input type="file" id="t-packet-files" accept=".json,application/json" multiple />
     </section>
 
     <section class="panel">
       <h3>Moderator access</h3>
-      <label class="toggle"><input type="checkbox" id="t-require-accounts" checked /> Require readers to have a
-        director-approved account to access the packets</label>
+      <label class="toggle"><input type="checkbox" id="t-require-accounts" checked /> Readers need an approved account
+        to load packets</label>
     </section>
 
     <section class="panel teams-only create-only">
       <h3>Roster <span class="optional">optional</span></h3>
-      <p class="hint">Paste from your registration spreadsheet, or upload a registration QBJ. MODAQ rooms
-        default to it, and you can edit it later in the director console.</p>
+      <p class="hint">You can edit it later in the console.</p>
       <label class="roster-paste-label" for="t-roster-paste">Paste from your spreadsheet</label>
       <textarea id="t-roster-paste" class="field" rows="3"
-        placeholder="Copy the rows, header row included (Team Name, Player 1, Player 2…), and paste here. Emails and other columns are left out."></textarea>
+        placeholder="Paste rows with the header (Team Name, Player 1, Player 2…)"></textarea>
       <p id="t-roster-paste-note" class="hint"></p>
       <label class="select-label" for="t-roster-file">Or upload a QBJ</label>
       <input type="file" id="t-roster-file" accept=".qbj,.json,application/json" />
@@ -152,7 +141,7 @@
 
     <section id="room-names-panel" class="panel hidden">
       <h3>Room names</h3>
-      <p class="hint">What players and moderators see for each room. Leave one blank to show its code.</p>
+      <p class="hint">Blank shows the room code.</p>
       <div id="room-names" class="room-names"></div>
     </section>
 
@@ -171,7 +160,7 @@
         <label class="toggle"><input type="checkbox" id="t-def-autoclear" /> Auto-clear buzzer 5s after a buzz</label>
         <label class="toggle"><input type="checkbox" id="t-def-require-team" /> Require team name to join</label>
         <label class="toggle"><input type="checkbox" id="t-def-roster-join" checked /> Players pick their team and name
-          from the roster (anyone not on it is reported to you)</label>
+          from the roster</label>
         <label class="toggle"><input type="checkbox" id="t-def-player-alerts" checked /> Let players alert the moderator that the buzzer isn't clear</label>
       </fieldset>
     </section>

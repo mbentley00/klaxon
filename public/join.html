@@ -34,9 +34,7 @@
 
       <!-- One of these is shown, by where the moderator stands. -->
       <div id="j-signin" class="hidden">
-        <p>To moderate here you need a Klaxon account, so the director knows who is asking.
-          Sign in, or create an account — it takes a username and a password — and you'll come
-          straight back to this page.</p>
+        <p>Sign in to request to moderate. You'll come back here.</p>
         <a id="j-signin-link" class="btnlink primary">Sign in or create an account</a>
       </div>
 
@@ -46,26 +44,23 @@
       </div>
 
       <div id="j-pending" class="hidden">
-        <p><strong>Request sent.</strong> The director approves moderators from their console.
-          You can leave this page open: it notices the approval by itself.</p>
+        <p><strong>Request sent.</strong> This page updates when the director approves you.</p>
       </div>
 
       <div id="j-denied" class="hidden">
-        <p>The director declined this request. If that's a mistake, ask them to add you —
-          they can approve you from the same list.</p>
+        <p>The director declined this request. Ask them if that's a mistake.</p>
       </div>
 
       <div id="j-approved" class="hidden">
         <p id="j-bye-already" class="msg bad hidden"></p>
         <p id="j-approved-full"><strong>You're approved to moderate.</strong> Open the room you're reading in:</p>
         <div id="j-approved-assigned" class="hidden">
-          <p><strong>You read these rounds.</strong> Open the room when your round starts. Every other
-            round you're a player: join your game from its player link as usual.</p>
+          <p><strong>You read these rounds.</strong> Open the room when your round starts. Other rounds,
+            join as a player.</p>
         </div>
         <ul id="j-rooms" class="players"></ul>
         <p id="j-no-assignments" class="hint hidden">The director hasn't given you a round to read yet.</p>
-        <p id="j-no-rooms" class="hint hidden">The director hasn't made any rooms yet. Ask them which room is
-          yours, and come back here once it exists.</p>
+        <p id="j-no-rooms" class="hint hidden">No rooms yet. Check back later.</p>
       </div>
 
       <p id="j-msg" class="msg"></p>

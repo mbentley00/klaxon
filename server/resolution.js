@@ -47,20 +47,20 @@ export const RESOLUTIONS = [
   {
     id: 'denied',
     rule: 'H.12',
-    label: 'Denied — the original ruling stands',
-    detail: 'Nothing changes. All original scoring on the affected question remains.'
+    label: 'Denied (ruling stands)',
+    detail: 'Nothing changes.'
   },
   {
     id: 'answer-accepted',
     rule: 'H.12.1',
-    label: 'Upheld — the answer should have been accepted',
-    detail: 'The cycle is undone and the points awarded. On a tossup this needs a replacement bonus read to that team.'
+    label: 'Upheld (answer accepted)',
+    detail: 'Undo the cycle and award the points. A tossup also needs a replacement bonus for that team.'
   },
   {
     id: 'thrown-out',
     rule: 'H.12.2',
-    label: 'Upheld — the question has no single correct answer',
-    detail: 'The question is thrown out and a replacement of the same kind is read to the teams that were eligible.'
+    label: 'Upheld (question thrown out)',
+    detail: 'Read a replacement of the same kind to the eligible teams.'
   }
 ];
 const RESOLUTION_IDS = new Set(RESOLUTIONS.map((r) => r.id));
@@ -181,7 +181,7 @@ export function plan(qbj, protest, resolutionId, { award } = {}) {
       status: 'denied',
       adjustments: [],
       gameplay: [],
-      explain: ['The original ruling stands; no score changes (H.12).'],
+      explain: ['Ruling stands. No score changes (H.12).'],
       warnings: []
     };
   }
@@ -197,7 +197,7 @@ export function plan(qbj, protest, resolutionId, { award } = {}) {
   const add = (name, points, why) => {
     if (!name || !points) return;
     net.set(name, (net.get(name) || 0) + points);
-    explain.push(`${points > 0 ? '+' : ''}${points} ${name} — ${why}`);
+    explain.push(`${points > 0 ? '+' : ''}${points} ${name}: ${why}`);
   };
 
   const gameplay = [];
@@ -211,7 +211,7 @@ export function plan(qbj, protest, resolutionId, { award } = {}) {
         add(name, -points, `undo part ${part} of bonus #${protest.question} (H.12.1)`);
       }
       const value = num(award) || 10;
-      add(team, value, `part ${part} awarded to the protesting team (H.12.1)`);
+      add(team, value, `award part ${part} (H.12.1)`);
     } else {
       // A tossup: the whole cycle comes apart, including whatever the other
       // team scored after the wrongly-rejected answer, and the bonus.
@@ -222,12 +222,12 @@ export function plan(qbj, protest, resolutionId, { award } = {}) {
         add(name, -points, `undo the bonus that followed (H.12.1)`);
       }
       const value = num(award) || values[0];
-      add(team, value, `tossup awarded to the protesting team (H.12.1)`);
+      add(team, value, `award the tossup (H.12.1)`);
       gameplay.push({
         kind: 'bonus',
         forTeams: [team],
         rule: 'H.12.1',
-        why: `Both teams are reseated and a replacement bonus is read to ${team}, to complete a new cycle.`
+        why: `Reseat both teams and read a replacement bonus to ${team}.`
       });
     }
   } else {
@@ -243,7 +243,7 @@ export function plan(qbj, protest, resolutionId, { award } = {}) {
         kind: 'bonus',
         forTeams: [controller],
         rule: 'H.12.2',
-        why: `A replacement bonus is read to ${controller}, the team that was eligible for it.`
+        why: `Read a replacement bonus to ${controller}.`
       });
     } else {
       for (const [name, points] of tossupSwing(cycle)) {
@@ -259,22 +259,22 @@ export function plan(qbj, protest, resolutionId, { award } = {}) {
         kind: 'tossup',
         forTeams: eligible,
         rule: 'H.12.2',
-        why: `A replacement tossup is read to ${eligible.join(' and ')}.`
+        why: `Read a replacement tossup to ${eligible.join(' and ')}.`
       });
       gameplay.push({
         kind: 'bonus',
         forTeams: [],
         rule: 'H.12.2',
         conditional: true,
-        why: 'If the replacement tossup goes to the team that answered the original, the original bonus points '
-          + 'stand and no bonus is read. Otherwise a replacement bonus is read to whoever wins it.'
+        why: 'If the team that answered the original wins the replacement, its bonus stands. '
+          + 'Otherwise read a replacement bonus to the winner.'
       });
     }
   }
 
   if (wentToTiebreakers(qbj)) {
-    warnings.push('This match went past regulation. If upholding this unties the game, H.10.2 says the '
-      + 'tiebreaker questions and every score change from them are undone BEFORE this resolution is applied.');
+    warnings.push('This match went to tiebreakers. If upholding this unties the game, undo the '
+      + 'tiebreakers and their scores first (H.10.2).');
   }
 
   return {

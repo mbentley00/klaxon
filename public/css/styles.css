@@ -1656,3 +1656,15 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .ms-check-issues li { display: list-item; border: 0; padding: 1px 0; }
 .ms-check-list summary { font-size: .8rem; color: var(--muted); font-weight: 600; margin: 2px 0; }
 .ms-check-list p { margin: 2px 0 4px; color: var(--muted); overflow-wrap: anywhere; }
+
+/* Landing: "Rooms you've created" sits apart from the buttons above it. */
+#created-section { margin: 22px 0 6px; }
+#created-section h3 { margin-bottom: .7em; }
+
+/* Room page: a passing notice for errors with no message spot of their own. */
+.say-toast { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 8px);
+  max-width: min(90vw, 420px); padding: 8px 14px; border: 1.5px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--ink); font-size: .9rem; box-shadow: 3px 3px 0 var(--shadow-ink);
+  opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 50; }
+.say-toast.show { opacity: 1; transform: translate(-50%, 0); }
+.say-toast.bad { border-color: var(--bad); color: var(--bad); }

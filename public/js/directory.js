@@ -129,7 +129,7 @@ async function render() {
 
 function actionFor(t, status) {
   if (!t.requireReaderAccounts) {
-    return el('span', { className: 'pjoined' }, 'Open — ask the director for a room link');
+    return el('span', { className: 'pjoined' }, 'Open. Ask the director for a room link.');
   }
   if (!account) {
     return el('a', { className: 'btnlink tiny', href: '/account' }, 'Log in to request');
@@ -142,7 +142,7 @@ function actionFor(t, status) {
     btn.disabled = true;
     try {
       await api('POST', `/api/tournaments/${t.code}/access`, { sessionToken: session() });
-      dmsg(`Requested to join ${t.name}. The director will approve you.`);
+      dmsg(`Requested to join ${t.name}.`);
       render();
     } catch (e) { dmsg('Could not request: ' + e.message, false); btn.disabled = false; }
   };

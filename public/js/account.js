@@ -120,7 +120,7 @@ async function init() {
   }
   showSignedOut();
   setMode('login');
-  if (returnTo) say('Sign in and you\'ll be sent back to where you came from.');
+  if (returnTo) say('Sign in to continue.');
 }
 
 $('#tab-login').onclick = () => setMode('login');
@@ -168,7 +168,7 @@ $('#save-email').onclick = async () => {
     const { account } = await api('PATCH', '/api/accounts/me',
       { sessionToken: session(), email: $('#acct-email').value.trim() });
     $('#acct-email').value = account.email;
-    say(account.email ? 'Email saved — directors can add you as a moderator with it.' : 'Email removed.');
+    say(account.email ? 'Email saved.' : 'Email removed.');
   } catch (err) {
     say('Could not save: ' + friendly(err.message), false);
   }

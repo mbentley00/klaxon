@@ -306,11 +306,11 @@ async function notifyDirectorsOfProtest(room, protest) {
     to,
     subject: `Protest in ${where}: question ${protest.cycle}`,
     text: `${who} protested question ${protest.cycle} in ${where} of ${t.name || t.code}.` +
-      `${reasonText ? `\n\n${reasonText}` : ''}\n\nOnce the moderator records it in MODAQ it appears in the director console, under Results > Protests, to rule on: ${url}`,
+      `${reasonText ? `\n\n${reasonText}` : ''}\n\nOnce the moderator records it in MODAQ, rule on it in the director console under Game Data & Protests: ${url}`,
     html: `<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;color:#17130d;line-height:1.5;max-width:520px">` +
       `<p><strong>${escHtml(who)}</strong> protested <strong>question ${escHtml(protest.cycle)}</strong> in ${escHtml(where)} of ${escHtml(t.name || t.code)}.</p>` +
       (reasonText ? `<blockquote style="margin:0;padding:10px 14px;border-left:3px solid #ddd5c5;color:#333">${escHtml(reasonText)}</blockquote>` : '') +
-      `<p>Once the moderator records it in MODAQ it appears in the <a href="${escHtml(url)}">director console</a>, under Results &rsaquo; Protests, to rule on.</p>` +
+      `<p>Once the moderator records it in MODAQ, rule on it in the <a href="${escHtml(url)}">director console</a> under Game Data &amp; Protests.</p>` +
       `<hr style="border:none;border-top:1px solid #eee;margin:20px 0"><p style="font-size:12px;color:#888">Klaxon</p></div>`
   });
 }
@@ -328,11 +328,11 @@ async function notifyDirectorsOfRequest(t, requester, origin, { bye = false } = 
     subject: bye ? `${who} asked to read on their byes at ${tname}` : `${who} asked to moderate ${tname}`,
     text: `${who}${requester.email ? ` <${requester.email}>` : ''} asked to ${bye ? 'read on their bye rounds at' : 'moderate'} ${tname}.\n\n` +
       `Approve them in the director console: ${url} (Moderators & links > Reader accounts).` +
-      (bye ? ' They can read nowhere until you assign them a round and room there.' : ''),
+      (bye ? ' Then assign them a round and room.' : ''),
     html: `<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;color:#17130d;line-height:1.5;max-width:520px">` +
       `<p><strong>${esc(who)}</strong>${requester.email ? ` (${esc(requester.email)})` : ''} asked to ${bye ? 'read on their bye rounds at' : 'moderate'} <strong>${esc(tname)}</strong>.</p>` +
       `<p>Approve them in the <a href="${esc(url)}">director console</a>, under Moderators &amp; links &rsaquo; Reader accounts.` +
-      `${bye ? ' They can read nowhere until you assign them a round and room there.' : ''}</p>` +
+      `${bye ? ' Then assign them a round and room.' : ''}</p>` +
       `<hr style="border:none;border-top:1px solid #eee;margin:20px 0"><p style="font-size:12px;color:#888">Klaxon</p></div>`,
     replyTo: requester.email || undefined
   });
@@ -388,11 +388,11 @@ const callerIp = (req) =>
 app.post('/api/feedback', ah(async (req, res) => {
   const message = String(req.body?.message ?? '').trim();
   if (!message) return res.status(400).json({ error: 'Write a message first.' });
-  if (message.length > FEEDBACK_MAX) return res.status(400).json({ error: `Please keep it under ${FEEDBACK_MAX} characters.` });
+  if (message.length > FEEDBACK_MAX) return res.status(400).json({ error: `Keep it under ${FEEDBACK_MAX} characters.` });
 
   // An address is required so the report can be answered.
   const replyTo = String(req.body?.email ?? '').trim().slice(0, 200);
-  if (!replyTo) return res.status(400).json({ error: 'Add your email so Michael can reply.' });
+  if (!replyTo) return res.status(400).json({ error: 'Add your email.' });
   if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(replyTo)) return res.status(400).json({ error: "That email address doesn't look right." });
 
   const kind = req.body?.kind === 'bug' ? 'bug' : 'feedback';
@@ -401,9 +401,9 @@ app.post('/api/feedback', ah(async (req, res) => {
   // public/js/feedback.js): settings and status up top, then the log.
   const diagnostics = String(req.body?.diagnostics ?? '').slice(0, FEEDBACK_DIAGNOSTICS_MAX);
   const diagnosticsSummary = diagnostics.split(/\n(?:Log[ :(])/)[0].trim();
-  if (feedbackThrottled(callerIp(req))) return res.status(429).json({ error: "That's a lot of messages at once — try again in a few minutes." });
+  if (feedbackThrottled(callerIp(req))) return res.status(429).json({ error: 'Too many messages. Try again in a few minutes.' });
 
-  if (!emailEnabled()) return res.status(503).json({ error: "This form isn't set up to send mail yet." });
+  if (!emailEnabled()) return res.status(503).json({ error: "Email isn't set up yet." });
   const sent = await sendEmail({
     to: FEEDBACK_TO,
     subject: kind === 'bug' ? `Klaxon bug report from ${replyTo}` : `Klaxon feedback from ${replyTo}`,
@@ -412,7 +412,7 @@ app.post('/api/feedback', ah(async (req, res) => {
     replyTo,
     attachments: diagnostics ? [{ filename: 'read-along-diagnostics.txt', content: diagnostics }] : undefined
   });
-  if (!sent) return res.status(502).json({ error: "Couldn't send that just now." });
+  if (!sent) return res.status(502).json({ error: "Couldn't send that. Try again." });
   res.json({ ok: true });
 }));
 
@@ -443,11 +443,11 @@ const YAPP_PARAMS = ['format', 'prettyPrint', 'mergeMultiple', 'version', 'modaq
 // usual matcher treats a missing type as "doesn't match" and hands us no body.
 app.post('/api/yapp/parse', express.raw({ type: () => true, limit: YAPP_MAX_BYTES }), ah(async (req, res) => {
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
-    return res.status(400).json({ errorMessages: ['Send the packet file as the request body.'] });
+    return res.status(400).json({ errorMessages: ['No packet file received.'] });
   }
   const ip = callerIp(req);
   if (throttled(recentYapp, ip, YAPP_WINDOW_MS, YAPP_PER_WINDOW)) {
-    return res.status(429).json({ errorMessages: ["That's a lot of packets at once — try again in a few minutes."] });
+    return res.status(429).json({ errorMessages: ['Too many packets. Try again in a few minutes.'] });
   }
 
   const upstream = new URL(YAPP_URL);
@@ -476,7 +476,7 @@ app.post('/api/yapp/parse', express.raw({ type: () => true, limit: YAPP_MAX_BYTE
   } catch (e) {
     const timedOut = e?.name === 'AbortError';
     return res.status(504).json({
-      errorMessages: [timedOut ? 'The parser took too long to answer.' : 'Could not reach the parser.']
+      errorMessages: [timedOut ? 'The parser timed out.' : 'Could not reach the parser.']
     });
   } finally {
     clearTimeout(timer);
@@ -1261,7 +1261,7 @@ app.post('/api/tournaments/:code/exports/:filename/correct', ah(async (req, res)
     if (b?.json) { meta = m; body = b; break; }
   }
   if (!meta) {
-    return res.status(409).json({ error: "This game has no MODAQ copy to open — it was imported from YellowFruit, or played before games were kept. Fix it in YellowFruit and import it again." });
+    return res.status(409).json({ error: 'This game has no MODAQ copy. Fix it in YellowFruit and import it again.' });
   }
   const room = store.createRoom({
     name: `Correction: ${(meta.teams || []).join(' vs ') || gameRoom} (round ${gameRound})`.slice(0, 60),
@@ -1468,9 +1468,9 @@ app.get('/api/tournaments/:code/stats', ah(async (req, res) => {
 
 // The whole tournament as a YellowFruit file (.yft) that File > Open takes:
 // teams and players, phases and rounds, every final game (see yft.js).
-app.get('/api/tournaments/:code/yellowfruit.yft', ah(async (req, res) => {
-  const t = tournamentOr(res, req.params.code); if (!t) return;
-  if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
+// Built from the roster, the phases and the final games; the director's
+// download and the report zip both use it.
+async function yftFor(t) {
   const bucket = { kind: 't', code: t.code };
   const [matches, structure, roster] = await Promise.all([
     artifacts.readAllExports(bucket),
@@ -1486,7 +1486,13 @@ app.get('/api/tournaments/:code/yellowfruit.yft', ah(async (req, res) => {
     const registrations = objs.flatMap((o) => (o?.type === 'Registration' ? [o] : o?.registrations || []));
     reg = { registrations };
   } catch { reg = null; }
-  const file = buildYft(t, computeStats(matches, structure), reg);
+  return buildYft(t, computeStats(matches, structure), reg);
+}
+
+app.get('/api/tournaments/:code/yellowfruit.yft', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const file = await yftFor(t);
   const name = String(t.name || t.code).replace(/[\\/:*?"<>|]+/g, '').trim() || t.code;
   res.setHeader('Content-Disposition', `attachment; filename="${name}.yft"`);
   res.type('application/json').send(JSON.stringify(file, null, 2));
@@ -1580,8 +1586,8 @@ app.post('/api/rooms/:code/packets', ah(async (req, res) => {
     const owner = await artifacts.packetOwner(bucket, req.body?.round);
     if (owner.exists && owner.uploadedBy !== room.code) {
       return res.status(409).json({
-        error: `"${req.body?.round}" already has a packet in this tournament, so yours wasn't saved. `
-          + 'To read that one, clear the file you chose and start again. To read your own, give it a different round name.'
+        error: `"${req.body?.round}" already has a packet. Yours wasn't saved. `
+          + 'Clear your file to read theirs, or rename your round.'
       });
     }
   }
@@ -2023,7 +2029,7 @@ app.get('/t/:code/buzzpoints.zip', ah(async (req, res) => {
   // uploading. Beside data/, so the importer never reads it.
   if (warnings.length) {
     files.push({ name: 'klaxon_numbering_warnings.json', data: JSON.stringify({
-      note: 'These games read questions whose text is not in the stored packet. Their buzzes on those questions may be on the wrong question.',
+      note: 'These games read questions not in the stored packet. Their buzzes there may be on the wrong question.',
       games: warnings }, null, 2) });
   }
   const base = (t.name || t.code).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || t.code;
@@ -2082,7 +2088,7 @@ function shareFor(token) {
   return null;
 }
 
-const SHARE_GONE = '<p style="font-family:sans-serif">This share link has expired or was revoked. Ask the tournament director for a fresh one.</p>';
+const SHARE_GONE = '<p style="font-family:sans-serif">This share link has expired. Ask the director for a new one.</p>';
 
 app.get('/s/:token', (req, res) => {
   const hit = shareFor(req.params.token);
@@ -2128,6 +2134,12 @@ app.get('/t/:code/stats.zip', ah(async (req, res) => {
   const zipLink = (page, hash) => `${base}_${page}.html${hash ? '#' + hash : ''}`;
   const zipPages = PAGES.filter((p) => !p.servedOnly);
   const files = zipPages.map((p) => ({ name: `${base}_${p.key}.html`, data: renderReport(p.key, data.stats, zipLink, zipPages) }));
+  // The same tournament as a YellowFruit file, to open and keep editing in YF.
+  const t = store.getTournament(data.t.code);
+  if (t) {
+    try { files.push({ name: `${base}.yft`, data: JSON.stringify(await yftFor(t), null, 2) }); }
+    catch (e) { console.warn('[stats.zip] no .yft:', e.message); }
+  }
   const zip = buildZip(files);
   res.setHeader('Content-Disposition', `attachment; filename="${base}_stats.zip"`);
   res.type('application/zip').send(zip);
@@ -3873,7 +3885,7 @@ startBackups({
     sendEmail({
       to: process.env.KLAXON_ALERT_EMAIL || FEEDBACK_TO,
       subject: '[Klaxon] Nightly backup failed',
-      text: `The offsite backup of the data volume failed and will be retried hourly.\n\n${e?.message || e}`,
+      text: `The offsite backup failed. It retries hourly.\n\n${e?.message || e}`,
     }).catch(() => {});
   },
 });

@@ -104,12 +104,12 @@ const finding = (level, code, message, where = '') => ({ level, code, message, w
 // most, and it shows up as an imbalance rather than as anything wrong on a page.
 function checkCounts(tossups, bonuses, out) {
   if (!tossups.length) {
-    out.push(finding('error', 'no-tossups', 'No tossups came out of this packet at all.'));
+    out.push(finding('error', 'no-tossups', 'No tossups came out of this packet.'));
     return;
   }
   if (!bonuses.length) {
     out.push(finding('note', 'no-bonuses',
-      `${tossups.length} tossups and no bonuses. Fine for a tossup-only packet — check it isn't a bonus round that failed to parse.`));
+      `${tossups.length} tossups, no bonuses. Check the bonuses didn't fail to parse.`));
     return;
   }
   const diff = tossups.length - bonuses.length;
@@ -117,10 +117,10 @@ function checkCounts(tossups, bonuses, out) {
   // packets in the corpus; two or more is a question that went missing.
   if (diff >= 2) {
     out.push(finding('warning', 'count-mismatch',
-      `${tossups.length} tossups but only ${bonuses.length} bonuses — ${diff} bonuses may have been lost in the conversion.`));
+      `${tossups.length} tossups but only ${bonuses.length} bonuses. ${diff} bonuses may be lost.`));
   } else if (diff < 0) {
     out.push(finding('warning', 'count-mismatch',
-      `${bonuses.length} bonuses but only ${tossups.length} tossups — ${-diff} tossup${diff === -1 ? '' : 's'} may have been lost in the conversion.`));
+      `${bonuses.length} bonuses but only ${tossups.length} tossups. ${-diff} tossup${diff === -1 ? '' : 's'} may be lost.`));
   }
 }
 
@@ -170,7 +170,7 @@ function checkTossups(tossups, out) {
       const nextNumber = new RegExp('[.?!\u201d"\']\\s+' + (n + 1) + '\\.\\s+[A-Z\u201c"]');
       if (nextNumber.test(q.slice(40))) {
         out.push(finding('error', 'merged-tossups',
-          `Tossup ${n + 1}'s number appears in the middle of this question, which is also far longer than the rest of the packet — two tossups have been run together into one.`, at));
+          `Tossups ${n} and ${n + 1} are merged.`, at));
       }
     }
 
@@ -178,11 +178,11 @@ function checkTossups(tossups, out) {
     // parser never found the boundary and read on into the next question.
     if (QUESTION_PROSE.test(a)) {
       out.push(finding('error', 'answer-runs-on',
-        'The answer line contains question text ("for 10 points…"), so it has run into the question after it.', at));
+        'The answer line runs into the next question.', at));
     }
     if (a.length > LONG_ANSWER) {
       out.push(finding('note', 'long-answer',
-        `The answer line runs ${a.length} characters. Usually that is just a long list of acceptable answers — check it hasn't run into the next question.`, at));
+        `${a.length}-character answer line. Check it doesn't run into the next question.`, at));
     }
 
     // Powers.
@@ -195,7 +195,7 @@ function checkTossups(tossups, out) {
       const at01 = q.indexOf('(*)') / q.length;
       if (at01 < POWER_MIN_POS || at01 > POWER_MAX_POS) {
         out.push(finding('warning', 'power-position',
-          `The power marker sits ${Math.round(at01 * 100)}% of the way into the question. In real packets it almost never falls before 35% or after 75%, so this one is probably in the wrong place.`, at));
+          `Power marker at ${Math.round(at01 * 100)}% of the question. Probably misplaced.`, at));
       }
     }
 
@@ -208,24 +208,24 @@ function checkTossups(tossups, out) {
 
   if (missingPower.length) {
     out.push(finding('warning', 'missing-power',
-      `${powered} of ${tossups.length} tossups have a (*) power marker, but ${missingPower.length === 1 ? 'this one does' : 'these do'} not: ${listNumbers(missingPower)}.`,
+      `No (*) power marker in ${missingPower.length === 1 ? 'tossup' : 'tossups'} ${listNumbers(missingPower)}.`,
       missingPower.length === 1 ? `tossup ${missingPower[0]}` : ''));
   }
   if (unmarkedAnswer.length) {
     out.push(finding('warning', 'unmarked-answer',
-      `The required part of the answer is underlined everywhere except ${unmarkedAnswer.length === 1 ? 'tossup' : 'tossups'} ${listNumbers(unmarkedAnswer)}.`));
+      `No underlined answer in ${unmarkedAnswer.length === 1 ? 'tossup' : 'tossups'} ${listNumbers(unmarkedAnswer)}.`));
   }
   if (short.length) {
     out.push(finding('warning', 'short-tossup',
-      `Unusually short next to the rest of the packet (median ${Math.round(mid)} characters): ${short.length === 1 ? 'tossup' : 'tossups'} ${listNumbers(short)}. A question that stops early usually means the parser lost the end of it.`));
+      `${short.length === 1 ? 'Tossup' : 'Tossups'} ${listNumbers(short)} ${short.length === 1 ? 'is' : 'are'} unusually short (median ${Math.round(mid)} characters). The end may be lost.`));
   }
   if (long.length) {
     out.push(finding('warning', 'long-tossup',
-      `Much longer than the rest of the packet (median ${Math.round(mid)} characters): ${long.length === 1 ? 'tossup' : 'tossups'} ${listNumbers(long)}. Two questions run together look like this.`));
+      `${long.length === 1 ? 'Tossup' : 'Tossups'} ${listNumbers(long)} ${long.length === 1 ? 'is' : 'are'} unusually long (median ${Math.round(mid)} characters). Two questions may be merged.`));
   }
   if (missingMeta.length) {
     out.push(finding('note', 'missing-metadata',
-      `Every other tossup carries a category line; ${missingMeta.length === 1 ? 'tossup' : 'tossups'} ${listNumbers(missingMeta)} ${missingMeta.length === 1 ? 'does' : 'do'} not.`));
+      `No category line in ${missingMeta.length === 1 ? 'tossup' : 'tossups'} ${listNumbers(missingMeta)}.`));
   }
 
   return { usesPowers, usesMetadata, powered };
@@ -251,14 +251,14 @@ function checkBonuses(bonuses, out) {
     // an error rather than a warning.
     if (parts.length !== answers.length || parts.length !== values.length) {
       out.push(finding('error', 'bonus-shape',
-        `${parts.length} parts, ${answers.length} answers and ${values.length} values — they have to match.`, at));
+        `${parts.length} parts, ${answers.length} answers and ${values.length} values. They must match.`, at));
       return;
     }
     if (!plain(b.leadin)) {
       out.push(finding('error', 'empty-leadin', 'This bonus has no leadin.', at));
     } else if (plain(b.leadin).length > LONG_LEADIN) {
       out.push(finding('warning', 'long-leadin',
-        `The leadin runs ${plain(b.leadin).length} characters — it may have absorbed the previous question.`, at));
+        `${plain(b.leadin).length}-character leadin. It may include the previous question.`, at));
     }
     parts.forEach((p, j) => {
       if (!plain(p)) out.push(finding('error', 'empty-part', `Part ${j + 1} has no text.`, at));
@@ -278,11 +278,11 @@ function checkBonuses(bonuses, out) {
 
   if (oddParts.length) {
     out.push(finding('warning', 'bonus-parts',
-      `This packet's bonuses are ${usual.value} parts each, but ${oddParts.length === 1 ? 'bonus' : 'bonuses'} ${listNumbers(oddParts)} ${oddParts.length === 1 ? 'is' : 'are'} not — a part probably didn't survive the conversion.`));
+      `${oddParts.length === 1 ? 'Bonus' : 'Bonuses'} ${listNumbers(oddParts)} ${oddParts.length === 1 ? "doesn't" : "don't"} have ${usual.value} parts. A part is probably lost.`));
   }
   if (oddValues.length) {
     out.push(finding('warning', 'bonus-values',
-      `Bonuses here are worth ${usualSum.value} points, but ${oddValues.length === 1 ? 'bonus' : 'bonuses'} ${listNumbers(oddValues)} ${oddValues.length === 1 ? 'is' : 'are'} not.`));
+      `${oddValues.length === 1 ? 'Bonus' : 'Bonuses'} ${listNumbers(oddValues)} ${oddValues.length === 1 ? "isn't" : "aren't"} worth ${usualSum.value} points.`));
   }
   return { usualParts: usual.value };
 }
@@ -308,7 +308,7 @@ function checkText(text, at, out, { guides = true } = {}) {
       if (MOD_NOTE.test(span) || ANSWER_ASIDE.test(span)) continue;
       if (span.length > GUIDE_MAX_CHARS || span.split(/\s+/).length > GUIDE_MAX_WORDS) {
         out.push(finding('warning', 'long-guide',
-          `A ${span.length}-character pronunciation guide: “${span.slice(0, 70)}${span.length > 70 ? '…' : ''}”. Guides are a couple of words; this one has probably swallowed the text after it.`, at));
+          `Long pronunciation guide: “${span.slice(0, 70)}${span.length > 70 ? '…' : ''}”. Probably missing its “]”.`, at));
       }
     }
   }
@@ -317,12 +317,12 @@ function checkText(text, at, out, { guides = true } = {}) {
   const closes = (text.match(/\]/g) || []).length;
   if (opens !== closes) {
     out.push(finding('warning', 'unbalanced-brackets',
-      `${opens} “[” and ${closes} “]” — a pronunciation guide or answer alternative isn't closed.`, at));
+      `${opens} “[” and ${closes} “]”. A bracket isn't closed.`, at));
   }
 
   if (MOJIBAKE.test(text)) {
     out.push(finding('warning', 'mojibake',
-      'Garbled characters — the document was saved in an encoding the parser had to guess at. Check the accents and quotation marks.', at));
+      'Garbled characters. Check the accents and quotation marks.', at));
   }
 }
 
@@ -352,7 +352,7 @@ function checkNumbering(tossups, out) {
 
   if (missing.length) {
     out.push(finding('error', 'missing-question',
-      `The document numbers ${missing.length === 1 ? 'a tossup' : 'tossups'} ${listNumbers(missing)}, but ${missing.length === 1 ? "it isn't" : 'they are not'} in the parsed packet — ${missing.length === 1 ? 'that question' : 'those questions'} did not make it through the conversion.`));
+      `${missing.length === 1 ? 'Tossup' : 'Tossups'} ${listNumbers(missing)} ${missing.length === 1 ? 'is' : 'are'} missing.`));
   }
   if (repeated.length) {
     out.push(finding('warning', 'repeated-number',
@@ -360,7 +360,7 @@ function checkNumbering(tossups, out) {
   }
   if (backwards.length) {
     out.push(finding('warning', 'numbering-order',
-      `The tossup numbers go backwards (${backwards.slice(0, 3).join(', ')}) — the questions may be out of order.`));
+      `Tossup numbers go backwards (${backwards.slice(0, 3).join(', ')}).`));
   }
 }
 
@@ -390,7 +390,7 @@ export function lintPacket(packet, { name = '' } = {}) {
   if (!packet || typeof packet !== 'object' || !Array.isArray(packet.tossups)) {
     return {
       name,
-      findings: [finding('error', 'not-a-packet', 'This isn\'t a packet: there is no list of tossups in it.')],
+      findings: [finding('error', 'not-a-packet', 'Not a packet. It has no tossups list.')],
       summary: { tossups: 0, bonuses: 0 }
     };
   }
@@ -437,7 +437,7 @@ export function lintSet(packets) {
         const n = r.summary.tossups;
         if (n > 0 && n !== usual.value) {
           r.findings.unshift(finding('warning', 'set-count-outlier',
-            `${n} tossups, where every other packet in this set has ${usual.value}. ${n < usual.value ? `${usual.value - n} question${usual.value - n === 1 ? '' : 's'} probably didn't make it through.` : 'Check for a question that got counted twice.'}`));
+            `${n} tossups. The rest of the set has ${usual.value}. ${n < usual.value ? `${usual.value - n} question${usual.value - n === 1 ? '' : 's'} probably lost.` : 'Check for a question counted twice.'}`));
         }
       }
     }

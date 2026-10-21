@@ -72,8 +72,7 @@ function showRooms(access) {
     already.textContent = (access?.director
       ? "You're signed in as this tournament's director, "
       : "You're signed in as a full moderator of this tournament, ") +
-      'so this bye-reader link doesn\'t change anything: you can still read in every room. ' +
-      'To see what a bye reader gets, open the link signed in with a different account.';
+      'so you can read in every room. Use another account to test the bye-reader link.';
   }
   $('#j-approved-full').classList.toggle('hidden', assigned);
   $('#j-approved-assigned').classList.toggle('hidden', !assigned);
@@ -113,11 +112,11 @@ $('#j-request').onclick = async () => {
     tournament = await api('GET', `/api/tournaments/${code}`);
   } catch {
     $('#j-name').textContent = `Tournament ${code}`;
-    return say("This tournament doesn't exist, or it has ended. Check the link with the director.", false);
+    return say("Tournament not found. Check the link with the director.", false);
   }
   $('#j-name').textContent = tournament.name || `Tournament ${code}`;
   if (asBye) {
-    $('#j-ask-text').textContent = 'Ask the director to let you read during your bye rounds. Once they approve you and give you a round and room, it shows up here.';
+    $('#j-ask-text').textContent = 'Ask the director to let you read on your byes. Your rounds show here once assigned.';
     $('#j-request').textContent = 'Request to read on my byes';
   }
   $('#j-date').textContent = tournament.date ? tournament.date : '';

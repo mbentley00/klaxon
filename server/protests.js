@@ -32,11 +32,11 @@
 // accidental-buzz ruling, what the moderator heard) is not protestable.
 export const PROTEST_REASONS = [
   { id: 'rejected', rule: 'H.5.a', label: 'A correct answer was rejected' },
-  { id: 'ambiguous', rule: 'H.5.b', label: 'The question is ambiguous — our answer is also correct' },
+  { id: 'ambiguous', rule: 'H.5.b', label: 'The question is ambiguous. Our answer is also correct' },
   { id: 'too-specific', rule: 'H.5.c', label: 'The listed answer is too specific for the clues' },
   { id: 'no-answer', rule: 'H.5.d', label: 'The question has no single correct answer' },
   { id: 'prompt', rule: 'H.5.e', label: 'We should have been prompted' },
-  { id: 'opponent', rule: 'H.5.f', label: 'The other team was given points for an incorrect answer' }
+  { id: 'opponent', rule: 'H.5.f', label: 'The other team scored with a wrong answer' }
 ];
 const REASON_IDS = new Set(PROTEST_REASONS.map((r) => r.id));
 

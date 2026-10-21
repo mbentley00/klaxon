@@ -84,7 +84,7 @@ $('#feedback-form').addEventListener('submit', async (e) => {
     $('#feedback-form').reset();
     $('#fb-context').textContent = '';
     $('#fb-mic').classList.add('hidden');
-    say('Thanks — that went straight to Michael. He reads all of it.');
+    say('Thanks. Michael reads every message.');
   } catch (err) {
     // If mail isn't wired up (or is failing), the message shouldn't just die:
     // hand them the same content as an email they can send themselves.

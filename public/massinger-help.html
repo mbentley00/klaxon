@@ -28,11 +28,10 @@
   <main class="stage help">
     <section class="panel">
       <h3>MASSINGER tournaments</h3>
-      <p>Before each game, the two teams take turns banning and protecting subcategories of the
-        packet's tossups. The first team bans. Then the second team bans and protects, then the first
-        team bans and protects, and so on until each team has made 3 bans. The last ban ends it.</p>
-      <p>A 26-tossup packet becomes a 20-tossup game. The banned tossups become the tiebreakers, in
-        packet order: if the game is tied after 20, question 21 is the first tossup that was banned.</p>
+      <p>Before each game, teams take turns banning and protecting tossup subcategories. The first
+        team bans. Then each team in turn bans and protects, until each has 3 bans.</p>
+      <p>A 26-tossup packet becomes a 20-tossup game. Banned tossups are the tiebreakers, in packet
+        order.</p>
       <nav aria-label="On this page">
         <ol class="help-toc">
           <li><a href="#director">For the director</a></li>
@@ -57,55 +56,49 @@
 
       <h4>1. Create the tournament</h4>
       <p>On <a href="/new-tournament">Create a tournament</a>, tick <em>MASSINGER pick/ban before each
-        game</em> (at the bottom of the scoring format). Then choose:</p>
+        game</em> under the scoring format. Then choose:</p>
       <ul>
-        <li><strong>Who makes the picks.</strong> <em>Anyone on the team</em> (the default),
-          <em>Each team's captain</em>, <em>Moderator only</em> (players call their picks out loud),
-          or <em>Nobody: random bans, no protects</em>, where Klaxon bans 6 tossups at random and
-          the teams don't pick.</li>
-        <li><strong>The timer</strong>, in seconds per pick (0 for none). When it runs out, Klaxon makes
-          a random pick of the kind that's due.</li>
+        <li><strong>Who makes the picks.</strong> <em>Anyone on the team</em> (default),
+          <em>Each team's captain</em>, <em>Moderator only</em> (players call picks aloud), or
+          <em>Nobody: random bans, no protects</em> (6 random bans).</li>
+        <li><strong>The timer</strong>, in seconds per pick (0 for none). A timeout makes a random pick.</li>
       </ul>
       <figure class="shot">
-        <img src="/img/massinger/01-create.png" width="632" height="252" loading="lazy"
-             alt="The MASSINGER options: a ticked checkbox, a 'Who makes the pick/ban picks' menu set to Anyone on the team, and a 30-second timer." />
+        <img src="/img/massinger/01-create.png" width="632" height="232" loading="lazy"
+             alt="MASSINGER options: checkbox ticked, Anyone on the team, 30-second timer." />
       </figure>
-      <p>You can change both later in the tournament's settings, and a moderator can change them
-        for one game.</p>
+      <p>Both can change later in settings, or per game by the moderator.</p>
 
       <h4>2. Upload packets that qualify</h4>
       <p>Each round's packet needs:</p>
       <ul>
         <li><strong>More than 20 tossups.</strong> 26 uses all six bans.</li>
-        <li><strong>A subcategory on every tossup</strong>, after the author in its metadata, written
-          <em>Category - Subcategory</em>: <code>&lt;Author, Science - Biology&gt;</code>. Commas inside
+        <li><strong>A subcategory on every tossup</strong>, after the author, as
+          <em>Category - Subcategory</em>: <code>&lt;Author, Science - Biology&gt;</code>. Commas in
           the name are fine (<code>History - Cross, Historiography, and Miscellaneous</code>).</li>
         <li><strong>At least two different subcategories.</strong></li>
       </ul>
-      <p>A packet that doesn't qualify is read in full, without a pick/ban. Upload packets on the
-        <strong>Packets &amp; roster</strong> tab. New rounds start hidden from moderators.</p>
-      <p>Under each round, the tab checks the packet: <strong>✓</strong> when it's ready,
-        <strong>⚠</strong> when the pick/ban works but something looks off (tossups with no
-        subcategory, a name where the subcategory should be, the same subcategory spelled two ways),
-        and <strong>✕</strong> when the round won't get a pick/ban, with the reason. Fix the packet
-        and use <strong>Replace…</strong>. <em>Subcategories</em> lists what the teams will see.</p>
+      <p>Other packets are read in full with no pick/ban. Upload on <strong>Packets &amp;
+        roster</strong>. New rounds start hidden.</p>
+      <p>Each round shows <strong>✓</strong> ready, <strong>⚠</strong> works but something looks off,
+        or <strong>✕</strong> no pick/ban, with the reason. Fix the packet and use
+        <strong>Replace…</strong>. <em>Subcategories</em> lists what teams will see.</p>
       <figure class="shot">
-        <img src="/img/massinger/02-packets.png" width="648" height="533" loading="lazy"
-             alt="The Round packets list in the director console: four rounds of 26 tossups each, Round 1 visible, and a Release Round 2 packet button." />
+        <img src="/img/massinger/02-packets.png" width="648" height="739" loading="lazy"
+             alt="Round packets: four 26-tossup rounds, Round 1 visible, Release Round 2 packet button." />
       </figure>
 
       <h4>3. Upload the roster</h4>
-      <p>Also on <strong>Packets &amp; roster</strong>. Moderators then choose teams from a list, and
-        with roster joining on, players pick their team and name when they join.</p>
+      <p>Also on <strong>Packets &amp; roster</strong>. Moderators choose teams from it. With roster
+        joining on, players pick their team when they join.</p>
 
       <h4>4. Rooms and moderators</h4>
-      <p>Add rooms on the <strong>Rooms</strong> tab. Send each moderator their room's reader link, or
-        send everyone the moderator invite link from <strong>Moderators &amp; links</strong> and
-        approve their requests. Share the player landing page or the room links with teams.</p>
+      <p>Add rooms on <strong>Rooms</strong>. Send each moderator a reader link, or send the
+        moderator invite link from <strong>Moderators &amp; links</strong> and approve requests.
+        Share the player landing page or room links with teams.</p>
 
       <h4>5. On the day</h4>
-      <p>Click <strong>Release next packet</strong> for each round. Moderators can only load
-        rounds you've released.</p>
+      <p>Click <strong>Release next packet</strong> for each round.</p>
     </section>
 
     <!-- ============================== MODERATOR ============================== -->
@@ -119,90 +112,81 @@
       </ol>
 
       <h4>1. Pick the round</h4>
-      <p>Open your reader link, or <em>Read here</em> on the invite page. Click the released round,
-        then <strong>Start reading</strong>.</p>
+      <p>Open your reader link or <em>Read here</em>. Click the released round, then
+        <strong>Start reading</strong>.</p>
       <figure class="shot">
-        <img src="/img/massinger/03-mod-setup.png" width="592" height="533" loading="lazy"
-             alt="The moderator setup screen with Round 1 selected under Packet and a Start reading button." />
+        <img src="/img/massinger/03-mod-setup.png" width="592" height="408" loading="lazy"
+             alt="Moderator setup: Round 1 selected, Start reading button." />
       </figure>
 
       <h4>2. Set up the game</h4>
-      <p>Choose the two teams. Every connected player has to be on one of them, because the players
-        make the picks. Untick anyone who starts on the bench. Under <strong>Pick/ban</strong>, check who
-        picks first (a coin flip unless you choose), who makes the picks, and the seconds per pick.
-        Then click <strong>Begin pick/ban</strong>.</p>
-      <p>If the packet has a problem, this screen says so: a yellow note when the pick/ban works but
-        the subcategories look off, or <em>No pick/ban for this round</em> with the reason. Tell the
-        director: once they replace the packet, start the round again.</p>
+      <p>Choose both teams and put every connected player on one. Untick bench players. Under
+        <strong>Pick/ban</strong>, check who picks first (coin flip by default), who picks, and the
+        seconds per pick. Click <strong>Begin pick/ban</strong>.</p>
+      <p>A yellow note means the subcategories look off. <em>No pick/ban for this round</em> gives the
+        reason. Tell the director, and restart the round once they replace the packet.</p>
       <figure class="shot">
         <img src="/img/massinger/04-mod-lobby.png" width="592" height="887" loading="lazy"
-             alt="Set up the game: Lakeside A and Northfield A chosen, four players connected and ticked, and the pick/ban options with a Begin pick/ban button." />
+             alt="Set up the game: two teams, four players ticked, pick/ban options." />
       </figure>
 
       <h4>3. The pick/ban</h4>
-      <p>The players pick on their own screens, and you watch it happen. The screen shows whose turn
-        it is, the clock, and the last pick. You can also make a pick yourself (the <em>Ban</em> and
-        <em>Protect</em> buttons), use <strong>Random ban</strong>, <strong>Undo last</strong> or
-        <strong>Edit picks</strong>, or <strong>Restart</strong>.</p>
+      <p>Players pick on their screens. You see the turn, clock and last pick. You can also use
+        <em>Ban</em>, <em>Protect</em>, <strong>Random ban</strong>, <strong>Undo last</strong>,
+        <strong>Edit picks</strong> or <strong>Restart</strong>.</p>
       <figure class="shot">
         <img src="/img/massinger/07-mod-pickban.png" width="752" height="940" loading="lazy"
-             alt="The moderator's pick/ban screen: Lakeside A to ban with 29 seconds left, both teams' cards, and the board with Science - Biology protected and Literature - British banned." />
+             alt="Moderator pick/ban: Lakeside A to ban, 29 seconds left, one protect and one ban on the board." />
       </figure>
-      <p>When it's done, click <strong>Continue to the game</strong>.</p>
+      <p>Then click <strong>Continue to the game</strong>.</p>
       <figure class="shot">
         <img src="/img/massinger/09-mod-done.png" width="752" height="908" loading="lazy"
-             alt="Pick/ban complete, 20 questions remain: three categories banned and three protected, with a Continue to the game (20 questions) button." />
+             alt="Pick/ban complete: three bans, three protects, Continue to the game button." />
       </figure>
-      <p>With random bans, there's one button, <strong>Draw the bans</strong>, and
-        <strong>Redraw</strong> if you need to start over.</p>
+      <p>With random bans, click <strong>Draw the bans</strong>. <strong>Redraw</strong> starts over.</p>
 
       <h4>4. Read</h4>
-      <p>The game has the 20 questions that are left. Buzzes appear in the panel on the right: the
-        player's name and team pop up in large type, and the window's edges flash, so you won't miss
-        one while you're reading. At the end, click <strong>Save &amp; next game</strong>. This files the
-        game and downloads a backup copy, then goes back to the setup screen for the next round.</p>
+      <p>The game has the 20 remaining questions. Buzzes show on the right in large type, and the
+        window edges flash. At the end, click <strong>Save &amp; next game</strong> to file the game,
+        download a backup and return to setup.</p>
       <figure class="shot wide">
         <img src="/img/massinger/10-mod-buzz.png" width="1050" height="540" loading="lazy"
-             alt="Reading in MODAQ: the question on the left, and on the right a large purple card reading BUZZ, Jordan Lee, Northfield A." />
+             alt="Reading in MODAQ with a buzz card for Jordan Lee, Northfield A." />
       </figure>
     </section>
 
     <!-- ============================== PLAYERS ============================== -->
     <section class="panel" id="players">
       <h3>For players</h3>
-      <p>Join the room and pick your team and name. While the moderator sets up the game, the pick/ban
-        panel says <em>Starting soon</em>.</p>
+      <p>Join and pick your team and name. The panel says <em>Starting soon</em> during setup.</p>
       <figure class="shot">
-        <img src="/img/massinger/05-player-soon.png" width="396" height="241" loading="lazy"
-             alt="The player's pick/ban panel: Starting soon, the moderator is setting the teams." />
+        <img src="/img/massinger/05-player-soon.png" width="396" height="217" loading="lazy"
+             alt="Player pick/ban panel: Starting soon." />
       </figure>
-      <p>When it's your team's turn, your screen says so in large type, and each subcategory has a
-        <em>Ban</em> or <em>Protect</em> button. Anyone on the team can pick unless the director chose
-        captains or the moderator. When it's the other team's turn, you watch the picks arrive.</p>
+      <p>On your team's turn, each subcategory has a <em>Ban</em> or <em>Protect</em> button. Anyone
+        on the team can pick unless the director chose captains or the moderator.</p>
       <div class="shot-pair">
         <figure class="shot">
-          <img src="/img/massinger/06-player-turn.png" width="396" height="900" loading="lazy"
-               alt="A phone on Lakeside A's turn: Your ban, a 29-second clock, and Ban buttons on each subcategory." />
-          <figcaption>Your team's turn</figcaption>
+          <img src="/img/massinger/06-player-turn.png" width="396" height="880" loading="lazy"
+               alt="Phone on its team's turn: Your ban, clock, Ban buttons." />
+          <figcaption>Your turn</figcaption>
         </figure>
         <figure class="shot">
           <img src="/img/massinger/08-player-waiting.png" width="396" height="909" loading="lazy"
-               alt="A phone on Northfield A while Lakeside A picks: Waiting for Lakeside A to pick, and the last pick, Science - Biology protected." />
-          <figcaption>The other team's turn</figcaption>
+               alt="Phone waiting for the other team, showing its last pick." />
+          <figcaption>Their turn</figcaption>
         </figure>
       </div>
-      <p>The pick/ban sounds have their own switch, <strong>Pick sounds on/off</strong>, at the top
-        of the panel. It doesn't affect the buzz sound.</p>
+      <p><strong>Pick sounds on/off</strong> at the top of the panel mutes pick sounds only.</p>
     </section>
 
     <!-- ============================== AFTER ============================== -->
     <section class="panel" id="after">
       <h3>After the games</h3>
-      <p>Stats work as in any tournament. Every exported game records its picks and bans by
-        category, and the buzzpoints download includes a <code>klaxon_massinger_picks.csv</code>.
-        Buzzes are numbered by the full packet, so each buzz lands on the right question even though
-        each room read a different 20. If a packet was edited after a game was played on it,
-        <code>klaxon_numbering_warnings.json</code> in the zip lists the games to check.</p>
+      <p>Stats work as usual. Exports record picks and bans by category, and the buzzpoints zip
+        includes <code>klaxon_massinger_picks.csv</code>. Buzzes are numbered by the full packet. If
+        a packet changed after a game, <code>klaxon_numbering_warnings.json</code> lists the games
+        to check.</p>
     </section>
 
     <!-- ============================== FAQ ============================== -->
@@ -210,27 +194,24 @@
       <h3>Questions</h3>
       <details>
         <summary>A player clicked too late and their pick didn't go through.</summary>
-        <p>Picks are refused if the board has moved on since that screen last updated. The player sees
-          why and can pick again. After a team's ban, there's a 2.5-second pause before the same team's
-          protect, so nobody protects by accident with a double click.</p>
+        <p>The board had moved on. The player sees why and can pick again. A team's protect waits
+          2.5 seconds after its ban to stop double-click mistakes.</p>
       </details>
       <details>
         <summary>Someone made the wrong pick.</summary>
-        <p>The moderator can use <strong>Undo last</strong>, or <strong>Edit picks</strong> to change
-          any pick.</p>
+        <p>The moderator can use <strong>Undo last</strong> or <strong>Edit picks</strong>.</p>
       </details>
       <details>
         <summary>A player can't pick: it says the room doesn't know their team.</summary>
-        <p>On the moderator's <em>Set up the game</em> screen, put that player on their team.</p>
+        <p>The moderator puts them on their team in <em>Set up the game</em>.</p>
       </details>
       <details>
         <summary>The game is tied after 20 questions.</summary>
-        <p>Read on: question 21 is the first banned tossup in packet order, then the next banned
-          one, and so on.</p>
+        <p>Read the banned tossups in packet order.</p>
       </details>
       <details>
         <summary>One packet has no subcategories.</summary>
-        <p>That round is read in full, with no pick/ban. The others are unaffected.</p>
+        <p>That round is read in full with no pick/ban.</p>
       </details>
       <p class="help-link"><a href="/tournament-help">Everything else about tournaments →</a></p>
     </section>

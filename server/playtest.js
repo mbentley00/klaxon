@@ -21,10 +21,10 @@
 // worse than no tag. "error" is factual (something in it is wrong); the other
 // three are judgements a writer can act on without further explanation.
 export const FEEDBACK_TAGS = [
-  { id: 'error', label: 'Question error', hint: 'Something in it is factually wrong' },
-  { id: 'early', label: 'Clue too early', hint: 'A giveaway clue came before it should have' },
+  { id: 'error', label: 'Question error', hint: 'Something in it is wrong' },
+  { id: 'early', label: 'Clue too early', hint: 'A giveaway came too early' },
   { id: 'hard', label: 'Too hard', hint: 'Nobody in the room could get it' },
-  { id: 'great', label: 'Great question', hint: 'Worth keeping as it is' }
+  { id: 'great', label: 'Great question', hint: 'Keep it as it is' }
 ];
 const TAG_IDS = new Set(FEEDBACK_TAGS.map((t) => t.id));
 

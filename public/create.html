@@ -26,25 +26,24 @@
   <main class="stage create-page">
     <form id="create-form" class="panel create-form">
       <h3>Create a room</h3>
-      <p class="hint">A room is for one game at a time. Doing several rounds?
-        <a href="/tournament-mode">Use Tournaments</a> instead.</p>
+      <p class="hint">One game at a time. Several rounds? <a href="/tournament-mode">Use Tournaments</a>.</p>
 
       <label class="toggle create-modaq"><input type="checkbox" id="use-modaq" checked />
         <span><strong>Use MODAQ</strong>
-          <span class="hint">Read the packet in Klaxon; scores, buzz points and stats kept as you go.</span></span></label>
+          <span class="hint">Read the packet here. Keeps score and stats.</span></span></label>
 
       <fieldset class="create-format">
         <legend>Who's playing?</legend>
         <label class="toggle"><input type="radio" name="format" value="teams" checked />
-          <span><strong>Teams</strong> <span class="hint">Standard quizbowl of two teams.</span></span></label>
+          <span><strong>Teams</strong> <span class="hint">Two teams.</span></span></label>
         <label class="toggle"><input type="radio" name="format" value="shootout" />
-          <span><strong>Shootout</strong> <span class="hint">Everyone for themselves, with a buzz queue and a chat.</span></span></label>
+          <span><strong>Shootout</strong> <span class="hint">Everyone for themselves, with a queue and chat.</span></span></label>
       </fieldset>
 
       <!-- A footnote, not a caution: nothing is lost without an account, and a
            warning box here put people off reading at all. -->
-      <p id="no-account-warn" class="hint hidden">Your games are saved in this browser
-        (<a href="/games">Your games</a>). <a href="/account?return=/create">Log in</a> to keep them on any device.</p>
+      <p id="no-account-warn" class="hint hidden"><a href="/games">Your games</a> are saved in this browser.
+        <a href="/account?return=/create">Log in</a> to keep them on any device.</p>
 
       <details class="create-more">
         <summary>Game options</summary>
@@ -80,7 +79,7 @@
         </fieldset>
         <fieldset class="opt-defaults" id="opt-evening-set">
           <legend>Practice</legend>
-          <label class="toggle"><input type="checkbox" id="opt-evening" /> Running totals for the evening (each player's points across packets)</label>
+          <label class="toggle"><input type="checkbox" id="opt-evening" /> Running totals across packets</label>
         </fieldset>
         <fieldset class="opt-defaults">
           <legend>Finding the game</legend>

@@ -33,7 +33,7 @@
     <nav class="tabbar" id="tabbar" role="tablist">
       <button class="tab" data-tab="rooms">Rooms</button>
       <button class="tab" data-tab="packets">Packets &amp; roster</button>
-      <button class="tab" data-tab="results">Results</button>
+      <button class="tab" data-tab="results">Game Data &amp; Protests</button>
       <button class="tab" data-tab="stats">Stats</button>
       <button class="tab" data-tab="settings">Moderators &amp; links</button>
     </nav>
@@ -47,16 +47,13 @@
         <input id="room-qty" type="number" min="1" max="50" value="1" aria-label="How many rooms" />
         <button id="add-rooms" class="primary">Add</button>
       </div>
-      <p class="hint">Each room gets a player link and a private reader link. Hand the
-        reader link to whoever moderates that room; share the player link (or room code)
-        with the teams.</p>
+      <p class="hint">Reader links go to moderators. Player links go to teams.</p>
       <p id="t-msg" class="msg"></p>
     </section>
 
     <section class="panel" id="bulk-panel" data-tab="rooms">
       <h3>Copy for spreadsheet</h3>
-      <p class="hint">Tab-separated — paste into Google Sheets / Excel and each room fills a
-        row across columns. Or grab a single column of links.</p>
+      <p class="hint">Pastes into Sheets or Excel, one room per row.</p>
       <div class="bulk-btns">
         <button id="copy-table" class="primary tiny">Copy full table</button>
         <button id="copy-players" class="ghost tiny">Copy player links</button>
@@ -71,14 +68,13 @@
     <section class="panel" data-tab="rooms">
       <h3>Rooms <span id="room-count" class="muted-count"></span></h3>
       <div id="rooms-list" class="rooms-list"></div>
-      <p id="rooms-empty" class="hint">No rooms yet — add some above.</p>
+      <p id="rooms-empty" class="hint">No rooms yet.</p>
     </section>
 
     <!-- Message readers (director only) -->
     <section class="panel" id="message-panel" data-tab="rooms">
       <h3>Message readers</h3>
-      <p class="hint">Pops up in the moderator's MODAQ view — e.g. an erratum announcement or
-        "hold for the last room". Players never see it.</p>
+      <p class="hint">Pops up for moderators only.</p>
       <div class="sound-row">
         <select id="msg-target" aria-label="Which rooms">
           <option value="ALL">All rooms</option>
@@ -92,8 +88,7 @@
     <!-- ========================= PACKETS & ROSTER ========================= -->
     <section class="panel" id="packets-panel" data-tab="packets">
       <h3>Packets &amp; roster</h3>
-      <p class="hint" id="modaq-gate-hint">Moderators load each round's packet in their MODAQ view;
-        rooms prefill teams from the roster below.</p>
+      <p class="hint" id="modaq-gate-hint"></p>
 
       <div class="modaq-block">
         <label class="vol"><input type="checkbox" id="player-scoresheet" />
@@ -115,7 +110,7 @@
       <!-- Hidden for now unless the tournament is already a playtest (see initPlaytest). -->
       <div class="modaq-block hidden" id="playtest-block">
         <label class="vol"><input type="checkbox" id="playtest" />
-          playtest — players see the answer line once the room is past a cycle, and can flag the question</label>
+          playtest: players see answer lines after each cycle and can flag questions</label>
         <div class="sound-row" id="playtest-row">
           <button id="playtest-refresh" class="ghost tiny">Refresh feedback</button>
           <button id="playtest-download" class="ghost tiny">Download feedback</button>
@@ -131,14 +126,13 @@
           <ul id="roster-alerts-list"></ul>
           <button id="roster-alerts-clear" class="ghost tiny">Clear these</button>
         </div>
-        <p class="hint">Copy the rows from your registration spreadsheet, header row included, then click
-          <b>Paste or edit roster</b> and paste them into the box at the top. MODAQ rooms in this
-          tournament use the roster to prefill teams.</p>
+        <p class="hint">Copy your registration rows with the header row, then click
+          <b>Paste or edit roster</b>.</p>
         <div class="sound-row">
           <button id="roster-edit" class="primary">Paste or edit roster</button>
           <button id="roster-upload" class="ghost">Upload QBJ file…</button>
           <input type="file" id="roster-file" class="hidden" accept=".qbj,.json,application/json" />
-          <button id="roster-yf" class="ghost" title="The whole tournament as a .yft (File &gt; Open), and the roster as a QBJ (File &gt; QBJ Schema &gt; Import Teams and Rosters Only)">Download for YellowFruit</button>
+          <button id="roster-yf" class="ghost" title="Tournament .yft plus roster .qbj">Download for YellowFruit</button>
         </div>
       </div>
 
@@ -149,10 +143,8 @@
           <label class="vol"><input type="checkbox" id="packet-tiebreaker" /> tiebreaker</label>
           <button id="packet-upload" class="primary tiny">Upload packets</button>
         </div>
-        <p class="hint">Each file's name becomes the round label. <span id="packets-release-hint">New rounds are hidden from moderators —
-          toggle a round visible to release it.</span> Tiebreaker packets are a pool moderators can sub in.
-          Got Word files? Turn them into JSON with the
-          <a href="/yapp" target="_blank" rel="noopener">packet parser</a>.</p>
+        <p class="hint">File name = round label. <span id="packets-release-hint">New rounds start hidden.</span>
+          Word files? Use the <a href="/yapp" target="_blank" rel="noopener">packet parser</a>.</p>
         <div class="sound-row">
           <button id="release-next" class="primary tiny" disabled>Release next packet</button>
           <label class="vol"><input type="checkbox" id="auto-release" />
@@ -164,7 +156,6 @@
       <div class="modaq-block">
         <h4>Tiebreakers used <span id="tb-count" class="muted-count"></span>
           <button id="tb-refresh" class="tiny ghost">Refresh</button></h4>
-        <p class="hint">Which tiebreaker questions have been read, and the teams that have heard them.</p>
         <ul id="tb-list" class="players"></ul>
         <p id="tb-empty" class="hint">No tiebreaker packets released yet.</p>
       </div>
@@ -172,26 +163,23 @@
 
     <!-- ============================== RESULTS ============================== -->
     <section class="panel" id="results-panel" data-tab="results">
-      <h3>Results</h3>
+      <h3>Game Data &amp; Protests</h3>
 
       <div class="modaq-block">
         <h4>Match stats <span id="exports-count" class="muted-count"></span>          <button id="exports-refresh" class="tiny ghost">Refresh</button></h4>
-        <p class="hint">Moderators' MODAQ stats sync here live as they read — one QBJ per match, always
-          current. Grouped by round; click a room to download that match.</p>
+        <p class="hint">Games appear here as they're read. Click a room to download its QBJ.</p>
         <ul id="exports-list" class="players export-rounds"></ul>
         <p id="exports-empty" class="hint">No matches synced yet.</p>
         <div class="sound-row">
           <input type="file" id="yf-file" accept=".yft,.json,application/json" />
           <button id="yf-import" class="ghost tiny">Import YellowFruit file</button>
         </div>
-        <p class="hint">Fixed games in YellowFruit? Upload your .yft file — games matching a synced
-          match (same round, same teams) replace it; games we've never seen are added.</p>
+        <p class="hint">Games with the same round and teams are replaced. New games are added.</p>
       </div>
 
       <div class="modaq-block">
         <h4>Errata <span id="errata-count" class="muted-count"></span>
           <button id="errata-refresh" class="tiny ghost">Refresh</button></h4>
-        <p class="hint">Corrections moderators noted while reading.</p>
         <ul id="errata-list" class="players"></ul>
         <p id="errata-empty" class="hint">No errata reported.</p>
       </div>
@@ -208,8 +196,6 @@
           <button id="protests-notify" class="tiny ghost" aria-pressed="false">Notify me</button></h4>
         <p id="protests-notify-note" class="hint hidden"></p>
         <ul id="room-protests-list" class="players room-protests hidden"></ul>
-        <p class="hint">Protests moderators recorded in MODAQ. While the game is live a protest is
-          pending; once it's final, a protest either could still change the result or is moot.</p>
         <ul id="protests-list" class="players"></ul>
         <div id="replay-links" class="replay-links hidden"></div>
         <p id="protests-empty" class="hint">No protests lodged.</p>
@@ -219,18 +205,16 @@
     <!-- Tournament structure: phases + divisions (director only) -->
     <section class="panel" id="structure-panel" data-tab="stats">
       <h3>Tournament structure</h3>
-      <p class="hint">Group rounds into phases (Prelims, Playoffs…) and teams into divisions/tiers so the
-        stat report is split like YellowFruit. Optional — without it, all games are one phase.</p>
+      <p class="hint">Optional. Splits the stat report by phase and division.</p>
       <div class="modaq-block">
         <h4>Phases</h4>
-        <p class="hint">One per line as <code>Phase name: rounds</code> — e.g. <code>Prelims: 1,2,3,4</code>. A number matches the round named “Round 1” (“PARAGONE Round 1”…); for any other round, write its name as it appears in the stats.</p>
+        <p class="hint">One per line: <code>Prelims: 1,2,3,4</code>. A number matches “Round 1”. Write other rounds by name.</p>
         <textarea id="phases-text" class="tsv-preview" rows="4" spellcheck="false"
           placeholder="Prelims: 1,2,3,4,5,6,7&#10;Playoffs: 8,9,10,11"></textarea>
       </div>
       <div class="modaq-block">
         <h4>Divisions / tiers <span id="div-count" class="muted-count"></span>
           <button id="div-add" class="tiny ghost">Add division</button></h4>
-        <p class="hint">Assign teams to a division within a phase (e.g. Playoffs → 1st bracket).</p>
         <div id="div-rows"></div>
       </div>
       <button id="structure-save" class="primary tiny">Save structure</button>
@@ -242,9 +226,7 @@
     <!-- Player landing page (secret link, director only to fetch) -->
     <section class="panel" id="player-page-panel" data-tab="settings">
       <h3>Player landing page</h3>
-      <p class="hint">One link for players with everything: the rooms and their join codes, live
-        stats, and your schedule/Discord links. It's a secret link — the tournament code alone
-        doesn't unlock it — so share it only with your teams.</p>
+      <p class="hint">One secret link with rooms, stats, schedule and Discord. Share it with teams only.</p>
       <label class="share-row">
         <span>Player link</span>
         <span class="copy-field">
@@ -258,8 +240,7 @@
     <!-- Player-facing links (director only to edit; players see them in rooms) -->
     <section class="panel" id="links-panel" data-tab="settings">
       <h3>Player links</h3>
-      <p class="hint">Shown to players in every room of this tournament — point them at the
-        schedule and your Discord server.</p>
+      <p class="hint">Shown in every room.</p>
       <div class="sound-row">
         <input id="link-schedule" placeholder="Schedule link (https://…)" />
       </div>
@@ -282,9 +263,7 @@
           <a id="mod-invite-open" class="btnlink tiny" target="_blank" rel="noopener">Open</a>
         </span>
       </label>
-      <p class="hint">Send this to your moderators. They sign in or create an account and ask to join;
-        their requests show up below for you to approve. Once approved they can read in any room
-        of this tournament without a reader link.</p>
+      <p class="hint">For moderators. Approve their requests below. Approved moderators can read in any room.</p>
       <label class="share-row">
         <span>Player reading during a bye round</span>
         <span class="copy-field">
@@ -293,10 +272,7 @@
           <a id="bye-invite-open" class="btnlink tiny" target="_blank" rel="noopener">Open</a>
         </span>
       </label>
-      <p class="hint">Send this one to players who read on their byes. Their requests come in as
-        <strong>Assigned rounds only</strong> with no rounds, so approving them lets them read nowhere
-        until you give them a round and room below. They see only those packets, and are players
-        everywhere else.</p>
+      <p class="hint">For players who read on their byes. After approving, assign their rounds below.</p>
       <div class="sound-row">
         <input id="member-add-id" placeholder="Email or username of a registered account" />
         <button id="member-add" class="primary tiny">Add moderator</button>
@@ -313,9 +289,9 @@
       <div class="modaq-block">
         <h4>Games in progress <span id="live-count" class="muted-count"></span></h4>
         <ul id="live-list" class="players"></ul>
-        <p id="live-empty" class="hint">No games in progress right now.</p>
+        <p id="live-empty" class="hint">No games in progress.</p>
       </div>
-      <p class="hint">Standings, individuals and box scores, live. Public; no answer lines.</p>
+      <p class="hint">Public. No answer lines.</p>
       <label class="share-row">
         <span>Public stats link</span>
         <span class="copy-field">
@@ -333,18 +309,18 @@
           <a id="buzzpoints-open" class="btnlink tiny" target="_blank" rel="noopener">Open report</a>
           <a id="buzzpoints-csv" class="btnlink tiny ghost">CSV</a>
           <a id="buzzpoints-zip" class="btnlink tiny ghost"
-            title="The data/ folder buzzpoint-migrator builds quizbowlbuzzpoints.com from: packets as JSON, games as .qbj, and index files. Fill in difficulty and level in its two index.json files.">quizbowlbuzzpoints.com (.zip)</a>
+            title="buzzpoint-migrator data/ folder. Fill in difficulty and level in both index.json files.">quizbowlbuzzpoints.com (.zip)</a>
           <a id="buzzpoints-games" class="btnlink tiny ghost"
-            title="For a set already on quizbowlbuzzpoints.com: just the games, as Round_N_Team_Team.qbj (N = the round's place in the Packets list), naming packets by the files you uploaded.">Games only (.zip)</a>
+            title="Games only, for a set already on quizbowlbuzzpoints.com.">Games only (.zip)</a>
         </div>
         <label class="vol" style="margin-top: 14px"><input type="checkbox" id="buzz-points" />
-          also record every buzz attempt, including ones that lost the race to the lock</label>
+          also record buzzes that lost the race</label>
         <p class="hint" id="buzz-points-note"></p>
       </div>
 
       <div class="modaq-block">
         <h4>Temporary share links</h4>
-        <p class="hint">Expire in 7 days; revoke any time. Buzzpoint links show answer lines.</p>
+        <p class="hint">Buzzpoint links show answer lines.</p>
         <div class="row">
           <button id="share-new-stats" class="tiny">New stats link (7 days)</button>
           <button id="share-new-buzzpoints" class="tiny">New buzzpoints link (7 days)</button>
@@ -365,7 +341,7 @@
     <div class="roster-body">
       <label class="roster-paste-label" for="roster-paste">Paste from your spreadsheet</label>
       <textarea id="roster-paste" rows="2"
-        placeholder="Copy the rows, header row included (Team Name, Player 1, Player 2…), and paste here. Emails and other columns are left out."></textarea>
+        placeholder="Paste rows with the header row (Team Name, Player 1, Player 2…)"></textarea>
       <p id="roster-paste-note" class="hint"></p>
       <div class="roster-scroll">
         <table id="roster-grid" class="roster-grid">

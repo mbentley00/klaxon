@@ -143,7 +143,7 @@ socket.on('kicked', (info) => {
     showGate('player');
     $('#gate-join').textContent = 'Join again';
     const msg = $('#gate-msg');
-    msg.textContent = "You've left the game. Your score is kept — join again any time.";
+    msg.textContent = "You've left. Your score is kept.";
     msg.className = 'msg good';
     return;
   }
@@ -155,7 +155,7 @@ socket.on('kicked', (info) => {
     showGate('player');
     $('#gate-join').textContent = 'Join the next game';
     const msg = $('#gate-msg');
-    msg.textContent = 'That game is over. The reader is starting the next one — join again to play.';
+    msg.textContent = 'That game is over. Join again for the next one.';
     msg.className = 'msg good';
     return;
   }
@@ -166,11 +166,11 @@ socket.on('kicked', (info) => {
     document.body.classList.remove('has-chat', 'has-sheet');
     showGate('player');
     $('#gate-join').textContent = 'Join';
-    $('#gate-msg').textContent = 'The host ended this game. Thanks for playing!';
+    $('#gate-msg').textContent = 'The host ended this game.';
     $('#gate-msg').className = 'msg good';
     return;
   }
-  alert('You were removed from this room by the reader.');
+  alert('The reader removed you from this room.');
   location.href = '/';
 });
 
@@ -296,7 +296,7 @@ function updateRosterGate() {
   $('#gate-team').classList.toggle('hidden', teamSel.value !== NOT_ON_ROSTER);
   $('#gate-name').placeholder = 'Your name';
   $('#gate-msg').textContent = custom
-    ? "You'll join as a guest and the tournament director will be told you're not on the roster."
+    ? "You'll join as a guest. The director will be told."
     : '';
 }
 
@@ -382,14 +382,14 @@ function doJoin(role, name, team, roster) {
       if (resp?.error === 'team_required') roomInfo = { ...(roomInfo || {}), requireTeam: true };
       showGate('player');
       $('#gate-msg').textContent = resp?.error === 'no_room'
-        ? `Room ${code} doesn't exist — it may have expired. Check the code or ask for a new link.`
+        ? `No room ${code}. Check the code or ask for a new link.`
         : resp?.error === 'game_ended'
-          ? 'This game is over — the host closed it. Ask them for a new room.'
+          ? 'This game is over. Ask the host for a new room.'
           : resp?.error === 'team_required'
-            ? 'This room requires a team name — enter yours to join.'
+            ? 'Enter a team name to join.'
             : resp?.error === 'full_name_required'
-              ? 'Enter your first and last name — at least 2 letters each.'
-              : 'Could not join — try again.';
+              ? 'Enter a first and last name, 2+ letters each.'
+              : 'Could not join. Try again.';
       if (resp?.error === 'team_required') $('#gate-team').focus();
       return;
     }
@@ -413,12 +413,12 @@ function doJoin(role, name, team, roster) {
       state.role = null;
       showGate('player');
       $('#gate-msg').textContent = {
-        not_logged_in: 'Moderators: sign in with your reader account below, then try again.',
-        not_approved: "Your account isn't approved for this tournament yet — request access below, or ask the director to add you (they can use your email).",
-        no_tournament: "This room isn't part of a tournament, so only its reader link grants control.",
-        not_assigned: "You read only the rounds the director assigned you, and none of them is in this room. Join as a player below.",
-        not_your_round: "This room is reading a round you weren't assigned. You can read here when your round comes up; join as a player for now.",
-      }[resp.denyReason] || 'Staff credentials invalid — open the room from your reader link.';
+        not_logged_in: 'Moderators: sign in below, then try again.',
+        not_approved: "Not approved for this tournament yet. Request access below or ask the director.",
+        no_tournament: "Not a tournament room. Use its reader link.",
+        not_assigned: "None of your assigned rounds is in this room. Join as a player below.",
+        not_your_round: "This isn't your round. Join as a player for now.",
+      }[resp.denyReason] || 'Staff link invalid. Open the room from your reader link.';
       // Not approved (but logged in): offer the access request right here.
       const tcode = resp.state?.tournamentCode;
       if (resp.denyReason === 'not_approved' && tcode) {
@@ -461,7 +461,7 @@ $('#gate-join').onclick = () => {
       const letters = (v) => (v.match(/\p{L}/gu) || []).length;
       const bad = letters(first) < 2 ? '#gate-first' : letters(last) < 2 ? '#gate-last' : null;
       if (bad) {
-        $('#gate-msg').textContent = 'Enter your first and last name — at least 2 letters each.';
+        $('#gate-msg').textContent = 'Enter a first and last name, 2+ letters each.';
         $(bad).focus();
         return;
       }
@@ -501,11 +501,11 @@ $('#gate-request').onclick = async () => {
   try {
     const { status } = await api('POST', `/api/tournaments/${tcode}/access`, { sessionToken });
     if (status === 'approved') {
-      $('#gate-msg').textContent = "You're approved — joining…";
+      $('#gate-msg').textContent = "Approved. Joining…";
       doJoin('reader', $('#gate-name').value.trim() || recall('name') || undefined);
     } else {
       $('#gate-msg').textContent =
-        'Request sent — pending the director\'s approval. Once approved, click "Moderator? Start reading" again.';
+        'Request sent. Once the director approves, click "Moderator? Start reading" again.';
     }
   } catch (e) {
     $('#gate-msg').textContent = 'Could not request access: ' + e.message;
@@ -743,7 +743,7 @@ socket.on('roster_alert', (alert) => {
   if (!isStaffRole(state.role) || !alert) return;
   const banner = $('#stuck-banner');
   banner.classList.remove('hidden');
-  banner.textContent = `${alert.name}${alert.team ? ` (${alert.team})` : ''} joined but isn't on the roster.`;
+  banner.textContent = `${alert.name}${alert.team ? ` (${alert.team})` : ''} isn't on the roster.`;
 });
 
 // At a tournament a room is "Room 3" to everyone in it -- that is what the
@@ -932,7 +932,7 @@ $('#me-team-form')?.addEventListener('submit', (e) => {
     remember('team', team);
     closeTeamForm();
     msg.textContent = resp.pending
-      ? "You're in this game for your old team; you'll play for the new one from the next packet."
+      ? "You'll switch teams next packet."
       : '';
   });
 });
@@ -948,7 +948,7 @@ function renderNextPacket(s) {
   const me = (s.members || []).find((m) => m.id === state.me.id);
   if (!me) return;
   const banner = $('#next-banner');
-  banner.textContent = `Packet ${n} is starting — you're still in` + (me.effectiveTeam ? `, on ${me.effectiveTeam}.` : '.');
+  banner.textContent = `Packet ${n}. You're still in` + (me.effectiveTeam ? `, on ${me.effectiveTeam}.` : '.');
   banner.classList.remove('hidden');
   clearTimeout(nextBannerTimer);
   nextBannerTimer = setTimeout(() => banner.classList.add('hidden'), 15000);
@@ -1160,7 +1160,7 @@ function renderFullSheet(s) {
     return;
   }
 
-  $('#sheet-title').textContent = sheet.current ? `Scoresheet — through question ${sheet.current}` : 'Scoresheet';
+  $('#sheet-title').textContent = sheet.current ? `Scoresheet through question ${sheet.current}` : 'Scoresheet';
   // The totals, in the same order as the columns under them.
   $('#sheet-scores').replaceChildren(...sheet.teams.map((team, i) => el('span', { className: 'sheet-total' },
     el('span', { className: 'sheet-total-name', textContent: team.name }),
@@ -1292,7 +1292,7 @@ function renderMassingerLastPick(m) {
     msLastPickOff = setTimeout(() => box.classList.add('hidden'), left);
   }
   const ban = a.type === 'ban';
-  const how = m.control === 'random' ? 'random bans' : a.by === 'timeout' ? ' · time ran out, random pick' : a.by === 'random' ? ' · random pick'
+  const how = m.control === 'random' ? 'random bans' : a.by === 'timeout' ? ' · timed out, random pick' : a.by === 'random' ? ' · random pick'
     : a.by && a.by !== 'moderator' ? ` · ${a.by}` : ' · by the moderator';
   box.replaceChildren(
     el('span', { className: 'ms-lastpick-icon', textContent: ban ? '✕' : '🛡' }),
@@ -1412,8 +1412,8 @@ function renderAnswers(s) {
   }
 
   $('#answer-hint').textContent = active
-    ? 'You have the buzzer. Type your answer and press Enter to give it. The room sees nothing until you do — or until the moderator asks for it.'
-    : 'Commit an answer before the player with the buzzer gives theirs. Only the moderator sees it.';
+    ? 'Your buzz. Type your answer and press Enter.'
+    : 'Commit an answer before the buzzed player gives theirs. Only the moderator sees it.';
 
   // The player with the FLOOR has no clock. They are the one being asked the
   // question, and the moderator gives them as long as they give them: a box
@@ -1425,7 +1425,7 @@ function renderAnswers(s) {
     box.disabled = false;
     box.classList.remove('append-only');
     if (!answerSpokenAt) {
-      $('#answer-note').textContent = 'Press Enter when that\u2019s your answer.';
+      $('#answer-note').textContent = 'Press Enter to give it.';
     }
     renderSpoken(a);
     return;
@@ -1450,13 +1450,13 @@ function renderAnswers(s) {
       box.classList.toggle('append-only', appendOnly);
       $('#answer-note').textContent = left > 0
         ? (appendOnly
-          ? 'Finish your word — you can add to your answer, but not take any of it back.'
+          ? 'Finish your word. You can add, not delete.'
           : freeWithdrawals
-            ? 'While this runs you can withdraw for nothing. After it you can still answer, but a withdrawal may cost you.'
-            : 'Commit an answer before this runs out. You can still add to it afterwards while the moderator gives them longer.')
+            ? 'Withdrawing is free until this runs out.'
+            : 'Commit an answer before this runs out.')
         : (freeWithdrawals
-          ? 'The free window has passed. You can still add to your answer — the moderator may give them longer — but withdrawing may cost you now.'
-          : 'You can still add to your answer while the moderator gives them longer.');
+          ? 'Withdrawing may cost you now. You can still add to your answer.'
+          : 'You can still add to your answer.');
       if (left <= 0) {
         clearInterval(answerTick);
         answerTick = null;
@@ -1502,7 +1502,7 @@ $('#answer-box').addEventListener('keydown', (e) => {
   // thing (answers.speak), but a page that sends it anyway leaves the player
   // watching for a change that can't come, so it is answered here too.
   if (text === answerSentText && Date.now() - answerSpokenAt < 1500) {
-    $('#answer-note').textContent = 'Already sent — change it and press Enter to give a different answer.';
+    $('#answer-note').textContent = 'Already sent. Change it to give another.';
     return;
   }
   socket.emit('answer_spoken', { text }, (res) => {
@@ -1510,8 +1510,8 @@ $('#answer-box').addEventListener('keydown', (e) => {
     answerSpokenAt = Date.now();
     answerSentText = text;
     $('#answer-note').textContent = res.already
-      ? 'Already sent — change it and press Enter to give a different answer.'
-      : 'Sent. You can change it and press Enter again until the moderator rules.';
+      ? 'Already sent. Change it to give another.'
+      : 'Sent. You can change it until the moderator rules.';
   });
 });
 
@@ -1533,7 +1533,7 @@ $('#answer-box').addEventListener('input', () => {
       // showing something that was never committed.
       answerCommitted = res.text ?? answerCommitted;
       box.value = answerCommitted;
-      $('#answer-note').textContent = "You can't take an answer back now — only add to it.";
+      $('#answer-note').textContent = "Too late to delete. You can only add.";
     }
   });
 });
@@ -1556,7 +1556,7 @@ function wdBadge(s, playerId) {
   return el('span', {
     className: 'sb-wd',
     textContent: `WD in ${left}`,
-    title: `Used their free withdraw. Withdrawing now costs them; free again in ${left} question${left === 1 ? '' : 's'}.`
+    title: `Free withdraw used. Free again in ${left} question${left === 1 ? '' : 's'}.`
   });
 }
 
@@ -1641,8 +1641,8 @@ function renderShootout(s) {
 const WITHDRAW_RULE = {
   free: 'Withdrawing a buzz is free.',
   none: 'No withdrawing: a buzz stands once it’s in.',
-  typed: 'Type your answer while you wait your turn; withdrawing is free only if you hadn’t committed to a different answer.',
-  rationed: 'Withdrawing is free, but not twice in a row — the next few questions after one are yours to answer.'
+  typed: 'Type your answer while you wait. Withdrawing is free unless you committed a different answer.',
+  rationed: 'One free withdraw, then a few questions without.'
 };
 // The strip above the buzzer gets the rule in a few words; the full sentence is
 // its tooltip. It is a standing rule, not news — it doesn't get three lines at
@@ -1693,15 +1693,31 @@ function renderSession(s) {
   $('#leave-game').classList.toggle('hidden', state.role !== 'player');
 }
 
+// A short notice at the bottom of the screen, for errors from actions that
+// have no message spot of their own (leaving, resetting, a refused chat line).
+let sayTimer = null;
+function say(text, ok = true) {
+  let box = $('#say-toast');
+  if (!box) {
+    box = el('div', { id: 'say-toast', className: 'say-toast', role: 'status' });
+    document.body.append(box);
+  }
+  box.textContent = text;
+  box.classList.toggle('bad', !ok);
+  box.classList.add('show');
+  clearTimeout(sayTimer);
+  sayTimer = setTimeout(() => box.classList.remove('show'), 4500);
+}
+
 $('#leave-game')?.addEventListener('click', () => {
-  if (!confirm('Leave the game? Your score is kept, and you can join again whenever you like.')) return;
+  if (!confirm('Leave the game? Your score is kept.')) return;
   socket.emit('leave_game', {}, (res) => {
     if (res?.error) say('Could not leave: ' + res.error, false);
   });
 });
 
 $('#shootout-reset')?.addEventListener('click', () => {
-  if (!confirm('Reset the leaderboard? Every packet banked so far goes back to zero.')) return;
+  if (!confirm('Reset the leaderboard? Every banked score goes to zero.')) return;
   socket.emit('reader_action', { action: 'shootout_reset' }, (res) => {
     if (res?.error) say('Could not reset: ' + res.error, false);
   });
@@ -1885,7 +1901,7 @@ const CHAT_ERRORS = {
   too_fast: 'One at a time.',
   empty: 'Nothing to say?',
   disabled: 'This room has no chat.',
-  buzzing: 'Not while you’re buzzed in — your answer goes in the answer box.'
+  buzzing: 'Not while you’re buzzed in.'
 };
 
 // Typing @ offers the people in the room. Names get typed wrong and people
@@ -2175,10 +2191,10 @@ function feedbackRow(n) {
 }
 
 const PLAYTEST_ERRORS = {
-  not_finished: 'You can comment once the room has finished that question.',
+  not_finished: 'Wait until the room finishes that question.',
   disabled: 'This tournament is not a playtest.',
   no_question: 'No question to comment on.',
-  too_many: 'That is a lot of feedback from one room already.'
+  too_many: 'This room has sent too much feedback.'
 };
 
 // ---- Protests ----
@@ -2194,11 +2210,11 @@ const PLAYTEST_ERRORS = {
 // can't file for the other side.
 const PROTEST_REASONS = [
   { id: 'rejected', label: 'A correct answer was rejected' },
-  { id: 'ambiguous', label: 'The question is ambiguous — our answer is also correct' },
+  { id: 'ambiguous', label: 'The question is ambiguous. Our answer is also correct' },
   { id: 'too-specific', label: 'The listed answer is too specific for the clues' },
   { id: 'no-answer', label: 'The question has no single correct answer' },
   { id: 'prompt', label: 'We should have been prompted' },
-  { id: 'opponent', label: 'The other team was given points for an incorrect answer' }
+  { id: 'opponent', label: 'The other team scored with a wrong answer' }
 ];
 
 // "Protest this question", on the question. A protest that means "whatever we
@@ -2235,8 +2251,8 @@ function protestRow(n) {
       const said = res?.error
         ? (PROTEST_ERRORS[res.error] || res.error)
         : res.existed
-          ? 'Your team already has that protest on this question.'
-          : 'Told. They will come to it at the next break.';
+          ? 'Your team already lodged that protest.'
+          : 'Sent. The moderator will take it at the next break.';
       protestNotes.set(n, said);
       if (!res?.error) protestOpen.delete(n);
       note.textContent = said;
@@ -2259,14 +2275,14 @@ function rowPlayed(row) {
 }
 
 const PROTEST_ERRORS = {
-  no_team: "The room doesn't know which team you're on yet — ask the moderator to put you on one.",
-  no_question: 'There is no question to protest yet.',
+  no_team: "You're not on a team. Ask the moderator to add you.",
+  no_question: 'No question to protest yet.',
   not_started: 'Nothing has happened on that question yet.',
-  cooldown: 'Just a moment — you protested a second ago.',
-  too_many: 'There are already a lot of protests in this room.',
+  cooldown: 'Wait a moment and try again.',
+  too_many: 'This room has too many protests.',
   not_player: 'Only players can protest.',
-  not_open: 'The moderator has not opened that protest yet.',
-  not_involved: 'Only the two teams playing can write on this protest.',
+  not_open: 'The moderator hasn\'t opened that protest yet.',
+  not_involved: 'Only the two teams playing can write here.',
   empty: 'Write something first.'
 };
 
@@ -2282,7 +2298,7 @@ function renderProtests(s) {
   if (!list.length && !canLodge) { view.classList.add('hidden'); return; }
   view.classList.remove('hidden');
   $('#protest-where').textContent = canLodge
-    ? 'To protest, find the question on the scoresheet and press “Protest this question”.'
+    ? 'To protest, press “Protest this question” on the scoresheet.'
     : '';
   $('#protest-count').textContent = list.length ? `(${list.length})` : '';
 
@@ -2347,8 +2363,8 @@ function renderProtests(s) {
       li.append(
         el('div', { className: 'protest-mine' },
           el('div', { className: 'protest-side' },
-            side === 'for' ? 'Your team lodged this — say why it should stand.'
-              : 'This is against your team — say why it should be rejected.'),
+            side === 'for' ? 'Your team lodged this. Say why it should stand.'
+              : 'This is against your team. Say why it should be rejected.'),
           box,
           el('div', { className: 'row' }, send, note)));
     }
@@ -2358,7 +2374,7 @@ function renderProtests(s) {
 
 const PROTEST_STATUS_WORD = {
   lodged: 'noted',
-  open: 'open — write now',
+  open: 'open, write now',
   filed: 'filed'
 };
 
@@ -2392,9 +2408,9 @@ function renderMassingerLobby(s, lobby) {
   $('#ms-round').textContent = lobby.round ? `Round ${lobby.round}` : '';
   const status = $('#ms-status');
   status.className = 'ms-status soon';
-  status.textContent = 'Starting soon — the moderator is setting the teams.';
+  status.textContent = 'Starting soon. The moderator is setting the teams.';
   for (const id of ['#ms-clock', '#ms-counts', '#ms-turnbig', '#ms-next', '#ms-lastpick']) $(id).classList.add('hidden');
-  const about = pickban ? 'Teams take turns protecting or banning categories before the first question.' : '';
+  const about = pickban ? 'Teams take turns protecting or banning categories.' : '';
   const hint = $('#ms-hint');
   if (state.role !== 'player') {
     hint.textContent = about;
@@ -2403,8 +2419,8 @@ function renderMassingerLobby(s, lobby) {
     const me = (s.members || []).find((x) => x.id === state.me?.id);
     const vouched = !!me?.rosterPlayer || !!me?.assignedTeam;
     hint.textContent = !team
-      ? `You're not on a team yet. Tell the moderator which team you're on${pickban ? ' — only players on a team can pick' : ''}.`
-      : `You're on ${team}${vouched ? '' : ' (the moderator still has to confirm it)'}` +
+      ? `You're not on a team yet. Tell the moderator which team you're on.`
+      : `You're on ${team}${vouched ? '' : ' (unconfirmed)'}` +
         `${pickban && me?.isCaptain ? ', and you make its picks' : ''}. ${about}`.trim();
   }
   $('#ms-board-wrap').classList.add('hidden');
@@ -2459,7 +2475,7 @@ function renderMassinger(s) {
     status.textContent = `Random bans: ${banned.join(', ') || 'none'}. ${remaining} questions remain.`;
   } else if (m.status === 'done') {
     status.className = 'ms-status done';
-    status.textContent = `Pick/ban complete — ${remaining} questions remain.`;
+    status.textContent = `Pick/ban done. ${remaining} questions remain.`;
   } else {
     status.className = 'ms-status' + (mine ? ' mine' : '');
     const dueNow = Array.isArray(m.schedule) ? m.schedule[m.actions.length]?.type : null;
@@ -2504,22 +2520,21 @@ function renderMassinger(s) {
   if (m.status === 'done') {
     hint.textContent = '';
   } else if (mine && paused) {
-    hint.textContent = `Get ready: your ${due?.type || 'pick'} opens in a moment.`;
+    hint.textContent = `Your ${due?.type || 'pick'} opens in a moment.`;
   } else if (mine) {
     const what = due ? due.type
       : canBan && canProtect ? 'protect or ban' : canBan ? 'ban (no protects left)' : 'protect (no bans left)';
     hint.textContent = m.timerSec > 0
-      ? `Pick a subcategory to ${what}. If the timer runs out, a random ${canBan ? 'ban' : 'protect'} is made for you.`
+      ? `Pick a subcategory to ${what}. If time runs out, it's random.`
       : `Pick a subcategory to ${what}.`;
   } else if (m.control === 'moderator') {
-    hint.textContent = 'The moderator is making every pick — call yours out to them.';
+    hint.textContent = 'The moderator makes the picks. Call yours out.';
   } else if (myTurn && !vouched) {
-    hint.textContent = "It's your team's pick, but the room doesn't know which team this buzzer is on — " +
-      'ask the moderator to put you on your team (or to make the pick for you).';
+    hint.textContent = "Your team's pick. Ask the moderator to put you on your team.";
   } else if (myTurn && captainMode && !me?.isCaptain) {
     hint.textContent = ourCaptain
-      ? `Your team's picks are made by your captain, ${ourCaptain.rosterPlayer || ourCaptain.name}.`
-      : "Your team's picks are made by its captain — ask the moderator to name one.";
+      ? `Your captain, ${ourCaptain.rosterPlayer || ourCaptain.name}, picks.`
+      : "Your captain picks. Ask the moderator to name one.";
   } else if (state.role === 'player' && myTeam(s)) {
     hint.textContent = `Waiting for ${m.teams[m.turn]} to pick.`;
   } else {
@@ -2571,21 +2586,21 @@ function renderMassinger(s) {
 }
 
 const MASSINGER_PICK_ERRORS = {
-  not_your_turn: "It isn't your team's pick right now.",
-  not_linked: "The room doesn't know which team this buzzer is on — ask the moderator to put you on your team.",
-  moderator_only: 'The moderator is making every pick for this game.',
-  random_bans: 'This game’s bans are random: nobody picks.',
-  not_captain: "Your team's picks are made by its captain.",
+  not_your_turn: "Not your team's pick.",
+  not_linked: "Ask the moderator to put you on your team.",
+  moderator_only: 'The moderator makes the picks.',
+  random_bans: 'Bans are random. Nobody picks.',
+  not_captain: "Your captain picks.",
   not_a_player: 'Only players can pick.',
-  protected: 'That subcategory is protected — it can\u2019t be banned.',
-  exhausted: 'That subcategory has no questions left to ban.',
-  no_bans_left: 'Your team has used all its bans.',
-  no_protects_left: 'Your team has used all its protects.',
+  protected: 'That subcategory is protected.',
+  exhausted: 'Nothing left to ban there.',
+  no_bans_left: 'No bans left.',
+  no_protects_left: 'No protects left.',
   ban_now: 'This pick is a ban.',
   protect_now: 'This pick is a protect.',
-  stale: 'That pick was already made. Check the board and try again.',
-  wait: 'Hold on: your next pick opens in a moment.',
-  not_active: 'The pick/ban has already finished.'
+  stale: 'Already picked. Check the board.',
+  wait: 'Your next pick opens in a moment.',
+  not_active: 'The pick/ban is over.'
 };
 
 let msPauseOff = null;
@@ -2610,9 +2625,9 @@ function sendMassingerPick(type, label, step) {
 // the MODAQ buzz panel, which reads the same state) with the roster name.
 const ROSTER_ERRORS = {
   bad_json: "That file isn't valid JSON.",
-  no_registrations: "That doesn't look like a QBJ roster file — no registrations in it.",
+  no_registrations: "Not a QBJ roster file.",
   no_teams: 'No teams with players in that file.',
-  no_tournament_roster: "This tournament doesn't have a roster uploaded yet.",
+  no_tournament_roster: "This tournament has no roster yet.",
   forbidden: 'Only the reader can load a roster.'
 };
 
@@ -2632,7 +2647,7 @@ async function loadRoster(body) {
     });
     const teams = roster?.teamNames?.length || 0;
     rosterMsg(`Loaded ${teams} team${teams === 1 ? '' : 's'}.` +
-      (roster?.teams?.length ? '' : ' Add the teams playing in this room.'), 'good');
+      (roster?.teams?.length ? '' : ' Add the teams playing here.'), 'good');
   } catch (e) {
     rosterMsg(ROSTER_ERRORS[e.message] || `Could not load the roster: ${e.message}`, 'bad');
   }
@@ -2662,7 +2677,7 @@ function renderRoster(s) {
   const chips = $('#roster-team-chips');
   chips.innerHTML = '';
   if (!active.length) {
-    chips.append(el('span', { className: 'hint' }, 'No teams yet — add the ones playing here.'));
+    chips.append(el('span', { className: 'hint' }, 'No teams yet.'));
   }
   for (const name of active) {
     const chip = el('span', { className: 'chip team-chip' }, name);
@@ -2979,7 +2994,7 @@ function renderBuzzer(s) {
           : pos > 0 ? 'wait your turn'
             : canBuzz ? 'or press Space'
               : has ? `${q[0].name} buzzed`
-                : bonus ? 'no buzzing until the next tossup'
+                : bonus ? 'wait for the next tossup'
                 : teamDone ? 'your team already answered' : 'not open');
   } else {
     buzzer.disabled = true;
@@ -3132,8 +3147,8 @@ function renderStuck(s) {
       const left = Math.ceil((s.lastBuzzAt + STUCK_DELAY_MS - clock.now()) / 1000);
       btn.disabled = left > 0;
       btn.textContent = left > 0
-        ? `Buzzer isn't clear — in ${left}s`
-        : "Buzzer isn't clear — alert the moderator";
+        ? `Buzzer isn't clear (${left}s)`
+        : "Buzzer isn't clear";
     }
     if (!btn.disabled && stuckTick) { clearInterval(stuckTick); stuckTick = null; }
   };
@@ -3148,14 +3163,14 @@ $('#stuck-alert').onclick = () => {
   socket.emit('stuck_alert', {}, (resp) => {
     if (resp?.ok) {
       state.stuckSentFor = buzzAt;
-      btn.textContent = resp.delivered ? 'Moderator alerted' : 'Alert sent — no moderator connected';
+      btn.textContent = resp.delivered ? 'Moderator alerted' : 'Sent. No moderator connected';
       return;
     }
     // Rejected (too soon / cooling down / disabled) — say so and re-render.
     $('#buzz-feedback').textContent = {
-      too_soon: 'Give the moderator a moment first.',
-      cooldown: 'You just alerted the moderator — hang tight.',
-      disabled: 'This room has player alerts turned off.'
+      too_soon: 'Give the moderator a moment.',
+      cooldown: 'Already alerted.',
+      disabled: 'Alerts are off in this room.'
     }[resp?.error] || 'Could not alert the moderator.';
     if (state.snapshot) renderStuck(state.snapshot);
   });
@@ -3166,7 +3181,7 @@ socket.on('stuck_alert', (a) => {
   if (!isStaffRole(state.role) || !a) return;
   const who = `${a.name || 'A player'}${a.team ? ` (${a.team})` : ''}`;
   const banner = $('#stuck-banner');
-  banner.textContent = `⚠ ${who} says the buzzer isn't clear — ${clockTime(a.at || Date.now())}`;
+  banner.textContent = `⚠ ${who} says the buzzer isn't clear (${clockTime(a.at || Date.now())})`;
   banner.classList.remove('hidden');
   clearTimeout(state.stuckBannerTimer);
   state.stuckBannerTimer = setTimeout(() => banner.classList.add('hidden'), 30000);
@@ -3222,7 +3237,7 @@ function renderQueue(s) {
   if (how) {
     how.textContent = queueMode
       ? ''
-      : 'The first buzz locks the buzzer — nobody else can buzz until it is cleared.';
+      : 'The first buzz locks the buzzer until it is cleared.';
   }
   const list = $('#queue-list');
   list.innerHTML = '';
@@ -3248,7 +3263,7 @@ function renderQueue(s) {
       el('summary', {},
         `also buzzed, too late: ${others.map((o) => o.playerId === state.me?.id ? 'you' : o.name).join(', ')}`),
       el('ul', {}, ...others.map((o) => el('li', {},
-        `${o.playerId === state.me?.id ? 'You' : o.name} — ${marginText(o.marginMs)} after ${q[0].name}`))));
+        `${o.playerId === state.me?.id ? 'You' : o.name}: ${marginText(o.marginMs)} after ${q[0].name}`))));
     list.append(el('li', { className: 'also-row' }, late));
   }
 
@@ -3272,15 +3287,15 @@ function renderQueue(s) {
     if (chatBox.dataset.placeholder == null) chatBox.dataset.placeholder = chatBox.placeholder;
     chatBox.disabled = shut;
     $('#chat-send').disabled = shut;
-    chatBox.placeholder = shut ? 'Buzzed in — chat is closed' : chatBox.dataset.placeholder;
+    chatBox.placeholder = shut ? 'Chat closed while buzzed in' : chatBox.dataset.placeholder;
     $('#chat-view').classList.toggle('chat-locked', shut);
     const lockNote = $('#chat-locked');
     lockNote.classList.toggle('hidden', !shut);
     if (shut) {
       const typed = !!(s.settings?.typedAnswers || s.settings?.lockedAnswers);
       lockNote.textContent = typed
-        ? 'You’re buzzed in. Chat opens again once you’ve sent your answer.'
-        : 'You’re buzzed in. Chat opens again when the moderator rules.';
+        ? 'Chat reopens once you send your answer.'
+        : 'Chat reopens when the moderator rules.';
     }
   }
   // Not from the front of the queue: once you have the floor, letting the buzz
@@ -3297,17 +3312,17 @@ function renderQueue(s) {
     const question = Number(s.scoresheet?.current) || 0;
     const left = usedAt == null || question <= 0 ? 0 : Math.max(0, usedAt + wait - question);
     btn.textContent = left > 0
-      ? `Withdraw my buzz (W) — costs you (free again in ${left})`
+      ? `Withdraw my buzz (W), not free`
       : 'Withdraw my buzz (W)';
     btn.classList.toggle('costly', left > 0);
     btn.title = left > 0
-      ? `You withdrew on question ${usedAt}. The next free one is question ${usedAt + wait}.`
-      : wait > 0 ? 'Free — and then not again for a few questions.' : '';
+      ? `Free again on question ${usedAt + wait}.`
+      : wait > 0 ? 'Free, then not again for a few questions.' : '';
   }
   const note = $('#queue-note');
   if (note) {
     note.textContent = state.role === 'player' && s.settings?.allowWithdraw && pos === 0
-      ? 'You have the buzzer — only the moderator can take this buzz back now.'
+      ? 'Only the moderator can take this buzz back now.'
       : '';
   }
 }
@@ -3324,8 +3339,8 @@ function undoClear(id) {
     if (!res?.error) return;
     const note = $('#recent-note');
     note.textContent = res.error === 'nobody_to_restore'
-      ? 'Everyone it cleared has left or is already back in the queue.'
-      : 'That clear can’t be undone any more — the room has moved on.';
+      ? 'Nobody to put back.'
+      : 'Too late to undo that clear.';
     setTimeout(() => { note.textContent = ''; }, 3000);
   });
 }
@@ -3428,7 +3443,7 @@ $('#opt-listed').onchange = (e) =>
 // It sends everybody home, so it asks first. Reopening doesn't: nothing is
 // lost by it, and a host who ended the game by mistake wants it back now.
 $('#end-game').onclick = () => {
-  if (!confirm('End the game for everyone? Players are sent home and the room stops taking new ones. You can reopen it.')) return;
+  if (!confirm('End the game for everyone? Players are sent home. You can reopen it.')) return;
   socket.emit('reader_action', { action: 'end_game', end: true });
 };
 $('#reopen-game').onclick = () => socket.emit('reader_action', { action: 'end_game', end: false });
@@ -3439,7 +3454,7 @@ function renderEnded(s) {
   banner.classList.toggle('hidden', !ended);
   if (ended) {
     const when = new Date(ended.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    banner.textContent = `This game ended at ${when}${ended.by ? ` — ${ended.by} closed it` : ''}.`;
+    banner.textContent = `${ended.by ? `${ended.by} ended this game` : 'This game ended'} at ${when}.`;
   }
   // Never in a tournament room: the next round's players would be turned away.
   $('#end-game').classList.toggle('hidden', !!ended || !!s.tournamentCode);

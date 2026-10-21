@@ -106,7 +106,7 @@ async function init() {
       const list = $('#rooms-list')?.closest('section');
       const add = $('#add-rooms')?.closest('section');
       if (list && add) add.before(list);
-      $('#rooms-empty').textContent = 'No rooms yet — add one below.';
+      $('#rooms-empty').textContent = 'No rooms yet.';
     }
     document.title = `${t.name || code} — Klaxon`;
     rememberVisit(t.name, t.date);
@@ -193,7 +193,7 @@ function initMessaging(t) {
       });
       status.textContent = r.delivered > 0
         ? `Sent to ${r.delivered} reader${r.delivered === 1 ? '' : 's'} in ${r.rooms} room${r.rooms === 1 ? '' : 's'}.`
-        : `Sent to ${r.rooms} room${r.rooms === 1 ? '' : 's'} — no readers connected right now; they'll see it when they open the room.`;
+        : `Sent to ${r.rooms} room${r.rooms === 1 ? '' : 's'}. Readers see it when they open the room.`;
       status.className = 'msg good';
       $('#msg-text').value = '';
     } catch (e) {
@@ -213,7 +213,7 @@ function initPlayerScoresheet(t) {
     try {
       await api('PUT', `/api/tournaments/${code}/player-scoresheet`, { directorToken, enabled: cb.checked });
       msay(cb.checked
-        ? 'Players now see a live scoresheet of questions already read.'
+        ? 'Player scoresheet on.'
         : 'Player scoresheet off.');
     } catch (e) {
       msay('Could not change the player scoresheet: ' + e.message, false);
@@ -238,7 +238,7 @@ function initShowQuestions(t) {
   const show = () => {
     $('#question-lag-row').classList.toggle('hidden', !cb.checked);
     note.textContent = cb.checked
-      ? `A question appears once the room is ${lag.value} question${lag.value === '1' ? '' : 's'} past it.`
+      ? `Each question shows ${lag.value} question${lag.value === '1' ? '' : 's'} after it's read.`
       : '';
   };
   const save = async () => {
@@ -247,8 +247,8 @@ function initShowQuestions(t) {
         { directorToken, enabled: cb.checked, lag: Number(lag.value) });
       show();
       msay(cb.checked
-        ? `Players will see each question once the room is ${lag.value} past it.`
-        : 'Questions hidden from players again.');
+        ? `Questions shown ${lag.value} behind the room.`
+        : 'Questions hidden from players.');
     } catch (e) {
       msay('Could not change that: ' + e.message, false);
     }
@@ -271,8 +271,8 @@ function initScoresheetCategories(t) {
     try {
       await api('PUT', `/api/tournaments/${code}/scoresheet-categories`, { directorToken, enabled: cb.checked });
       msay(cb.checked
-        ? 'Categories will appear on the players’ scoresheet for cycles the room has finished.'
-        : 'Categories off — the scoresheet lists events only.');
+        ? 'Scoresheet categories on.'
+        : 'Scoresheet categories off.');
     } catch (e) {
       msay('Could not change the scoresheet categories: ' + e.message, false);
       cb.checked = !cb.checked;
@@ -290,8 +290,8 @@ function initBuzzPoints(t) {
   const note = $('#buzz-points-note');
   const show = (on) => {
     note.textContent = on
-      ? 'Included in the quizbowlbuzzpoints.com zip, as klaxon_all_buzz_attempts.json.'
-      : 'Turn this on before play: buzz attempts are only kept while it is on.';
+      ? 'Saved in the quizbowlbuzzpoints.com zip as klaxon_all_buzz_attempts.json.'
+      : 'Only buzzes made while this is on are kept.';
   };
   cb.checked = t.buzzPoints === true;
   show(cb.checked);
@@ -300,8 +300,8 @@ function initBuzzPoints(t) {
       await api('PUT', `/api/tournaments/${code}/buzz-points`, { directorToken, enabled: cb.checked });
       show(cb.checked);
       msay(cb.checked
-        ? "Recording buzz points — every room's buzzes, including the ones that lost the lock."
-        : 'Buzz points off. What has already been collected is kept.');
+        ? 'Recording every buzz attempt.'
+        : 'Buzz recording off. Buzzes already recorded are kept.');
     } catch (e) {
       msay('Could not change buzz points: ' + e.message, false);
       cb.checked = !cb.checked;
@@ -337,7 +337,7 @@ function initPlaytest(t) {
       list.replaceChildren();
       note.textContent = feedback.length
         ? `${feedback.length} comment${feedback.length === 1 ? '' : 's'} so far.`
-        : 'Nothing from the rooms yet.';
+        : 'No feedback yet.';
       // Newest first: during a playtest the useful end is the recent one.
       for (const f of feedback.slice().reverse().slice(0, 100)) {
         const li = el('li', { className: 'playtest-item' });
@@ -363,8 +363,8 @@ function initPlaytest(t) {
     try {
       await api('PUT', `/api/tournaments/${code}/playtest`, { directorToken, enabled: cb.checked });
       msay(cb.checked
-        ? 'Playtest on — rooms will show each answer line once they are past the cycle.'
-        : 'Playtest off. Answer lines stop; what was already said is kept.');
+        ? 'Playtest on.'
+        : 'Playtest off.');
       refresh();
     } catch (e) {
       msay('Could not change the playtest setting: ' + e.message, false);
@@ -418,7 +418,7 @@ function initShareLinks() {
     try {
       const { link } = await api('POST', `/api/tournaments/${code}/share-links`, { directorToken, kind });
       const url = `${location.origin}/s/${link.token}`;
-      try { await navigator.clipboard.writeText(url); smsg2(`Link created and copied: ${url}`); }
+      try { await navigator.clipboard.writeText(url); smsg2(`Link copied: ${url}`); }
       catch { smsg2(`Link created: ${url}`); }
       refresh();
     } catch (e) { smsg2('Could not create the link: ' + e.message, false); }
@@ -438,7 +438,7 @@ function initAutoRelease(t) {
     try {
       await api('PUT', `/api/tournaments/${code}/auto-release`, { directorToken, enabled: cb.checked });
       msay(cb.checked
-        ? 'Auto-release on: the next packet is released as soon as a round finishes everywhere.'
+        ? 'Auto-release on.'
         : 'Auto-release off.');
     } catch (e) {
       msay('Could not change auto-release: ' + e.message, false);
@@ -469,8 +469,8 @@ function initLinks(t) {
       sched.value = links.schedule;
       disc.value = links.discord;
       lmsg.textContent = rejected.length
-        ? `Saved, but the ${rejected.join(' and ')} link was dropped — links must start with http(s)://`
-        : 'Saved. Players see these links in every room.';
+        ? `Saved, except the ${rejected.join(' and ')} link. Links must start with http(s)://.`
+        : 'Saved.';
       lmsg.className = 'msg ' + (rejected.length ? 'bad' : 'good');
     } catch (e) {
       lmsg.textContent = 'Could not save links: ' + e.message;
@@ -550,7 +550,7 @@ function renderDivisions() {
       sel.append(opt);
     }
     sel.onchange = () => { row.teams = [...sel.selectedOptions].map((o) => o.value); };
-    box.append(el('p', { className: 'hint' }, knownTeams.length ? 'Ctrl/Cmd-click to select this division\'s teams:' : 'No teams have played yet.'));
+    box.append(el('p', { className: 'hint' }, knownTeams.length ? 'Ctrl/Cmd-click to pick teams:' : 'No teams have played yet.'));
     box.append(sel);
     wrap.append(box);
   });
@@ -560,7 +560,7 @@ async function saveStructure() {
   const structure = { phases: parsePhasesText(), divisions: divisionRows.filter((d) => d.name.trim()) };
   try {
     await api('PUT', `/api/tournaments/${code}/structure`, { directorToken, structure });
-    smsg('Structure saved. Stats will now group by phase and division.');
+    smsg('Structure saved.');
   } catch (e) { smsg('Could not save structure: ' + e.message, false); }
 }
 
@@ -647,7 +647,7 @@ function initModaq() {
     // Without the director token this browser can't manage MODAQ artifacts.
     const gate = $('#modaq-gate-hint');
     if (gate) gate.textContent =
-      'MODAQ management is only available in the browser that created this tournament (it holds the director token).';
+      'Open this page in the browser that created the tournament to manage it.';
     for (const panel of panels) {
       panel.querySelectorAll('button, input, select').forEach((n) => { n.disabled = true; });
     }
@@ -677,7 +677,7 @@ function initModaq() {
 
   $('#packet-upload').onclick = async () => {
     const files = [...($('#packet-files').files || [])];
-    if (!files.length) return msay('Choose one or more packet JSON files first.', false);
+    if (!files.length) return msay('Choose packet JSON files first.', false);
     const tiebreaker = $('#packet-tiebreaker').checked;
     // A file named like a round that's already here replaces that round's
     // packet: say so first.
@@ -689,10 +689,9 @@ function initModaq() {
     } catch { /* the upload says what happened */ }
     if (existing.length) {
       const played = existing.filter((x) => x.games > 0);
-      if (!confirm(`${existing.length === 1 ? 'This round is' : 'These rounds are'} already uploaded and will be replaced: `
-        + existing.map((x) => `"${x.round}"`).join(', ') + '.'
-        + (played.length ? `\n\nGames have already been played on ${played.map((x) => `"${x.round}"`).join(', ')}.` : '')
-        + '\n\nEach keeps its place, release state and tiebreaker setting.')) return;
+      if (!confirm(`Replace ${existing.length === 1 ? 'round' : 'rounds'} `
+        + existing.map((x) => `"${x.round}"`).join(', ') + '?'
+        + (played.length ? `\n\nGames already played on ${played.map((x) => `"${x.round}"`).join(', ')} keep their scores.` : ''))) return;
     }
     let ok = 0;
     for (const file of files) {
@@ -707,7 +706,7 @@ function initModaq() {
       } catch { /* skip bad file */ }
     }
     const kind = tiebreaker ? ' tiebreaker' : '';
-    msay(ok ? `Uploaded ${ok}${kind} round${ok > 1 ? 's' : ''}${packetsOpen ? ', ready for the room' : ' (hidden until you make them visible)'}.` : 'No valid packets found.', ok > 0);
+    msay(ok ? `Uploaded ${ok}${kind} round${ok > 1 ? 's' : ''}.${packetsOpen ? '' : ' They start hidden.'}` : 'No valid packets found.', ok > 0);
     $('#packet-files').value = '';
     $('#packet-tiebreaker').checked = false;
     refreshPackets();
@@ -715,7 +714,7 @@ function initModaq() {
 
   $('#yf-import').onclick = async () => {
     const text = await readFileText($('#yf-file'));
-    if (!text) return msay('Choose your YellowFruit (.yft) file first.', false);
+    if (!text) return msay('Choose a .yft file first.', false);
     try {
       const yft = JSON.parse(text);
       const { updated, added } = await api('POST', `/api/tournaments/${code}/yf-import`, { directorToken, yft });
@@ -741,7 +740,7 @@ function initModaq() {
       refreshMembers();
     } catch (e) {
       msay(e.message === 'account_not_found'
-        ? `No account with that email or username. Ask them to create one at ${location.origin}/account, then add them here.`
+        ? `No account with that email or username. They can make one at ${location.origin}/account.`
         : 'Could not add moderator: ' + e.message, false);
     }
   };
@@ -795,7 +794,7 @@ async function openRosterEditor() {
   $('#roster-paste').value = '';
   $('#roster-paste-note').textContent = rosterTeams.length
     ? ''
-    : 'No roster yet: paste your teams above, or add them one at a time.';
+    : 'No roster yet.';
   $('#roster-check').textContent = '';
   renderRosterGrid();
   $('#roster-dialog').showModal();
@@ -823,7 +822,7 @@ function renderRosterGrid(focus) {
       className: 'rt-team' + (team.placeholder ? ' rt-placeholder' : ''),
       value: team.name,
       placeholder: 'Team name',
-      title: team.placeholder ? 'A placeholder: the sheet had no team name here' : ''
+      title: team.placeholder ? 'No team name in the sheet' : ''
     });
     name.setAttribute('aria-label', `Team ${ti + 1} name`);
     name.oninput = () => {
@@ -866,7 +865,7 @@ function rosterPaste(text) {
   const { teams, skipped } = parseSpreadsheet(text);
   if (!teams.length) {
     $('#roster-paste-note').textContent =
-      "Couldn't find any teams there. Copy whole rows, with the header row (Team Name, Player 1, …).";
+      'No teams found. Copy whole rows with the header row.';
     return false;
   }
   rosterTeams = mergeTeams(rosterTeams, teams);
@@ -876,8 +875,7 @@ function rosterPaste(text) {
   $('#roster-paste-note').textContent =
     `Added ${plural(teams.length, 'team')} (${plural(players, 'player')}).` +
     (skipped ? ` Skipped ${plural(skipped, 'row')} with no players.` : '') +
-    (unnamed ? ` ${unnamed} had no team name and got a placeholder (highlighted): type the real names in.` : '') +
-    ' Press Save roster below to keep them.';
+    (unnamed ? ` ${unnamed} need${unnamed === 1 ? 's' : ''} a team name (highlighted).` : '');
   return true;
 }
 
@@ -900,7 +898,7 @@ $('#roster-add-team').onclick = () => {
   renderRosterGrid('last');
 };
 $('#roster-clear-all').onclick = () => {
-  if (rosterTeams.length && !confirm('Remove every team from the editor? Nothing is saved until you press Save roster.')) return;
+  if (rosterTeams.length && !confirm('Remove every team?')) return;
   rosterTeams = [];
   renderRosterGrid();
 };
@@ -964,8 +962,8 @@ $('#roster-yf').onclick = async () => {
       setTimeout(() => save(URL.createObjectURL(new Blob([toYellowFruitQbj(name, teams)], { type: 'application/json' })), `${stem} roster.qbj`), 400);
     }
     msay(teams.length
-      ? 'Downloaded the tournament (.yft, open it with File > Open) and the roster (.qbj, for File > QBJ Schema > Import Teams and Rosters Only).'
-      : 'Downloaded the tournament (.yft): open it in YellowFruit with File > Open. (No roster yet, so no roster file.)');
+      ? 'Downloaded the .yft (File > Open) and roster .qbj.'
+      : 'Downloaded the .yft (File > Open).');
   } catch (e) { msay('Could not build the YellowFruit file: ' + e.message, false); }
 };
 
@@ -1000,8 +998,8 @@ async function refreshPackets() {
     // releasing, so no visibility to show or toggle.
     packetsOpen = alwaysOpen === true;
     $('#packets-release-hint').textContent = packetsOpen
-      ? 'With one room, every round is ready for it as soon as it is uploaded. Add a second room and you release rounds one by one.'
-      : 'New rounds are hidden from moderators — toggle a round visible to release it.';
+      ? 'With one room, rounds are ready on upload.'
+      : 'New rounds start hidden.';
     $('#release-next').classList.toggle('hidden', packetsOpen);
     const visibleCount = packets.filter((p) => p.visible).length;
     $('#packets-count').textContent = !packets.length ? ''
@@ -1084,7 +1082,7 @@ function updateReleaseNext(packets) {
     btn.disabled = true;
     try {
       await api('PUT', `/api/tournaments/${code}/packets/${qt(next.round)}/visibility`, { directorToken, visible: true });
-      msay(`Released the Round ${next.round} packet — moderators can load it now.`);
+      msay(`Released the Round ${next.round} packet.`);
       refreshPackets();
       refreshTiebreakers();
     } catch (e) {
@@ -1100,7 +1098,7 @@ function updateReleaseNext(packets) {
 function dragHandle(li, p) {
   const h = el('button', {
     className: 'drag-handle', type: 'button', textContent: '⠿',
-    title: 'Drag to reorder (or focus and use the arrow keys)'
+    title: 'Drag or use arrow keys to reorder'
   });
   h.setAttribute('aria-label', `Move Round ${p.round}`);
 
@@ -1189,12 +1187,10 @@ function replaceButton(p, number) {
     try {
       packet = JSON.parse(await file.text());
       if (!Array.isArray(packet.tossups) || !packet.tossups.length) throw new Error('no tossups');
-    } catch { return msay(`"${file.name}" isn't a packet file (JSON with tossups).`, false); }
-    const was = p.tossups > 0 ? ` (currently ${p.tossups} tossups)` : '';
-    if (!confirm(`Replace the packet for Round ${number}${p.round !== String(number) ? ` ("${p.round}")` : ''}${was} with "${file.name}" (${packet.tossups.length} tossups)?`
-      + gamesNote(p)
-      + (p.games > 0 ? ' Their scores and stats stay as they are; their buzzpoints are checked against the new text, and any question that no longer matches is flagged in the download.' : '')
-      + '\n\nIt keeps its place, release state and tiebreaker setting. A room already reading it keeps the version it loaded until it starts the round again.')) return;
+    } catch { return msay(`"${file.name}" isn't a packet JSON file.`, false); }
+    const was = p.tossups > 0 ? ` (${p.tossups} tossups)` : '';
+    if (!confirm(`Replace Round ${number}${p.round !== String(number) ? ` ("${p.round}")` : ''}${was} with "${file.name}" (${packet.tossups.length} tossups)?`
+      + (p.games > 0 ? '\n\nGames already played keep their scores.' : ''))) return;
     btn.disabled = true;
     try {
       await api('PUT', `/api/tournaments/${code}/packets/${qt(p.round)}`, { directorToken, packet });
@@ -1215,8 +1211,8 @@ function deleteButton(p, number) {
   btn.onclick = async () => {
     if (!confirm(`Delete the packet for Round ${number}${p.round !== String(number) ? ` ("${p.round}")` : ''}? This can't be undone.`
       + gamesNote(p)
-      + (p.games > 0 ? ' Those games stay in your results and stats, but the buzzpoints download will leave them out.' : '')
-      + (p.visible ? '\n\nIt is released: moderators can no longer load it.' : ''))) return;
+      + (p.games > 0 ? ' Those games stay in the stats but leave the buzzpoints download.' : '')
+      + (p.visible ? '\n\nModerators will no longer be able to load it.' : ''))) return;
     btn.disabled = true;
     try {
       await api('DELETE', `/api/tournaments/${code}/packets/${qt(p.round)}`, { directorToken });
@@ -1239,12 +1235,12 @@ function splitButton(p) {
     if (!confirm(`Split "Round ${p.round}" into ${count}hidden tiebreaker rounds, one per tossup?
 
 `
-      + 'The original round is replaced by them.')) return;
+      + 'They replace the original round.')) return;
     btn.disabled = true;
     try {
       const { created } = await api('POST', `/api/tournaments/${code}/packets/${qt(p.round)}/split-tiebreakers`,
         { directorToken });
-      msay(`Split "Round ${p.round}" into ${created.length} tiebreaker round${created.length === 1 ? '' : 's'}, all hidden — release the one a room needs.`);
+      msay(`Split "Round ${p.round}" into ${created.length} hidden tiebreaker round${created.length === 1 ? '' : 's'}.`);
       refreshPackets();
       refreshTiebreakers();
     } catch (e) {
@@ -1344,7 +1340,7 @@ function memberAccessEditor(m, { rounds, rooms }) {
   if (!assigned) return box;
 
   const chips = el('ul', { className: 'assign-chips' });
-  if (!list.length) chips.append(el('li', { className: 'hint' }, 'No rounds yet: they can\'t moderate anywhere until you add one.'));
+  if (!list.length) chips.append(el('li', { className: 'hint' }, 'No rounds assigned yet.'));
   for (const a of list) {
     const x = mkBtn('×', 'tiny ghost', () => save('assigned', list.filter((y) => y !== a)));
     x.title = 'Remove'; x.setAttribute('aria-label', `Remove ${roundName(a.round)} in ${roomLabel(rooms, a.room)}`);
@@ -1365,7 +1361,7 @@ function memberAccessEditor(m, { rounds, rooms }) {
   });
   box.append(el('div', { className: 'row assign-add' }, round, room, add));
   if (!rounds.length || !rooms.length) {
-    box.append(el('p', { className: 'hint' }, !rounds.length ? 'Upload the packets first: rounds come from the Packets tab.' : 'Add rooms first.'));
+    box.append(el('p', { className: 'hint' }, !rounds.length ? 'Upload packets first.' : 'Add rooms first.'));
   }
   return box;
 }
@@ -1482,7 +1478,7 @@ async function refreshExports() {
 // game, and what is changed there goes straight back into these stats.
 function correctGameButton(x) {
   const btn = el('button', { className: 'ghost tiny export-remove' }, 'Edit');
-  btn.title = 'Open this game in MODAQ and correct it; changes save back into the stats';
+  btn.title = 'Correct this game in MODAQ. Changes save to the stats.';
   btn.onclick = async () => {
     // Opened now, while the click still counts, so no pop-up blocker stops it.
     const tab = window.open('about:blank', '_blank');
@@ -1493,7 +1489,7 @@ function correctGameButton(x) {
       remember('staffRole:' + r.code, 'reader');
       const url = `/modaq?room=${r.code}`;
       if (tab) tab.location = url; else location.href = url;
-      msay('Opened the game in MODAQ. Every change you make there is saved into the stats.');
+      msay('Opened in MODAQ. Changes save to the stats.');
     } catch (e) {
       tab?.close();
       msay(e.message, false);
@@ -1507,14 +1503,14 @@ function correctGameButton(x) {
 // and doesn't make a ceremony of it.
 function removeGameButton(x, round, room, teams) {
   const btn = el('button', { className: 'ghost tiny export-remove' }, x.removed ? 'Restore' : 'Remove');
-  btn.title = x.removed ? 'Count this game in the stats again' : 'Leave this game out of standings, box scores and downloads';
+  btn.title = x.removed ? 'Count this game in the stats again' : 'Leave this game out of the stats';
   btn.onclick = async () => {
     const what = `Round ${round}, room ${room}${teams ? ` (${teams})` : ''}`;
-    if (!x.removed && !confirm(`Remove ${what} from the stats?\n\nIt stays saved here, and Restore puts it back.`)) return;
+    if (!x.removed && !confirm(`Remove ${what} from the stats? Restore puts it back.`)) return;
     btn.disabled = true;
     try {
       await api('PUT', `/api/tournaments/${code}/exports/${qt(x.filename)}/removed`, { directorToken, removed: !x.removed });
-      msay(x.removed ? `${what} counts in the stats again.` : `${what} is out of the stats. Restore it from this list.`);
+      msay(x.removed ? `${what} counts in the stats again.` : `${what} is out of the stats.`);
       refreshExports();
     } catch (e) {
       msay('Could not change that game: ' + e.message, false);
@@ -1584,8 +1580,8 @@ function renderNotifyButton() {
   const blocked = supported && Notification.permission === 'denied';
   note.classList.toggle('hidden', !(blocked || !supported || on));
   note.textContent = !supported ? "This browser can't show notifications."
-    : blocked ? 'Notifications are blocked for this site — allow them in the browser\'s site settings.'
-      : 'A notification pops up for each new protest while this page is open (in any tab).';
+    : blocked ? 'Notifications are blocked. Allow them in site settings.'
+      : 'Notifies you of new protests while this page is open.';
 }
 $('#protests-notify').onclick = async () => {
   if (protestNotifyOn()) { remember(NOTIFY_KEY, '0'); renderNotifyButton(); return; }
@@ -1726,7 +1722,7 @@ async function toggleRuleForm(li, p) {
         part: p.part, team: p.team, resolution: pick.value, award: Number(award.value) || undefined
       });
     } catch (e) {
-      preview.append(el('div', { className: 'rule-warn', textContent: 'Could not work that out: ' + e.message }));
+      preview.append(el('div', { className: 'rule-warn', textContent: 'Could not preview: ' + e.message }));
       return;
     }
 
@@ -1774,8 +1770,8 @@ async function applyResolution(p, resolution, note, award, withReplay) {
     });
     if (!withReplay) {
       msay(resolution === 'denied'
-        ? 'Protest denied — nothing changes.'
-        : 'Resolved. The score correction is live in the stats.');
+        ? 'Protest denied.'
+        : 'Resolved. Stats updated.');
     } else {
       const r = await api('POST', `/api/tournaments/${code}/protests/replay`, {
         directorToken, room: p.room, round: p.round, type: p.type, question: p.question,
@@ -1797,14 +1793,13 @@ function showReplayLinks(r) {
   box.replaceChildren(
     el('h5', {}, `Replay room ${r.room}`),
     el('p', { className: 'hint' },
-      'Send the player link to both teams and open the reader link yourself. '
-      + 'The room already knows the teams and what has to be read.'),
+      'Send the player link to both teams. Open the reader link yourself.'),
     el('div', { className: 'sound-row' },
       el('a', { className: 'chip', href: r.reader, target: '_blank', rel: 'noopener', textContent: 'Open as reader' }),
       el('input', { readOnly: true, value: url(r.players), onclick: (e) => e.target.select() })),
     ...r.gameplay.map((g) => el('p', { className: 'hint', textContent: `${g.why} (${g.rule})` }))
   );
-  msay(`Replay room ${r.room} created — send the player link to both teams.`);
+  msay(`Replay room ${r.room} created.`);
 }
 
 async function ruleProtest(p, status, note, adjustments) {
@@ -1814,8 +1809,8 @@ async function ruleProtest(p, status, note, adjustments) {
       room: p.room, round: p.round, type: p.type, question: p.question, part: p.part, team: p.team,
       status, note, adjustments,
     });
-    msay(status == null ? 'Ruling cleared — the protest is open again.'
-      : status === 'upheld' ? 'Protest upheld — the score correction is live in the stats.'
+    msay(status == null ? 'Ruling cleared. The protest is open again.'
+      : status === 'upheld' ? 'Protest upheld. Stats updated.'
         : 'Protest denied.');
     refreshProtests();
   } catch (e) { msay('Could not save ruling: ' + e.message, false); }
@@ -1840,7 +1835,7 @@ $('#add-rooms').onclick = async () => {
     // A second room in a shootout brings releasing back (see packetsAlwaysOpen).
     refreshPackets();
   } catch (e) {
-    say('Error creating rooms: ' + e.message, false);
+    say('Could not create rooms: ' + e.message, false);
   }
   $('#add-rooms').disabled = false;
 };

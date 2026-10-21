@@ -26,7 +26,7 @@
     </nav>
     <div class="bar-right">
       <button id="compact-toggle" class="pill pill-btn hidden" title="Toggle compact view" aria-pressed="false">Compact</button>
-      <button id="copy-link" class="pill pill-btn" title="Copy the player join link for this room">Copy link</button>
+      <button id="copy-link" class="pill pill-btn" title="Copy the player link">Copy link</button>
       <span id="conn" class="pill" title="Connection">connecting…</span>
       <span id="latency" class="pill" title="Your latency"></span>
     </div>
@@ -87,7 +87,7 @@
 
     <!-- Sound warning (shown when the browser can't play the buzz sound) -->
     <div id="sound-warn" class="sound-warn hidden" role="alert">
-      Sound is off or blocked — you won't hear buzzes.
+      Sound is off. You won't hear buzzes.
       <button id="enable-sound" class="tiny">Enable sound</button>
     </div>
 
@@ -104,7 +104,7 @@
     <section id="massinger-view" class="panel massinger hidden" aria-live="polite">
       <h3 class="ms-head"><span><span id="ms-title">MASSINGER pick/ban</span> <span id="ms-round" class="muted-count"></span></span>
         <button id="ms-sound-btn" class="ghost tiny" type="button" aria-pressed="true"
-                title="Turn the pick/ban sounds on or off (buzz sounds aren't affected)">🔔 Pick sounds on</button></h3>
+                title="Pick/ban sounds only">🔔 Pick sounds on</button></h3>
       <div id="ms-status" class="ms-status"></div>
       <!-- Whose turn and what they're doing, loudly. -->
       <div id="ms-turnbig" class="ms-turnbig hidden"><span class="ms-turnbig-team"></span><span class="ms-turnbig-kind"></span></div>
@@ -159,7 +159,7 @@
           <h3>Your answer <span id="answer-clock" class="muted-count"></span></h3>
           <!-- Every keystroke reaches the moderator's screen (answers.forStaff),
                so the player is told, before they type, not after. -->
-          <p class="answer-live"><span class="live-dot" aria-hidden="true"></span>The moderator sees this box live, as you type.</p>
+          <p class="answer-live"><span class="live-dot" aria-hidden="true"></span>The moderator sees you type.</p>
           <p class="hint" id="answer-hint"></p>
           <input id="answer-box" type="text" maxlength="120" autocomplete="off"
                  placeholder="Type your answer" />
@@ -169,11 +169,10 @@
         <!-- Staff: a player says the buzzer was never cleared. -->
         <div id="stuck-banner" class="offline-alert hidden" role="alert" aria-live="assertive"></div>
         <!-- Players: ping the moderator about a buzzer left un-reset. -->
-        <button id="stuck-alert" class="ghost tiny hidden">Buzzer isn't clear — alert the moderator</button>
+        <button id="stuck-alert" class="ghost tiny hidden">Buzzer isn't clear</button>
         <!-- A buzzer that floats above Zoom (Document Picture-in-Picture). -->
         <button id="pip-open" class="ghost tiny hidden">Pop out buzzer ↗</button>
-        <p id="pip-hint" class="hint hidden">Keeps the buzzer on top of Zoom. Click it (or press Space
-          while it's focused) to buzz.</p>
+        <p id="pip-hint" class="hint hidden">Stays on top of Zoom.</p>
       </section>
 
       <!-- Buzz queue / order — always on screen so nothing below it jumps -->
@@ -259,8 +258,7 @@
       <h3>Reading a packet?</h3>
       <div class="row">
         <button id="modaq-switch" class="primary">Read with MODAQ →</button>
-        <span class="hint">Opens the MODAQ reader beside this buzzer — load a packet file, enter
-          the teams, and it keeps score. Players stay in this room and see the scoresheet.</span>
+        <span class="hint">Read with MODAQ here. It keeps score.</span>
       </div>
     </section>
 
@@ -307,8 +305,7 @@
         <div id="roster-team-chips" class="t-rooms"></div>
       </div>
       <p id="roster-msg" class="msg"></p>
-      <p class="hint">Pick each player's name next to their buzzer in the list below. Buzzes then
-        show the roster name, and the read-aloud option says it out loud.</p>
+      <p class="hint">Match each buzzer to a name in the list below.</p>
     </section>
 
     <!-- Players — everyone in the room sees who else is here -->
@@ -336,8 +333,7 @@
           <button class="copy-btn ghost tiny" data-target="share-coreader">Copy</button>
         </span>
       </label>
-      <p class="hint">Players just need the room code <strong id="share-code"></strong> on the
-        home page, or the link above. The co-reader link grants buzzer control.</p>
+      <p class="hint">Room code: <strong id="share-code"></strong>. The co-reader link controls the buzzer.</p>
     </section>
 
     <!-- Game options (staff only) -->
@@ -346,9 +342,8 @@
       <label class="toggle"><input type="checkbox" id="opt-queue" /> Buzzer queue mode</label>
       <label class="toggle hidden" id="opt-withdraw-row"><input type="checkbox" id="opt-withdraw" /> Allow players to withdraw</label>
       <label class="toggle"><input type="checkbox" id="opt-autoclear" /> Auto-clear buzzer 5s after a buzz</label>
-      <label class="toggle"><input type="checkbox" id="opt-typed" /> Players type their answer instead of saying it</label>
-      <label class="toggle hidden" id="opt-locked-row"><input type="checkbox" id="opt-locked" /> ...and everyone else in the
-        queue commits one first, in secret, before the buzzed-in player answers</label>
+      <label class="toggle"><input type="checkbox" id="opt-typed" /> Players type their answers</label>
+      <label class="toggle hidden" id="opt-locked-row"><input type="checkbox" id="opt-locked" /> ...and the rest of the queue commits one first, in secret</label>
       <div class="row hidden" id="opt-answer-timing">
         <label class="select-label" for="opt-answer-secs">Seconds to answer</label>
         <input type="number" id="opt-answer-secs" min="1" max="60" style="width:5em" />
@@ -356,7 +351,7 @@
         <input type="number" id="opt-answer-grace" min="0" max="10" style="width:5em" />
       </div>
       <label class="toggle"><input type="checkbox" id="opt-require-team" /> Require team name to join</label>
-      <label class="toggle"><input type="checkbox" id="opt-player-alerts" /> Let players alert me that the buzzer isn't clear</label>
+      <label class="toggle"><input type="checkbox" id="opt-player-alerts" /> Players can alert me to an uncleared buzzer</label>
       <label class="select-label" for="opt-modaq-mode">Moderator view</label>
       <select id="opt-modaq-mode">
         <option value="off">Standard buzzer</option>
@@ -364,19 +359,16 @@
         <option value="full">MODAQ — with roster / packets / exports</option>
       </select>
       <label class="toggle"><input type="checkbox" id="opt-listed" /> List this game on the Klaxon home page</label>
-      <p class="hint" id="opt-listed-hint">Anyone can find it and join — for Discord readings and open playtests.
-        It is listed only while someone is in the room, and ending the game takes it off.</p>
+      <p class="hint" id="opt-listed-hint">Shows on the home page while someone's in the room.</p>
       <label class="toggle"><input type="checkbox" id="opt-disconnect-sound" /> Play a sound when a player disconnects</label>
       <div class="end-row">
         <button id="end-game" class="ghost tiny">End game for everyone</button>
         <button id="reopen-game" class="ghost tiny hidden">Reopen the game</button>
       </div>
-      <p class="hint">Ending it sends the players home and closes the room to new ones. The scoresheet,
-        the chat and the log stay — and you can reopen it.</p>
+      <p class="hint">Sends players home and closes the room. You can reopen it.</p>
       <!-- For afterwards, when someone asks what happened to their buzz: every
            buzz, clear, withdrawal, join and chat line, stamped and in order. -->
-      <p class="hint"><a id="log-link" href="#" download>Download the activity log</a> — buzz times, who
-        cleared what, withdrawals and chat, for working out what happened.</p>
+      <p class="hint"><a id="log-link" href="#" download>Download the activity log</a></p>
     </section>
 
     <!-- Sound settings (everyone) -->
@@ -419,8 +411,6 @@
     <div class="sheet-scroll">
       <table id="sheet-grid" class="sheet-grid"></table>
     </div>
-    <p class="hint">Points each competitor scored, question by question. What was
-      asked and what the answer was stay with the moderator until the room is done.</p>
   </dialog>
 
   <script src="/socket.io/socket.io.js"></script>

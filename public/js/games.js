@@ -190,7 +190,7 @@ function row(g) {
       ask.disabled = true;
       try {
         await api('POST', `/api/games/${encodeURIComponent(g.id)}/request`, creds());
-        say('Asked. The game\'s moderator will see your request on their games page.');
+        say('Requested. The moderator will see it.');
         load();
       } catch (e) { ask.disabled = false; say('Could not send the request: ' + e.message, false); }
     };
@@ -215,7 +215,7 @@ function row(g) {
 
   if (g.hasQbj) actions.append(sheetButton(g, li), qbjButton(g, base, 'Download QBJ'));
   const open = el('button', { className: 'tiny' }, 'Reopen in MODAQ');
-  open.title = 'Opens the game in a new MODAQ room, to fix a score or export it again';
+  open.title = 'Open in a new MODAQ room to fix or re-export';
   open.onclick = async () => {
     open.disabled = true;
     try {
@@ -226,7 +226,7 @@ function row(g) {
     } catch (e) {
       open.disabled = false;
       say(e.message === 'no_modaq_copy'
-        ? 'MODAQ\'s copy of this game wasn\'t saved, so it can\'t be reopened. The QBJ still has the results.'
+        ? 'This game can\'t be reopened. The QBJ still has the results.'
         : 'Could not reopen the game: ' + e.message, false);
     }
   };
@@ -251,7 +251,7 @@ async function load() {
     $('#admin-row').classList.toggle('hidden', !r.admin);
     $('#games-list').replaceChildren(...r.games.map(row));
     $('#games-empty').classList.toggle('hidden', r.games.length > 0);
-    if (!r.loggedIn) say('Log in (Account, below) to also see the games your account moderated or played in.', true);
+    if (!r.loggedIn) say('Log in to see your account\'s games too.', true);
   } catch (e) {
     say('Could not load games: ' + e.message, false);
   }

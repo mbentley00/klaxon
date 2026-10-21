@@ -20,14 +20,11 @@ const formatSel = $('#yapp-format');
 
 // What each format is for, said once rather than crowded into the option list.
 const FORMAT_NOTES = {
-  json: 'The packet format MODAQ loads and Klaxon stores for a round.',
-  yapp2: 'The same JSON plus an “anchored” copy of any question with a pronunciation guide, ' +
-    'marking which words the guide covers. Readers that don’t know yapp2 ignore the extra field.',
-  html: 'A formatted packet for reading, not for loading into a reader.',
-  tiebreakers: 'A zip of one JSON per tossup. Upload them all at once in the director console with ' +
-    '“tiebreaker” ticked, and each question becomes a round you can release on its own — so the pool ' +
-    'stays hidden until the moment a room needs one question out of it. Bonuses are dropped: a tiebreaker ' +
-    'is a tossup.'
+  json: 'What MODAQ and Klaxon load.',
+  yapp2: 'JSON that marks which words each pronunciation guide covers.',
+  html: 'For reading. Readers can’t load it.',
+  tiebreakers: 'A zip of one JSON per tossup. Bonuses are dropped. Upload them in the director ' +
+    'console with “tiebreaker” ticked.'
 };
 
 // The parser has no tiebreaker mode — that split happens here, on the JSON it
@@ -43,7 +40,7 @@ function refresh() {
   const isZip = !!file && /\.zip$/i.test(file.name);
   $('#yapp-file-note').textContent = file
     ? `${file.name} · ${size(file.size)}`
-    : 'A .docx packet, or a .zip holding up to 30 of them.';
+    : 'A .docx, or a .zip of up to 30.';
   // Merging only means something for a zip of several packets — and never when
   // splitting into tiebreakers, where merging first would renumber the
   // questions across packets and lose which round each one came from.
@@ -82,7 +79,7 @@ $('#yapp-parse').addEventListener('click', async () => {
   const file = fileInput.files?.[0];
   if (!file) return;
   if (file.size > MAX_BYTES) {
-    return say(`That file is ${size(file.size)}. The parser takes up to ${size(MAX_BYTES)}.`, false);
+    return say(`That file is ${size(file.size)}. The limit is ${size(MAX_BYTES)}.`, false);
   }
   const btn = $('#yapp-parse');
   btn.disabled = true;
@@ -144,7 +141,7 @@ $('#yapp-parse').addEventListener('click', async () => {
     const packets = await parsedPackets(file, envelope ? parsed : null, raw);
     if (packets === null) return unopenableZip();
     if (!packets.length) {
-      if (splitting) say('Nothing to split — no packet came out of that file.', false);
+      if (splitting) say('No packet came out of that file.', false);
       return;
     }
     showChecks(packets);
@@ -204,7 +201,7 @@ function showResult(file, format, text, contentType, isZip, blob) {
   const preview = $('#yapp-preview');
   if (isZip) {
     preview.textContent = '';
-    $('#yapp-preview-note').textContent = 'A zip with one file per packet — download it to open.';
+    $('#yapp-preview-note').textContent = 'A zip, one file per packet.';
     return;
   }
   const CAP = 4000;
@@ -251,7 +248,7 @@ function unopenableZip() {
   $('#yapp-checks-panel').classList.remove('hidden');
   $('#yapp-checks-meta').textContent = '';
   $('#yapp-checks').replaceChildren(el('p', { className: 'hint' },
-    "This browser can't open the zip, so the packets inside it weren't checked. Parse a single .docx to check one."));
+    "This browser can't open the zip, so nothing was checked. Parse one .docx to check it."));
 }
 
 // --- checks ------------------------------------------------------------------
@@ -279,12 +276,12 @@ function splitIntoFiles(file, packets) {
       files.push({ name: `${tb.name}.json`, text: JSON.stringify(tb.packet, null, pretty ? 2 : 0) });
     }
   }
-  if (!files.length) return say('Nothing to split — no tossups came out of this packet.', false);
+  if (!files.length) return say('No tossups came out of this packet.', false);
 
   showResult(file, TIEBREAKERS, '', 'application/zip', true, writeZip(files));
   $('#yapp-preview-note').textContent =
-    `${files.length} file${files.length === 1 ? '' : 's'}, one per tossup — upload them all at once in the ` +
-    'director console with “tiebreaker” ticked.';
+    `${files.length} file${files.length === 1 ? '' : 's'}. Upload them in the director console with ` +
+    '“tiebreaker” ticked.';
   // Any packet the parser refused is listed on its own above; this counts what
   // actually got split, so the two numbers can be read together.
   const from = packets.length > 1 ? ` from ${packets.length} packets` : '';
@@ -357,6 +354,6 @@ $('#yapp-copy').addEventListener('click', async () => {
     await navigator.clipboard.writeText(result.text);
     say('Copied.', true);
   } catch {
-    say('Could not copy — download it instead.', false);
+    say('Could not copy. Download it instead.', false);
   }
 });

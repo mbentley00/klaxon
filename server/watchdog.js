@@ -114,13 +114,12 @@ export function startWatchdog({ io, dataDir, send, to, describe = () => ({}), wi
     if (stalled && stalledWindows >= STALL_WINDOWS && Date.now() - lastEmailAt > EMAIL_GAP_MS) {
       lastEmailAt = Date.now();
       report('Klaxon is stalling', [
-        `The server's event loop has stalled in ${stalledWindows} of the last ${recent.length} ${windowMs / 1000}-second checks ` +
-        `(worst ${w.loopDelayMs.worst} ms frozen, ${w.loopDelayMs.totalStalled} ms frozen in all). Fly's health check allows 3 s, ` +
-        'so new connections are probably being refused right now.',
+        `Event loop stalled in ${stalledWindows} of the last ${recent.length} ${windowMs / 1000}-second checks ` +
+        `(worst ${w.loopDelayMs.worst} ms, ${w.loopDelayMs.totalStalled} ms in all). New connections are probably being refused.`,
         w.throttle && w.throttle.seconds > 1
-          ? `The CPU is being throttled (${w.throttle.seconds.toFixed(1)} s throttled in the last 30 s): the shared-CPU burst credit is likely spent. ` +
-            'Look at what is using it below; a bigger or performance CPU (fly scale vm) buys time.'
-          : 'The CPU is not being throttled, so something in the server itself is blocking — see the traffic below.',
+          ? `CPU throttled ${w.throttle.seconds.toFixed(1)} s in the last 30 s. Burst credit is likely spent. ` +
+            'A bigger CPU (fly scale vm) buys time.'
+          : 'CPU not throttled. Something in the server is blocking.',
       ], w).catch(() => {});
     }
   }, windowMs).unref();
@@ -153,7 +152,7 @@ export function startWatchdog({ io, dataDir, send, to, describe = () => ({}), wi
     report('Klaxon restarted after a crash', [
       crash
         ? `The server died with ${crash.kind}: ${crash.message}`
-        : 'The server did not shut down cleanly (no crash was recorded — likely killed for memory, or the machine was stopped).',
+        : 'The server did not shut down cleanly. No crash was recorded, so it was likely killed for memory or stopped.',
       previous ? `That run started at ${previous.startedAt}.` : '',
       crash?.stack ? `<pre style="white-space:pre-wrap;font-size:12px">${esc(crash.stack)}</pre>` : '',
     ], crash?.lastWindow || null).catch(() => {});

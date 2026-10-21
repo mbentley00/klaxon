@@ -15,7 +15,7 @@ function readRosterPaste() {
   const { teams, skipped } = parseSpreadsheet(text);
   pastedTeams = teams;
   if (!teams.length) {
-    note.textContent = "Couldn't find any teams there. Copy whole rows, with the header row (Team Name, Player 1, …).";
+    note.textContent = "No teams found. Copy whole rows with the header (Team Name, Player 1, …).";
     return;
   }
   const players = teams.reduce((n, t) => n + t.players.length, 0);
@@ -24,7 +24,7 @@ function readRosterPaste() {
   note.textContent = `Found ${plural(teams.length, 'team')} (${plural(players, 'player')}): `
     + (names.length > 8 ? names.slice(0, 8).join(', ') + `, and ${names.length - 8} more` : names.join(', ')) + '.'
     + (skipped ? ` Skipped ${plural(skipped, 'row')} with no players.` : '')
-    + (unnamed ? ` ${unnamed} had no team name and got a placeholder; fix it in the director console.` : '');
+    + (unnamed ? ` ${unnamed} had no team name. Fix it in the console.` : '');
 }
 $('#t-roster-paste').addEventListener('input', readRosterPaste);
 
@@ -151,7 +151,7 @@ async function startEditing() {
   cancel.classList.remove('hidden');
 
   editToken = await directorTokenFor(editCode);
-  if (!editToken) return say(`Only ${editCode}'s director can change its settings. Open it from the browser that created it, or sign in to the account that did.`, false);
+  if (!editToken) return say(`Only ${editCode}'s director can change its settings. Sign in to the account that created it.`, false);
   let t;
   try { t = await api('GET', `/api/tournaments/${editCode}`); } catch (e) { return say('Could not load the tournament: ' + e.message, false); }
   try {
@@ -221,9 +221,8 @@ async function startEditing() {
 
   const rooms = t.rooms?.length || 0;
   $('#edit-note').textContent = `${t.code} · ${shootout ? 'Shootout' : 'Teams'} (can't be changed).`
-    + ' Display and buzz-recording changes reach every room at once. Scoring applies to games started after you save.'
-    + (rooms ? ` Room settings apply to rooms you add from now on; the ${rooms} existing room${rooms === 1 ? ' keeps' : 's keep'} their own.` : '')
-    + ' Packets and the roster are in the director console.';
+    + ' Scoring applies to games started after you save.'
+    + (rooms ? ' Room settings apply to new rooms only.' : '');
   $('#edit-note').classList.remove('hidden');
   $('#defaults-legend').textContent = 'Rooms added from now on start with';
   btn.disabled = false;
@@ -231,7 +230,7 @@ async function startEditing() {
 
 async function saveEdits() {
   if (gamesPlayed && scoringNow() !== loadedScoring
-    && !confirm(`${gamesPlayed} game${gamesPlayed === 1 ? ' has' : 's have'} already been scored. They keep the format they were read with; only games started from now on use the new scoring.\n\nSave the new scoring?`)) {
+    && !confirm(`${gamesPlayed} game${gamesPlayed === 1 ? ' has' : 's have'} been scored and keep${gamesPlayed === 1 ? 's' : ''} the old scoring. Save the new scoring for later games?`)) {
     return;
   }
   const body = {

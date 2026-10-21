@@ -29,13 +29,11 @@
 
   <main class="stage create-page">
     <p><a id="ro-back" href="#">← Back to the reader</a></p>
-    <p id="ro-denied" class="warn-box hidden">These are the room's settings, for its reader. Open them from the
-      reader page (Buzzer options), or use the room's reader link.</p>
+    <p id="ro-denied" class="warn-box hidden">Only the reader can change these. Open them from the reader page.</p>
 
     <form id="ro-form" class="panel create-form hidden" onsubmit="return false">
       <h3>Room options</h3>
-      <p class="hint">They apply at once, to everyone in the room. Starting, finishing and moving on to the next
-        game are on the reader page.</p>
+      <p class="hint">Changes apply at once.</p>
 
       <fieldset class="opt-defaults">
         <legend>Buzzing</legend>
@@ -74,7 +72,7 @@
         <legend>The room</legend>
         <label class="toggle"><input type="checkbox" id="ro-chat" /> Give the room a chat</label>
         <label class="toggle"><input type="checkbox" id="ro-listed" /> List this game on the Klaxon home page</label>
-        <label class="toggle hidden" id="ro-evening-row"><input type="checkbox" id="ro-evening" /> Running totals for the evening (each player's points across packets)</label>
+        <label class="toggle hidden" id="ro-evening-row"><input type="checkbox" id="ro-evening" /> Running totals across packets</label>
       </fieldset>
       <p id="ro-msg" class="msg" role="status"></p>
     </form>
@@ -95,8 +93,7 @@
           <button type="button" class="copy-btn tiny" data-target="ro-coreader-link">Copy</button>
         </span>
       </label>
-      <p class="hint"><a id="ro-log" href="#" download>Download the activity log</a> — buzz times, who cleared
-        what, withdrawals and chat, for working out what happened.</p>
+      <p class="hint"><a id="ro-log" href="#" download>Download the activity log</a> (buzzes, clears, withdrawals, chat).</p>
     </section>
   </main>
 

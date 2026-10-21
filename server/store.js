@@ -2074,11 +2074,11 @@ const stampOf = (at) => {
 // Why a buzz didn't make it. The stored reasons are the server's words for it
 // (see recordBuzz); these are the moderator's.
 const BUZZ_REASONS = {
-  locked: 'the buzzer was already locked',
-  queued: 'already in the queue',
-  duplicate: 'too many tries on this question',
+  locked: 'buzzer locked',
+  queued: 'already queued',
+  duplicate: 'out of tries',
   not_player: 'not a player',
-  not_open: 'the buzzer was not open'
+  not_open: 'buzzer not open'
 };
 
 const OPTION_LABELS = {
@@ -2108,21 +2108,21 @@ function logLine(e, room) {
     case 'reset_buzzer': {
       const dropped = (e.dropped || []).filter(Boolean);
       const what = e.judged === true
-        ? 'cleared the buzzer after scoring it'
-        : 'CLEARED the buzzer without scoring it (counted as an accidental buzz)';
-      const lost = dropped.length ? ` \u2014 dropped ${dropped.join(', ')}` : ' \u2014 nobody was on it';
+        ? 'cleared after scoring'
+        : 'CLEARED without scoring (accidental buzz)';
+      const lost = dropped.length ? `, dropped ${dropped.join(', ')}` : ', nobody on it';
       return ['CLEAR', `${who} ${what}${lost}`];
     }
     case 'restore_buzzes':
-      return ['UNDO', `${who} undid the last clear — ${(e.restored || []).join(', ')} back in the queue`];
+      return ['UNDO', `${who} undid the clear (${(e.restored || []).join(', ')} back in)`];
     case 'next_buzz':
-      return ['NEXT', `${who} moved past ${e.done || 'the buzz'}${e.headName ? ` \u2014 now on ${e.headName}` : ' \u2014 queue empty'}`];
+      return ['NEXT', `${who} moved past ${e.done || 'the buzz'}${e.headName ? `, now ${e.headName}` : ', queue empty'}`];
     case 'withdraw': {
       const by = e.byPlayer ? `${e.name || e.playerId} withdrew` : `${who} withdrew ${e.name || e.playerId}`;
       return ['WITHDRAW', `${by} (${e.free ? 'free' : 'not free'}: ${e.reason})`];
     }
     case 'buzz':
-      return ['QUEUE', `buzz window resolved \u2014 ${e.size} waiting`];
+      return ['QUEUE', `buzz window resolved, ${e.size} waiting`];
     case 'join':
       return ['JOIN', `${e.name || e.playerId} joined as ${e.role || 'player'}`];
     case 'rejoin':
@@ -2136,11 +2136,11 @@ function logLine(e, room) {
     case 'stuck_alert':
       return ['ALERT', `${e.name || e.playerId} says the buzzer is stuck`];
     case 'end_game':
-      return ['END', `${who} ended the game — players sent home, room off the home page`];
+      return ['END', `${who} ended the game`];
     case 'reopen_game':
       return ['END', `${who} reopened the game`];
     case 'set_options':
-      return ['OPTIONS', `settings changed \u2014 on: ${optionSummary(e.settings)}`];
+      return ['OPTIONS', `settings on: ${optionSummary(e.settings)}`];
     case 'set_roster':
       return ['ROSTER', `roster loaded (${e.teams} teams)`];
     case 'clear_roster':
@@ -2178,7 +2178,7 @@ export function activityLog(room) {
       const mark = b.accidental ? ', later cleared as accidental' : '';
       rows.push([b.at, 'BUZZ', `${b.name} buzzed${ms ? ` (+${ms}ms)` : ' (first)'}${mark}${q}`]);
     } else {
-      rows.push([b.at, 'no buzz', `${b.name} pressed but did not get in \u2014 ${BUZZ_REASONS[b.reason] || b.reason || 'turned away'}${q}`]);
+      rows.push([b.at, 'no buzz', `${b.name} did not get in (${BUZZ_REASONS[b.reason] || b.reason || 'turned away'})${q}`]);
     }
   }
 
@@ -2199,16 +2199,14 @@ export function activityLog(room) {
     year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
   });
   const head = [
-    `${room.shootoutSession?.name || room.name || 'Klaxon room'} \u2014 activity log`,
+    `Activity log \u00b7 ${room.shootoutSession?.name || room.name || 'Klaxon room'}`,
     `Room ${room.code} \u00b7 downloaded ${when(Date.now())}`,
     rows.length
       ? `${rows.length} events, ${when(rows[0][0])} to ${when(rows[rows.length - 1][0])}`
-      : 'Nothing has happened here yet.',
+      : 'No activity yet.',
     '',
-    'Times are the server\u2019s own clock \u2014 the clock buzzes are ordered on. A buzz says',
-    'how far behind the winning buzz it was. A CLEAR says whether the moderator had',
-    'scored that buzz first; one that was not scored is the room calling it an',
-    'accidental buzz.',
+    'Times are the server\u2019s clock. +ms is how far behind the winning buzz.',
+    'A CLEAR without scoring counts as an accidental buzz.',
     ''
   ];
   const body = rows.map(([at, kind, text]) =>
@@ -2229,10 +2227,10 @@ export function activityLog(room) {
  */
 const RECENT_LIMIT = 40;
 const RECENT_MISS = {
-  locked: 'too late — the buzzer was locked',
-  queued: 'already in the queue',
-  duplicate: 'out of tries this question',
-  not_open: 'the buzzer was not open'
+  locked: 'too late',
+  queued: 'already queued',
+  duplicate: 'out of tries',
+  not_open: 'buzzer not open'
 };
 export function recentActivity(room, limit = RECENT_LIMIT) {
   const items = [];
@@ -2264,7 +2262,7 @@ export function recentActivity(room, limit = RECENT_LIMIT) {
       pressed.add(key);
       items.push({
         at: b.at, kind: 'miss', question: b.question ?? null,
-        text: `${b.name} pressed — ${RECENT_MISS[b.reason] || 'did not get in'}`
+        text: `${b.name} pressed (${RECENT_MISS[b.reason] || 'did not get in'})`
       });
     }
   }
@@ -2280,19 +2278,19 @@ export function recentActivity(room, limit = RECENT_LIMIT) {
         const how = e.judged === true ? 'cleared after scoring' : 'cleared without scoring';
         items.push({
           at: e.at, kind: e.judged === true ? 'clear' : 'clear-accidental', question: e.question ?? null,
-          text: `${who} ${how}${dropped ? ` — dropped ${dropped}` : ' — nobody was on it'}`,
+          text: `${who} ${how}${dropped ? `, dropped ${dropped}` : ', nobody on it'}`,
           note: e.restored ? 'undone' : null,
           undoId: undo && undo === e ? e.id : null
         });
         break;
       }
       case 'restore_buzzes':
-        items.push({ at: e.at, kind: 'restore', text: `${who} undid the clear — ${names(e.restored)} back in` });
+        items.push({ at: e.at, kind: 'restore', text: `${who} undid the clear (${names(e.restored)} back in)` });
         break;
       case 'next_buzz':
         items.push({
           at: e.at, kind: 'next',
-          text: `${who} moved past ${e.done || 'the buzz'}${e.headName ? ` — now ${e.headName}` : ''}`
+          text: `${who} moved past ${e.done || 'the buzz'}${e.headName ? `, now ${e.headName}` : ''}`
         });
         break;
       case 'withdraw': {

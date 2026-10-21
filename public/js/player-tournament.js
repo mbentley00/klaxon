@@ -14,7 +14,7 @@ async function init() {
   } catch (e) {
     $('#tp-locked').classList.remove('hidden');
     if (e.message !== 'bad_key') {
-      $('#tp-msg').textContent = 'Tournament not found — check the link.';
+      $('#tp-msg').textContent = 'Tournament not found. Check the link.';
       $('#tp-msg').className = 'msg bad';
     }
     return;
@@ -48,7 +48,7 @@ async function init() {
     rooms.append(li);
   }
   if (view.rooms.length === 0) {
-    rooms.append(el('li', {}, el('span', { className: 'pjoined' }, 'No rooms yet — check back closer to start time.')));
+    rooms.append(el('li', {}, el('span', { className: 'pjoined' }, 'No rooms yet.')));
   }
 
   // Round schedule (if the director entered one): round -> matchups.
