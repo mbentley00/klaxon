@@ -77,12 +77,18 @@
       <p>Each round's packet needs:</p>
       <ul>
         <li><strong>More than 20 tossups.</strong> 26 uses all six bans.</li>
-        <li><strong>A subcategory on every tossup</strong>, as the last part of its metadata, after the
-          last comma: <code>&lt;Author, Science - Biology&gt;</code>.</li>
+        <li><strong>A subcategory on every tossup</strong>, after the author in its metadata, written
+          <em>Category - Subcategory</em>: <code>&lt;Author, Science - Biology&gt;</code>. Commas inside
+          the name are fine (<code>History - Cross, Historiography, and Miscellaneous</code>).</li>
         <li><strong>At least two different subcategories.</strong></li>
       </ul>
       <p>A packet that doesn't qualify is read in full, without a pick/ban. Upload packets on the
         <strong>Packets &amp; roster</strong> tab. New rounds start hidden from moderators.</p>
+      <p>Under each round, the tab checks the packet: <strong>✓</strong> when it's ready,
+        <strong>⚠</strong> when the pick/ban works but something looks off (tossups with no
+        subcategory, a name where the subcategory should be, the same subcategory spelled two ways),
+        and <strong>✕</strong> when the round won't get a pick/ban, with the reason. Fix the packet
+        and use <strong>Replace…</strong>. <em>Subcategories</em> lists what the teams will see.</p>
       <figure class="shot">
         <img src="/img/massinger/02-packets.png" width="648" height="533" loading="lazy"
              alt="The Round packets list in the director console: four rounds of 26 tossups each, Round 1 visible, and a Release Round 2 packet button." />
@@ -125,6 +131,9 @@
         make the picks. Untick anyone who starts on the bench. Under <strong>Pick/ban</strong>, check who
         picks first (a coin flip unless you choose), who makes the picks, and the seconds per pick.
         Then click <strong>Begin pick/ban</strong>.</p>
+      <p>If the packet has a problem, this screen says so: a yellow note when the pick/ban works but
+        the subcategories look off, or <em>No pick/ban for this round</em> with the reason. Tell the
+        director: once they replace the packet, start the round again.</p>
       <figure class="shot">
         <img src="/img/massinger/04-mod-lobby.png" width="592" height="887" loading="lazy"
              alt="Set up the game: Lakeside A and Northfield A chosen, four players connected and ticked, and the pick/ban options with a Begin pick/ban button." />

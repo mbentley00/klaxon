@@ -289,7 +289,7 @@
       <h4>Director checklist</h4>
       <ol class="help-checklist">
         <li><strong>Create</strong> a team tournament. Tick <em>MASSINGER pick/ban</em>, then pick who picks and the seconds per pick.</li>
-        <li><strong>Upload packets</strong>: over 20 tossups each (26 for all six bans), with the subcategory last in each tossup's metadata: <code>&lt;Author, Science - Biology&gt;</code>.</li>
+        <li><strong>Upload packets</strong>: over 20 tossups each (26 for all six bans), with each tossup's subcategory after the author in its metadata: <code>&lt;Author, Science - Biology&gt;</code>. The Packets tab checks each round.</li>
         <li><strong>Upload the roster.</strong></li>
         <li><strong>Add rooms</strong>, then send moderators their reader links or the moderator invite link (and approve requests).</li>
         <li><strong>Share</strong> the player landing page or the room links.</li>
@@ -314,9 +314,10 @@
           the pick/ban starts (stopping early if only 20 are left), nothing is protected, and the teams
           don't pick at all. Both can be changed later in the tournament's settings, and per game by the moderator.</li>
         <li><strong>Check the packets.</strong> Each round needs more than 20 tossups (26 uses all six bans), and every tossup
-          needs its subcategory as the last part of its metadata, after the last comma
-          (<code>&lt;Author, Science - Biology&gt;</code>), with at least two different subcategories.
-          A packet that doesn't qualify is read in full, without a pick/ban.</li>
+          needs its subcategory after the author in its metadata, written
+          <em>Category - Subcategory</em> (<code>&lt;Author, Science - Biology&gt;</code>), with at
+          least two different subcategories. A packet that doesn't qualify is read in full, without
+          a pick/ban. The Packets tab checks every round and says what's wrong.</li>
         <li><strong>Upload the roster</strong> (Packets &amp; roster). Moderators then choose teams from it
           instead of typing names. With roster joining on, players also pick their team and name when
           they join, so they're already on the right team.</li>

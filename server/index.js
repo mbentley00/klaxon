@@ -25,6 +25,7 @@ import { startBackups } from './backup.js';
 import { roundSummary } from './scorecard.js';
 import { buildZip } from './zip.js';
 import { toPacketNumbers } from './packetNumbers.js';
+import { checkMassingerPacket } from './massingerCheck.js';
 import * as accounts from './accounts.js';
 import { parseYellowFruit, planImport } from './yfimport.js';
 import { buildYft } from './yft.js';
@@ -1081,6 +1082,14 @@ app.get('/api/tournaments/:code/packets', ah(async (req, res) => {
   const bucket = { kind: 't', code: t.code };
   const games = await gamesByRound(bucket).catch(() => new Map());
   const packets = (await artifacts.listPackets(bucket)).map((p) => ({ ...p, games: games.get(p.round) || 0 }));
+  // MASSINGER: whether each playing round gets a pick/ban, and what's off about
+  // its subcategories, so the director can fix a packet before the day.
+  if (t.format?.massinger) {
+    await Promise.all(packets.filter((p) => !p.tiebreaker).map(async (p) => {
+      try { p.massinger = checkMassingerPacket(JSON.parse(await artifacts.getPacket(bucket, p.round))); }
+      catch { /* unreadable: no check */ }
+    }));
+  }
   res.json({ packets, alwaysOpen: packetsAlwaysOpen(t) });
 }));
 

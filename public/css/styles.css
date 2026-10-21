@@ -1642,3 +1642,17 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .help .shot-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
 .help .shot-pair figure.shot { margin: 0; }
 .help .shot-pair img { margin: 0 auto; }
+
+/* MASSINGER packet check, under each round on the Packets tab. */
+.packet-row .ms-check { flex: 1 0 100%; font-size: .85rem; border-left: 3px solid var(--line); padding: 2px 0 2px 10px; margin: 2px 0 4px; }
+.packet-row .ms-check.ok { border-left-color: var(--ok-deep); color: var(--muted); }
+.packet-row .ms-check.warn { border-left-color: var(--warn); }
+.packet-row .ms-check.bad { border-left-color: var(--bad); }
+.ms-check-head { font-weight: 700; }
+.ms-check.ok .ms-check-head { color: var(--ok-deep); font-weight: 600; }
+.ms-check.warn .ms-check-head { color: var(--warn); }
+.ms-check.bad .ms-check-head { color: var(--bad); }
+.ms-check-issues { margin: 2px 0; padding-left: 1.2em; }
+.ms-check-issues li { display: list-item; border: 0; padding: 1px 0; }
+.ms-check-list summary { font-size: .8rem; color: var(--muted); font-weight: 600; margin: 2px 0; }
+.ms-check-list p { margin: 2px 0 4px; color: var(--muted); overflow-wrap: anywhere; }

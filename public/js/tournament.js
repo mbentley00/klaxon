@@ -1036,9 +1036,32 @@ async function refreshPackets() {
       if (p.tiebreaker && p.tossups !== 1) controls.append(splitButton(p));
       controls.append(replaceButton(p, i + 1), deleteButton(p, i + 1));
       li.append(controls);
+      if (p.massinger) li.append(massingerCheckRow(p.massinger));
       ul.append(li);
     });
   } catch { /* ignore */ }
+}
+
+// MASSINGER: under each playing round, whether it gets a pick/ban and anything
+// off about its subcategories, with the full list one click away.
+function massingerCheckRow(c) {
+  const box = el('div', { className: 'ms-check' + (c.applies ? (c.issues.length ? ' warn' : ' ok') : ' bad') });
+  const head = c.applies
+    ? (c.issues.length ? `⚠ Pick/ban: ${c.subcats.length} subcategories. Check:` : `✓ Pick/ban: ${c.subcats.length} subcategories`)
+    : '✕ No pick/ban for this round';
+  box.append(el('div', { className: 'ms-check-head' }, head));
+  if (c.issues.length) {
+    const ul = el('ul', { className: 'ms-check-issues' });
+    for (const iss of c.issues) ul.append(el('li', {}, iss.text));
+    box.append(ul);
+  }
+  if (c.subcats.length) {
+    const det = el('details', { className: 'ms-check-list' });
+    det.append(el('summary', {}, 'Subcategories'));
+    det.append(el('p', {}, c.subcats.map((s) => `${s.label}${s.count > 1 ? ` ×${s.count}` : ''}`).join(' · ')));
+    box.append(det);
+  }
+  return box;
 }
 
 // One-click release of the next round: the button always names exactly which
