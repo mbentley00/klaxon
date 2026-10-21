@@ -103,20 +103,8 @@ export function buildYft(t, stats, roster) {
   // --- rounds: YellowFruit numbers them, in order across the phases. A round
   // already called by a number keeps it where it can; the label it had here
   // goes on as its packet name.
-  const roundNumber = new Map();
-  let next = 1;
-  const taken = new Set();
-  for (const phase of stats.phases || []) {
-    for (const label of phase.rounds) {
-      if (roundNumber.has(label)) continue;
-      const m = String(label).match(/\d+/);
-      let n = m ? Number(m[0]) : NaN;
-      if (!Number.isFinite(n) || n < next || taken.has(n)) n = next;
-      roundNumber.set(label, n);
-      taken.add(n);
-      next = n + 1;
-    }
-  }
+  // (computeStats numbers them; the HTML report shows the same numbers.)
+  const roundNumber = stats.roundNumbers || new Map();
 
   let matchId = 0;
   const phases = (stats.phases || []).filter((ph) => ph.rounds.length > 0).map((ph, i) => {

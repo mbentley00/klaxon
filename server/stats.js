@@ -67,10 +67,13 @@ function aggregate(matches) {
     return x;
   };
 
+  const perRound = new Map();   // games so far in each round: a game's place on the scoreboard
   for (const match of matches) {
     const qbj = match?.qbj || match;
     if (!qbj || !Array.isArray(qbj.match_teams) || qbj.match_teams.length === 0) continue;
     const round = String(qbj._round ?? '');
+    const gameIndex = perRound.get(round) || 0;
+    perRound.set(round, gameIndex + 1);
     // Still being read (live sync): show it on the scoreboard, but don't record
     // a win/loss/tie until the game is over.
     const live = qbj._inProgress === true;
@@ -116,13 +119,13 @@ function aggregate(matches) {
         else if (winnerIndex === i) { team.wins += 1; result = 'W'; }
         else { team.losses += 1; result = 'L'; }
       }
-      team.gameLog.push({ round, opponent: opp?.teamName || 'Bye', result, live, points: pt.total, oppPoints: opp?.total ?? 0, tuh, ac: pt.teamAc, bonusPoints: pt.bonusPoints, bonusesHeard: pt.positives });
+      team.gameLog.push({ round, gameIndex, opponent: opp?.teamName || 'Bye', result, live, points: pt.total, oppPoints: opp?.total ?? 0, tuh, ac: pt.teamAc, bonusPoints: pt.bonusPoints, bonusesHeard: pt.positives });
       for (const pr of pt.playerRows) {
         const player = getPlayer(pt.teamName, pr.name);
         player.gp += tuh > 0 ? pr.tuh / tuh : 0;
         player.tuh += pr.tuh; player.points += pr.points;
         for (const [v, c] of pr.ac) player.ac.set(v, (player.ac.get(v) || 0) + c);
-        player.gameLog.push({ round, opponent: opp?.teamName || 'Bye', tuh: pr.tuh, ac: pr.ac, points: pr.points });
+        player.gameLog.push({ round, gameIndex, opponent: opp?.teamName || 'Bye', result, teamPoints: pt.total, oppPoints: opp?.total ?? 0, gameTuh: tuh, tuh: pr.tuh, ac: pr.ac, points: pr.points });
       }
     });
 
@@ -140,11 +143,15 @@ function aggregate(matches) {
   return { teams, players, rounds, games, answerValues };
 }
 
+// Rounds in playing order: by the round's number where it has one ("PARAGONE
+// Round 2" before "PARAGONE Round 10"), otherwise by name with numbers compared
+// as numbers. Plain text order put Round 10 second and scrambled every report
+// and the .yft numbering after it.
 function sortRoundLabels(labels) {
   return [...labels].sort((a, b) => {
-    const na = Number(a), nb = Number(b);
-    if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
-    return String(a).localeCompare(String(b));
+    const na = roundNumberOf(a), nb = roundNumberOf(b);
+    if (na != null && nb != null && na !== nb) return Number(na) - Number(nb);
+    return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
   });
 }
 
@@ -363,7 +370,9 @@ export function computeStats(allMatches, structure, describeRoom) {
   }
 
   const global = aggregate(matches);
-  const answerValues = [...global.answerValues].sort((a, b) => b - a);
+  // A 0-point answer (a buzz that earned nothing) isn't a scoring column in
+  // YellowFruit or anywhere else.
+  const answerValues = [...global.answerValues].filter((v) => v !== 0).sort((a, b) => b - a);
   const positiveValues = [...global.answerValues].filter((v) => v > 0).sort((a, b) => a - b);
   const getValue = positiveValues.length ? positiveValues[0] : 10;
   const isPower = (v) => v > getValue;
@@ -406,9 +415,29 @@ export function computeStats(allMatches, structure, describeRoom) {
 
   const anyTies = [...global.teams.values()].some((t) => t.ties > 0);
 
+  // Round numbers as YellowFruit gives them (the .yft export uses these too):
+  // in order across the phases, a round already called by a number keeping it
+  // where it can.
+  const roundNumbers = new Map();
+  let next = 1;
+  const taken = new Set();
+  for (const ph of phases) {
+    for (const label of ph.rounds) {
+      if (roundNumbers.has(label)) continue;
+      const own = roundNumberOf(label);
+      let n = own != null ? Number(own) : NaN;
+      if (!Number.isFinite(n) || n < next || taken.has(n)) n = next;
+      roundNumbers.set(label, n);
+      taken.add(n);
+      next = n + 1;
+    }
+  }
+  // Bonuses: the caller may know the format; otherwise, did anyone score one.
+  const useBonuses = [...global.teams.values()].some((t) => t.bonusPoints > 0);
+
   return {
-    answerValues, getValue, isPower, anyTies,
-    phases, rounds, scoreboard,
+    answerValues, getValue, isPower, anyTies, useBonuses,
+    phases, rounds, scoreboard, roundNumbers,
     liveGames: liveGameRows(liveMatches, describeRoom),
     teamsGlobal: [...global.teams.values()],
     playersGlobal: [...global.players.values()],

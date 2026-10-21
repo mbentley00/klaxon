@@ -1895,7 +1895,10 @@ async function statsFor(code) {
   try { matches = await artifacts.readAllExports(bucket); } catch { matches = []; }
   if (!t && matches.length === 0) return null;
   const structure = await artifacts.getStructure(bucket).catch(() => null);
-  return { t: t || { code: upper, name: upper }, stats: computeStats(matches, structure, store.describeRoom), matchCount: matches.length };
+  const stats = computeStats(matches, structure, store.describeRoom);
+  // The format says whether there are bonuses; the data only guesses.
+  if (typeof t?.format?.hasBonuses === 'boolean') stats.useBonuses = t.format.hasBonuses;
+  return { t: t || { code: upper, name: upper }, stats, matchCount: matches.length };
 }
 
 // Director sets/gets the tournament structure (phases + divisions). The GET also

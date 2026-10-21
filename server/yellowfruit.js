@@ -422,49 +422,109 @@ ${sections}
   return pageShell('Scoreboard', link, body, pages);
 }
 
+// --- YellowFruit 4 markup helpers --------------------------------------------
+// The Team Detail and Player Detail pages are ported from YellowFruit 4.0.18's
+// own report code (StatReportHtml), helper for helper, so the HTML matches what
+// YellowFruit writes: same tables, cells, attributes and links.
+const yAttr = (o, k) => (o[k] === undefined ? '' : `${k}="${o[k]}"`);
+const yX = (tag, ...kids) => `<${tag}>\n${kids.join('\n')}\n</${tag}>`;
+const yJ = (tag, attrs, ...kids) => `<${tag} ${attrs.join(' ')}>\n${kids.join('\n')}\n</${tag}>`;
+const yK = (o, c) => `<td ${yAttr(o, 'align')} ${yAttr(o, 'title')} ${yAttr(o, 'style')} ${yAttr(o, 'width')}>${o.bold ? yX('b', c) : c}</td>`;
+const yY = (c, right, width) => { const o = { bold: true }; if (right) o.align = 'right'; if (width) o.width = width; return yK(o, c); };
+const yq = (c) => yK({}, c);
+const yQ = (c) => yK({ align: 'right' }, c);
+const yG = (cells) => `<tr>\n${cells.join('\n')}\n</tr>`;
+const yU = (cells) => `<tr class=pseudoTFoot>\n${cells.join('\n')}\n</tr>`;
+const yH = (rows, width, cls) => `<table  ${cls !== undefined ? `class=${cls}` : ''} ${width !== undefined ? `width=${width}` : ''}>\n${rows.join('\n')}\n</table>`;
+const yA = (href, text) => `<a HREF=${href}>${text}</a>`;
+const yAbbr = (label, title) => yJ('abbr', [`title="${title}"`], label);
+const MDASH = '&mdash;';
+// YellowFruit's Team.getTruncatedName: 35 characters, trimmed, then "...".
+const yTrunc = (name, n = 35) => (name.length <= n ? name : `${name.substring(0, n).trim()}...`);
+const REG_TUH = 20;
+const ABBR = {
+  tuh: () => yAbbr('TUH', 'Tossups heard'),
+  bhrd: () => yAbbr('BHrd', 'Bonuses heard'),
+  bpts: () => yAbbr('BPts', 'Points scored on bonuses'),
+  ppb: () => yAbbr('PPB', 'Points per bonus'),
+  gp: () => yAbbr('GP', 'Games played'),
+  pptuh: () => yAbbr(`PP${REG_TUH}TUH`, `Points per ${REG_TUH} tossups heard`),
+};
+
+// The shared pieces of a game row: round number, stage, opponent, W/L, score.
+function detailContext(stats, link) {
+  const multiPhase = (stats.phases || []).length >= 2;
+  const roundNo = (r) => String(stats.roundNumbers?.get(r) ?? r);
+  const stageCell = (r) => {
+    const ph = stats.roundToPhase?.(r);
+    if (!ph) return yq('');
+    return ph.color ? yJ('td', [`style="background-color:${ph.color}30"`], esc(ph.name)) : yq(esc(ph.name));
+  };
+  const teamLink = (name, full = false) => yA(link('teamdetail', teamAnchor(name)), esc(full ? name : yTrunc(name)));
+  const scoreLink = (g, mine, theirs) => yA(link('games', `Match_${anchor(g.round)}_${g.gameIndex}`), `${mine} - ${theirs}`);
+  const inOrder = (log) => [...log].sort((a, b) =>
+    (Number(roundNo(a.round)) - Number(roundNo(b.round))) || String(a.round).localeCompare(String(b.round)) || (a.gameIndex - b.gameIndex));
+  return { multiPhase, roundNo, stageCell, teamLink, scoreLink, inOrder };
+}
+const record = (t) => `${t.wins}-${t.losses}${t.ties ? `-${t.ties}` : ''}`;
+const byUpper = (a, b) => { const x = a.toLocaleUpperCase(), y = b.toLocaleUpperCase(); return x < y ? -1 : x > y ? 1 : 0; };
+
 // --- Team Detail -----------------------------------------------------------
 export function renderTeamDetail(stats, link, pages) {
-  const teams = [...stats.teamsGlobal].sort((a, b) => a.name.localeCompare(b.name));
-  const valueCols = stats.answerValues;
+  const ctx = detailContext(stats, link);
+  const values = stats.answerValues;
+  const bonuses = stats.useBonuses !== false;
+  const teams = [...stats.teamsGlobal].sort((a, b) => byUpper(a.name, b.name));
 
   const sections = teams.map((t) => {
-    const header = `<tr>
-${th('Round', { width: '8%' })}
-${th('Opponent', { width: '25%' })}
-${th('Result', { width: '8%' })}
-${th('PF', { align: true, width: '6%', abbr: 'Points for' })}
-${th('PA', { align: true, width: '6%', abbr: 'Points against' })}
-${valueCols.map((v) => th(String(v), { align: true, width: '5%' })).join('\n')}
-${th('TUH', { align: true, width: '6%' })}
-${th('PPB', { align: true, width: '7%' })}
-</tr>`;
-    const rows = t.gameLog.map((g) => `<tr>
-${td(esc(g.round))}
-${td(esc(g.opponent))}
-${td(g.live ? 'in progress' : (g.result || '—'))}
-${td(String(g.points), { align: true })}
-${td(String(g.oppPoints), { align: true })}
-${valueCols.map((v) => td(String(g.ac.get(v) || 0), { align: true })).join('\n')}
-${td(String(g.tuh), { align: true })}
-${td(f2(ppb(g.bonusPoints, g.bonusesHeard)), { align: true })}
-</tr>`).join('\n');
-    const foot = `<tr class=pseudoTFoot>
-${td(`<b>Total (${t.wins}-${t.losses}${stats.anyTies ? '-' + t.ties : ''})</b>`)}
-${td('')}
-${td('')}
-${td(`<b>${t.totalPoints}</b>`, { align: true })}
-${td('')}
-${valueCols.map((v) => td(`<b>${t.ac.get(v) || 0}</b>`, { align: true })).join('\n')}
-${td(`<b>${t.tuh}</b>`, { align: true })}
-${td(`<b>${f2(ppb(t.bonusPoints, t.bonusesHeard))}</b>`, { align: true })}
-</tr>`;
-    return `<div id=${teamAnchor(t.name)} class="boxScoreAnchor"></div>
-${sectionHeader(t.name)}
-<table  class=fwBelow1000px >
-${header}
-${rows}
-${foot}
-</table>`;
+    // Games
+    const head = [yK({ bold: true, width: '5%' }, 'Round')];
+    if (ctx.multiPhase) head.push(yK({ bold: true, width: '12%' }, 'Stage'));
+    head.push(yY('Opponent'), yY(''), yY('Score'));
+    for (const v of values) head.push(yY(String(v), true, '5%'));
+    head.push(yY(ABBR.tuh(), true));
+    if (bonuses) head.push(yY(ABBR.bhrd(), true), yY(ABBR.bpts(), true), yY(ABBR.ppb(), true));
+    const rows = [yG(head)];
+    for (const g of ctx.inOrder(t.gameLog)) {
+      const c = [yq(ctx.roundNo(g.round))];
+      if (ctx.multiPhase) c.push(ctx.stageCell(g.round));
+      c.push(yq(ctx.teamLink(g.opponent)), yq(g.result || ''), yq(ctx.scoreLink(g, g.points, g.oppPoints)));
+      for (const v of values) c.push(yQ(String(g.ac.get(v) || 0)));
+      c.push(yQ(String(g.tuh)));
+      if (bonuses) {
+        const p = g.bonusesHeard > 0 ? (g.bonusPoints / g.bonusesHeard).toFixed(2) : '--';
+        c.push(yQ(String(g.bonusesHeard)), yQ(String(g.bonusPoints)), yQ(p));
+      }
+      rows.push(yG(c));
+    }
+    const foot = [yq('')];
+    if (ctx.multiPhase) foot.push(yq(''));
+    foot.push(yY('Total'), yY(record(t)), yY(''));
+    for (const v of values) foot.push(yY(String(t.ac.get(v) || 0), true));
+    foot.push(yY(String(t.tuh), true));
+    if (bonuses) {
+      const p = t.bonusesHeard > 0 ? (t.bonusPoints / t.bonusesHeard).toFixed(2) : MDASH;
+      foot.push(yY(String(t.bonusesHeard), true), yY(String(t.bonusPoints), true), yY(p, true));
+    }
+    rows.push(yU(foot));
+
+    // Players (those who heard a tossup), best points per 20 first
+    const players = stats.playersGlobal.filter((p) => p.team === t.name && p.tuh > 0)
+      .sort((a, b) => (b.points / b.tuh) - (a.points / a.tuh));
+    let playerTable = '';
+    if (players.length) {
+      const ph = [yY('Player'), yY(ABBR.gp(), true)];
+      for (const v of values) ph.push(yY(String(v), true, '5%'));
+      ph.push(yY(ABBR.tuh(), true, '10%'), yY(ABBR.pptuh(), true, '12%'));
+      const prow = players.map((p) => {
+        const c = [yq(yA(link('playerdetail', playerAnchor(p.team, p.name)), esc(p.name))), yQ(p.gp.toFixed(1))];
+        for (const v of values) c.push(yQ(String(p.ac.get(v) || 0)));
+        c.push(yQ(String(p.tuh)), yQ(((p.points / p.tuh) * REG_TUH).toFixed(2)));
+        return yG(c);
+      });
+      playerTable = yH([yG(ph), ...prow], undefined, 'fwBelow800px');
+    }
+    return [yJ('h2', [`id=${teamAnchor(t.name)}`], esc(t.name)), yH(rows, '100%'), '<br />', playerTable].join('\n');
   }).join('\n');
 
   return pageShell('Team Detail', link, sections, pages);
@@ -472,38 +532,33 @@ ${foot}
 
 // --- Player Detail ---------------------------------------------------------
 export function renderPlayerDetail(stats, link, pages) {
-  const players = [...stats.playersGlobal].sort((a, b) => a.team.localeCompare(b.team) || a.name.localeCompare(b.name));
-  const valueCols = stats.answerValues;
+  const ctx = detailContext(stats, link);
+  const values = stats.answerValues;
+  const players = [...stats.playersGlobal].sort((a, b) => byUpper(a.team, b.team) || byUpper(a.name, b.name));
 
   const sections = players.map((p) => {
-    const header = `<tr>
-${th('Round', { width: '8%' })}
-${th('Opponent', { width: '25%' })}
-${th('TUH', { align: true, width: '6%' })}
-${valueCols.map((v) => th(String(v), { align: true, width: '5%' })).join('\n')}
-${th('Pts', { align: true, width: '7%' })}
-</tr>`;
-    const rows = p.gameLog.map((g) => `<tr>
-${td(esc(g.round))}
-${td(esc(g.opponent))}
-${td(String(g.tuh), { align: true })}
-${valueCols.map((v) => td(String(g.ac.get(v) || 0), { align: true })).join('\n')}
-${td(String(g.points), { align: true })}
-</tr>`).join('\n');
-    const foot = `<tr class=pseudoTFoot>
-${td('<b>Total</b>')}
-${td('')}
-${td(`<b>${p.tuh}</b>`, { align: true })}
-${valueCols.map((v) => td(`<b>${p.ac.get(v) || 0}</b>`, { align: true })).join('\n')}
-${td(`<b>${p.points}</b>`, { align: true })}
-</tr>`;
-    return `<div id=${playerAnchor(p.team, p.name)} class="boxScoreAnchor"></div>
-${sectionHeader(`${p.name} (${p.team})`)}
-<table  class=fwBelow1000px >
-${header}
-${rows}
-${foot}
-</table>`;
+    const head = [yK({ bold: true, width: '5%' }, 'Round')];
+    if (ctx.multiPhase) head.push(yK({ bold: true, width: '15%' }, 'Stage'));
+    head.push(yY('Opponent'), yY(''), yY('Score'), yY(ABBR.gp(), true));
+    for (const v of values) head.push(yY(String(v), true, '5%'));
+    head.push(yY(ABBR.tuh(), true), yY('Pts', true));
+    const rows = [yG(head)];
+    for (const g of ctx.inOrder(p.gameLog)) {
+      const c = [yq(ctx.roundNo(g.round))];
+      if (ctx.multiPhase) c.push(ctx.stageCell(g.round));
+      c.push(yq(ctx.teamLink(g.opponent)), yq(g.result || ''), yq(ctx.scoreLink(g, g.teamPoints, g.oppPoints)));
+      c.push(yQ((g.gameTuh > 0 ? g.tuh / g.gameTuh : 0).toFixed(1)));
+      for (const v of values) c.push(yQ(String(g.ac.get(v) || 0)));
+      c.push(yQ(String(g.tuh)), yQ(String(g.points)));
+      rows.push(yG(c));
+    }
+    const foot = [yq('')];
+    if (ctx.multiPhase) foot.push(yq(''));
+    foot.push(yY('Total'), yq(''), yq(''), yY(p.gp.toFixed(1), true));
+    for (const v of values) foot.push(yY(String(p.ac.get(v) || 0), true));
+    foot.push(yY(String(p.tuh), true), yY(String(p.points), true));
+    rows.push(yU(foot));
+    return [yJ('h2', [`id=${playerAnchor(p.team, p.name)}`], esc(`${p.name}, ${p.team}`)), yH(rows, undefined, 'fwBelow1000px')].join('\n');
   }).join('\n');
 
   return pageShell('Player Detail', link, sections, pages);
