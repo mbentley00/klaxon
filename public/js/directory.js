@@ -1,4 +1,4 @@
-import { api, $, el } from './util.js';
+import { api, $, el, renderTournamentList } from './util.js';
 
 const session = () => localStorage.getItem('bz_sessionToken');
 const dmsg = (t, ok = true) => { const m = $('#dir-msg'); m.textContent = t; m.className = 'msg ' + (ok ? 'good' : 'bad'); };
@@ -70,10 +70,8 @@ async function renderMine() {
   }))).filter(Boolean).sort(byDateThenName);
 
   $('#mine-panel').classList.toggle('hidden', !mine.length);
-  const ul = $('#mine-list');
-  ul.innerHTML = '';
   const directed = new Set(directorCodes());
-  for (const t of mine) {
+  renderTournamentList($('#mine-list'), mine, (t) => {
     const li = el('li', {});
     const col = el('span', { className: 'pcol' });
     col.append(el('span', { className: 'pname' }, t.name));
@@ -87,8 +85,8 @@ async function renderMine() {
       : role === 'moderator' || role === 'pending'
         ? el('a', { className: 'btnlink tiny', href: `/t/${t.code}/join` }, role === 'moderator' ? 'Moderate' : 'Requested')
         : el('a', { className: 'btnlink tiny', href: '/t/' + t.code }, 'Open'));
-    ul.append(li);
-  }
+    return li;
+  });
   return new Set(mine.map((t) => t.code));
 }
 

@@ -44,3 +44,25 @@ export const el = (tag, props = {}, ...kids) => {
   for (const k of kids) node.append(k);
   return node;
 };
+
+// A "Your tournaments" list: newest date first (undated ones — usually just
+// created — at the top), and anything more than a month past folded into a
+// collapsed "Older" section at the bottom. `row(t)` builds each <li>.
+export function renderTournamentList(ul, tournaments, row) {
+  const d = new Date();
+  d.setDate(d.getDate() - 30);
+  const cutoff = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const sorted = [...tournaments].sort((a, b) =>
+    (b.date || '9999').localeCompare(a.date || '9999') || (a.name || a.code).localeCompare(b.name || b.code));
+  const isOld = (t) => /^\d{4}-\d{2}-\d{2}/.test(t.date || '') && t.date < cutoff;
+  const recent = sorted.filter((t) => !isOld(t));
+  const older = sorted.filter(isOld);
+  ul.innerHTML = '';
+  for (const t of recent) ul.append(row(t));
+  if (!older.length) return;
+  const inner = el('ul', { className: 'players' });
+  for (const t of older) inner.append(row(t));
+  const det = el('details', { className: 'older-tournaments' },
+    el('summary', {}, `Older (${older.length})`), inner);
+  ul.append(el('li', { className: 'older-wrap' }, det));
+}

@@ -1,4 +1,4 @@
-import { api, recall, $, el } from './util.js';
+import { api, recall, $, el, renderTournamentList } from './util.js';
 
 const msg = $('#msg');
 
@@ -53,9 +53,18 @@ $('#open-form').addEventListener('submit', (e) => {
     return a ? { ...e, name: a.name || e.name, date: a.date || e.date } : e;
   });
   if (!recents.length) return;
+  // Sorting and folding go by date: look up any we don't have one for (a
+  // director token alone has no name or date). One gone from the server stays
+  // listed by its code.
+  recents = await Promise.all(recents.map(async (e) => {
+    if (e.date) return e;
+    try {
+      const t = await api('GET', `/api/tournaments/${e.code}`);
+      return { ...e, name: t.name || e.name, date: t.date || '' };
+    } catch { return e; }
+  }));
   $('#my-tournaments').classList.remove('hidden');
-  const ul = $('#my-tournaments-list');
-  for (const t of recents.slice(0, 8)) {
+  renderTournamentList($('#my-tournaments-list'), recents, (t) => {
     const li = el('li', {});
     const col = el('span', { className: 'pcol' });
     col.append(el('span', { className: 'pname' }, t.name || t.code));
@@ -69,8 +78,8 @@ $('#open-form').addEventListener('submit', (e) => {
       : role === 'moderator' || role === 'pending'
         ? el('a', { className: 'btnlink tiny', href: `/t/${t.code}/join` }, role === 'moderator' ? 'Moderate' : 'Requested')
         : el('a', { className: 'btnlink tiny', href: '/t/' + t.code }, 'Open'));
-    ul.append(li);
-  }
+    return li;
+  });
 })();
 
 // Reflect signed-in state on the account link.

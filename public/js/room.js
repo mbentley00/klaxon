@@ -3522,6 +3522,9 @@ function pushPref(keys) {
 const soundName = () => recall('sound') || 'ding';
 const volume = () => { const v = parseFloat(recall('volume')); return Number.isFinite(v) ? v : 0.9; };
 const isMuted = () => recall('muted') === '1';
+// Pick/ban sounds have their own switch (on unless turned off), so a room can
+// silence them without losing the buzz sound. Shared with the moderator page.
+const massingerSoundOn = () => recall('massingerSound') !== '0';
 // Moderator-only preference (local to this device, like the other sound prefs).
 const disconnectSoundOn = () => recall('disconnectSound') === '1';
 
@@ -3597,7 +3600,7 @@ function massingerMallet(ctx, dest, t, freq, dur, peak) {
 }
 
 function playMassingerPick(type) {
-  if (isMuted()) return;
+  if (isMuted() || !massingerSoundOn()) return;
   const ctx = ensureAudio();
   if (!ctx || ctx.state !== 'running') return;
   const t = ctx.currentTime;
@@ -3614,7 +3617,7 @@ function playMassingerPick(type) {
 
 // Last five seconds of the pick clock, for the team that's on it: a gentle tick.
 function playMassingerTick(secondsLeft) {
-  if (isMuted()) return;
+  if (isMuted() || !massingerSoundOn()) return;
   const ctx = ensureAudio();
   if (!ctx || ctx.state !== 'running') return;
   const master = ctx.createGain();
@@ -3754,6 +3757,20 @@ $('#opt-speak-buzz')?.addEventListener('change', (e) => {
   // buzz will sound like (including the first-name-only rule).
   const someone = (state.snapshot?.members || []).find((m) => m.role === 'player');
   speak(someone ? spokenNameFor(state.snapshot, someone.id) : 'Names will be read aloud');
+});
+function applyMassingerSoundUI() {
+  const b = $('#ms-sound-btn');
+  if (!b) return;
+  const on = massingerSoundOn();
+  b.setAttribute('aria-pressed', String(on));
+  b.textContent = on ? '🔔 Pick sounds on' : '🔕 Pick sounds off';
+}
+applyMassingerSoundUI();
+$('#ms-sound-btn')?.addEventListener('click', () => {
+  if (massingerSoundOn()) remember('massingerSound', '0'); else forget('massingerSound');
+  pushPref(['massingerSound']);
+  applyMassingerSoundUI();
+  if (massingerSoundOn()) playMassingerPick('protect'); // preview on turning back on
 });
 $('#mute-btn')?.addEventListener('click', () => {
   if (isMuted()) forget('muted'); else remember('muted', '1');

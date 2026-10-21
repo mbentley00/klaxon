@@ -138,7 +138,7 @@ export function setDisplayName(account, displayName) {
 // Player-facing preferences that follow the account between devices: the
 // buzz sound, volume, mute, spoken names, and the team prefilled on join.
 // Whitelisted keys, short string values; '' deletes a key.
-const PREF_KEYS = new Set(['team', 'sound', 'volume', 'muted', 'disconnectSound', 'speakBuzz']);
+const PREF_KEYS = new Set(['team', 'sound', 'volume', 'muted', 'disconnectSound', 'speakBuzz', 'massingerSound']);
 export function setPrefs(account, prefs) {
   const out = { ...(account.prefs || {}) };
   for (const [k, v] of Object.entries(prefs && typeof prefs === 'object' ? prefs : {})) {

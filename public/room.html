@@ -102,7 +102,9 @@
          both teams watch picks land live. Above the buzzer: nothing is read
          until it's done, and once it is, the board folds away. -->
     <section id="massinger-view" class="panel massinger hidden" aria-live="polite">
-      <h3><span id="ms-title">MASSINGER pick/ban</span> <span id="ms-round" class="muted-count"></span></h3>
+      <h3 class="ms-head"><span><span id="ms-title">MASSINGER pick/ban</span> <span id="ms-round" class="muted-count"></span></span>
+        <button id="ms-sound-btn" class="ghost tiny" type="button" aria-pressed="true"
+                title="Turn the pick/ban sounds on or off (buzz sounds aren't affected)">🔔 Pick sounds on</button></h3>
       <div id="ms-status" class="ms-status"></div>
       <!-- Whose turn and what they're doing, loudly. -->
       <div id="ms-turnbig" class="ms-turnbig hidden"><span class="ms-turnbig-team"></span><span class="ms-turnbig-kind"></span></div>
