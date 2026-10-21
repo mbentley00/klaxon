@@ -1633,3 +1633,12 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .massinger h3.ms-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 #ms-sound-btn { font-size: .75rem; font-weight: 600; }
 #ms-sound-btn[aria-pressed="false"] { color: var(--muted); }
+
+/* Help-page screenshots: framed, never wider than the column. Phone shots sit
+   side by side when there's room. */
+.help figure.shot { margin: .8em 0 1em; }
+.help figure.shot img { display: block; max-width: 100%; height: auto; border: 1.5px solid var(--line); border-radius: 8px; background: var(--surface); }
+.help figure.shot figcaption { font-size: .82rem; color: var(--muted); margin-top: 4px; text-align: center; }
+.help .shot-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.help .shot-pair figure.shot { margin: 0; }
+.help .shot-pair img { margin: 0 auto; }

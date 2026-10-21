@@ -2135,6 +2135,7 @@ app.get('/advanced', (_req, res) => res.redirect(301, '/create'));
 // tournament hub: create / open / browse, plus reader accounts
 app.get('/tournament-mode', (_req, res) => res.sendFile(path.join(publicDir, 'tournament-mode.html')));
 app.get('/tournament-help', (_req, res) => res.sendFile(path.join(publicDir, 'tournament-help.html')));
+app.get('/massinger-help', (_req, res) => res.sendFile(path.join(publicDir, 'massinger-help.html')));
 
 // create-tournament page
 app.get('/new-tournament', (_req, res) => res.sendFile(path.join(publicDir, 'new-tournament.html')));
