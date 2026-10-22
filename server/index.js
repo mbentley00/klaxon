@@ -301,14 +301,15 @@ async function notifyDirectorsOfProtest(room, protest) {
   const who = `${protest.byName || 'A player'}${protest.byTeam ? ` (${protest.byTeam})` : ''}`;
   // The ground they chose, as the rules put it.
   const ground = protests.PROTEST_REASONS.find((r) => r.id === protest.reason);
-  const reasonText = ground ? `${ground.label} (ACF ${ground.rule})` : '';
+  const q = `${protest.part === 'bonus' ? 'the bonus on ' : ''}question ${protest.cycle}`;
+  const reasonText = ground ? `${ground.label}${ground.rule ? ` (ACF ${ground.rule})` : ''}` : '';
   await sendEmail({
     to,
-    subject: `Protest in ${where}: question ${protest.cycle}`,
-    text: `${who} protested question ${protest.cycle} in ${where} of ${t.name || t.code}.` +
+    subject: `Protest in ${where}: ${q}`,
+    text: `${who} protested ${q} in ${where} of ${t.name || t.code}.` +
       `${reasonText ? `\n\n${reasonText}` : ''}\n\nOnce the moderator records it in MODAQ, rule on it in the director console under Game Data & Protests: ${url}`,
     html: `<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;color:#17130d;line-height:1.5;max-width:520px">` +
-      `<p><strong>${escHtml(who)}</strong> protested <strong>question ${escHtml(protest.cycle)}</strong> in ${escHtml(where)} of ${escHtml(t.name || t.code)}.</p>` +
+      `<p><strong>${escHtml(who)}</strong> protested <strong>${escHtml(q)}</strong> in ${escHtml(where)} of ${escHtml(t.name || t.code)}.</p>` +
       (reasonText ? `<blockquote style="margin:0;padding:10px 14px;border-left:3px solid #ddd5c5;color:#333">${escHtml(reasonText)}</blockquote>` : '') +
       `<p>Once the moderator records it in MODAQ, rule on it in the <a href="${escHtml(url)}">director console</a> under Game Data &amp; Protests.</p>` +
       `<hr style="border:none;border-top:1px solid #eee;margin:20px 0"><p style="font-size:12px;color:#888">Klaxon</p></div>`
@@ -1360,8 +1361,8 @@ app.get('/api/tournaments/:code/room-protests', (req, res) => {
     for (const p of room?.protests || []) {
       if (p.at <= since || p.status === 'dismissed') continue;
       const ground = protests.PROTEST_REASONS.find((r) => r.id === p.reason);
-      out.push({ id: p.id, room: room.code, roomName: room.name || '', round: p.round, cycle: p.cycle,
-        byTeam: p.byTeam, byName: p.byName, reason: ground ? `${ground.label} (ACF ${ground.rule})` : '', at: p.at });
+      out.push({ id: p.id, room: room.code, roomName: room.name || '', round: p.round, cycle: p.cycle, part: p.part || 'tossup',
+        byTeam: p.byTeam, byName: p.byName, reason: ground ? `${ground.label}${ground.rule ? ` (ACF ${ground.rule})` : ''}` : '', at: p.at });
     }
   }
   out.sort((a, b) => a.at - b.at);
@@ -3539,15 +3540,25 @@ io.on('connection', (socket) => {
     // server decides from the scoresheet it built itself.
     const which = store.protestableCycle(room, payload?.cycle);
     if (which.error) return ack?.({ error: which.error });
+    // Tossup or bonus: asked only when the game has bonuses and this question's
+    // bonus was read. Otherwise it can only be the tossup.
+    const row = (room.scoresheet?.rows || []).find((r) => r.n === which.cycle);
+    const bonusRead = !!room.scoresheet?.hasBonuses && !!row?.bonus;
+    let part = 'tossup';
+    if (bonusRead) {
+      if (payload?.part !== 'tossup' && payload?.part !== 'bonus') return ack?.({ error: 'no_part' });
+      part = payload.part;
+    }
     const res = protests.lodge(room, actor, {
       cycle: which.cycle,
+      part,
       round: room.modaqState?.round ?? null,
       reason: payload?.reason,
       teams: store.activeTeams(room)
     });
     if (res.error) return ack?.({ error: res.error });
     emitToStaff(room.code, 'protest_lodged', { id: res.protest.id, byTeam: res.protest.byTeam,
-      cycle: res.protest.cycle, byName: res.protest.byName, reason: res.protest.reason });
+      cycle: res.protest.cycle, part: res.protest.part, byName: res.protest.byName, reason: res.protest.reason });
     // A new protest, not the same one asked again.
     if (res.existed !== true) {
       notifyDirectorsOfProtest(room, res.protest).catch((e) => console.warn('[email] protest notice failed:', e.message));

@@ -27,16 +27,16 @@
 // every one of them collects its own for-and-against statements.
 // ---------------------------------------------------------------------------
 
-// The protestable errors, ACF H.5. A team picks one; "other" is not offered,
-// because H.6 is explicit that everything else (a judgment call, timing, an
-// accidental-buzz ruling, what the moderator heard) is not protestable.
+// The protestable errors, ACF H.5, plus "Other" for anything that doesn't fit
+// (the moderator and director decide whether it stands). "Other" has no rule.
 export const PROTEST_REASONS = [
   { id: 'rejected', rule: 'H.5.a', label: 'A correct answer was rejected' },
   { id: 'ambiguous', rule: 'H.5.b', label: 'The question is ambiguous. Our answer is also correct' },
   { id: 'too-specific', rule: 'H.5.c', label: 'The listed answer is too specific for the clues' },
   { id: 'no-answer', rule: 'H.5.d', label: 'The question has no single correct answer' },
   { id: 'prompt', rule: 'H.5.e', label: 'We should have been prompted' },
-  { id: 'opponent', rule: 'H.5.f', label: 'The other team scored with a wrong answer' }
+  { id: 'opponent', rule: 'H.5.f', label: 'The other team scored with a wrong answer' },
+  { id: 'other', rule: null, label: 'Other' }
 ];
 const REASON_IDS = new Set(PROTEST_REASONS.map((r) => r.id));
 
@@ -74,7 +74,7 @@ export function sideFor(protest, team) {
  * standing to answer. Both come from the buzzer's vouched-for team, never from
  * anything the protesting player typed.
  */
-export function lodge(room, actor, { cycle, round, reason, teams }) {
+export function lodge(room, actor, { cycle, part, round, reason, teams }) {
   if (!room.protests) room.protests = [];
   if (!room.protestCooldown) room.protestCooldown = new Map();
   const byTeam = String(actor.team ?? '').trim();
@@ -91,8 +91,11 @@ export function lodge(room, actor, { cycle, round, reason, teams }) {
   // same team pressing the same button is joining the protest their team
   // already has, not opening a rival one.
   const reasonId = REASON_IDS.has(reason) ? reason : null;
+  // The tossup or the bonus on that question. Old protests have no part and
+  // were always about the tossup.
+  const partId = part === 'bonus' ? 'bonus' : 'tossup';
   const existing = room.protests.find((p) => p.cycle === cycleNo && p.byTeam === byTeam &&
-    p.reason === reasonId && p.status !== 'dismissed');
+    p.reason === reasonId && (p.part || 'tossup') === partId && p.status !== 'dismissed');
   if (existing) return { ok: true, protest: existing, existed: true };
 
   const other = (Array.isArray(teams) ? teams : []).map((t) => String(t ?? '').trim())
@@ -100,6 +103,7 @@ export function lodge(room, actor, { cycle, round, reason, teams }) {
   const protest = {
     id: newId(),
     cycle: cycleNo,
+    part: partId,
     round: round == null ? null : String(round).slice(0, 40),
     at: now,
     byTeam,
@@ -209,6 +213,7 @@ export function publicProtests(room) {
     return {
       id: p.id,
       cycle: p.cycle,
+      part: p.part || 'tossup',
       round: p.round,
       at: p.at,
       byTeam: p.byTeam,

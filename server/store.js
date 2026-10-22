@@ -2542,7 +2542,9 @@ export function buildPlayerScoresheet(match, currentQuestion, hasBonuses = true,
     });
   }
   rows.sort((a, b) => a.n - b.n);
-  return { teams, rows, through, current: through, total, scores: [...totals], at: Date.now() };
+  // hasBonuses: the packet has bonuses and the format reads them, so a protest
+  // has to say whether it is about the tossup or the bonus.
+  return { teams, rows, through, current: through, total, hasBonuses: !!hasBonuses, scores: [...totals], at: Date.now() };
 }
 
 /**

@@ -1680,3 +1680,6 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .cycle-label { text-align: center; font-family: var(--mono); font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
 /* Under the scoresheet: how long the packet is. */
 .ss-packet-total { margin: 6px 2px 0; font-size: .8rem; color: var(--muted); }
+
+/* Protest picker: tossup or bonus, when the question had both. */
+.ss-protest-part { display: flex; gap: 6px; margin: 4px 0; }

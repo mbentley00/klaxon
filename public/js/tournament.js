@@ -1602,7 +1602,7 @@ async function pollRoomProtests() {
       const when = new Date(p.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       const li = el('li', {});
       const col = el('span', { className: 'pcol' });
-      col.append(el('span', { className: 'pname' }, `Just lodged — ${p.roomName || `Room ${p.room}`}${p.round ? `, round ${p.round}` : ''}, question ${p.cycle}`));
+      col.append(el('span', { className: 'pname' }, `Just lodged — ${p.roomName || `Room ${p.room}`}${p.round ? `, round ${p.round}` : ''}, ${p.part === 'bonus' ? 'bonus on ' : ''}question ${p.cycle}`));
       col.append(el('span', { className: 'pjoined' }, `${p.byName}${p.byTeam ? ` (${p.byTeam})` : ''} · ${when}${p.reason ? ` · ${p.reason}` : ''}`));
       li.append(col);
       return li;
@@ -1612,7 +1612,7 @@ async function pollRoomProtests() {
     // shouldn't fire a notification for every protest of the afternoon.
     if (!firstProtestPoll && protestNotifyOn()) {
       for (const p of fresh) {
-        const n = new Notification(`Protest: ${p.roomName || `Room ${p.room}`}, question ${p.cycle}`, {
+        const n = new Notification(`Protest: ${p.roomName || `Room ${p.room}`}, ${p.part === 'bonus' ? 'bonus on ' : ''}question ${p.cycle}`, {
           body: `${p.byName}${p.byTeam ? ` (${p.byTeam})` : ''}${p.reason ? ` — ${p.reason}` : ''}`,
           tag: `protest-${p.id}`
         });

@@ -1113,7 +1113,7 @@ function renderScoresheet(s) {
       // happened on it, then what you made of it.
       if (s.playtest && row.answer && state.role === 'player') ev.append(feedbackRow(row.n));
       // ...and the way to protest it, on the question itself.
-      if (canProtest && rowPlayed(row)) ev.append(protestRow(row.n));
+      if (canProtest && rowPlayed(row)) ev.append(protestRow(row.n, !!sheet.hasBonuses && !!row.bonus));
       // Protests, worded as MODAQ's own Events panel words them.
       for (const pr of row.protests || []) {
         const text = pr.type === 'bonus'
@@ -2230,7 +2230,8 @@ const PROTEST_REASONS = [
   { id: 'too-specific', label: 'The listed answer is too specific for the clues' },
   { id: 'no-answer', label: 'The question has no single correct answer' },
   { id: 'prompt', label: 'We should have been prompted' },
-  { id: 'opponent', label: 'The other team scored with a wrong answer' }
+  { id: 'opponent', label: 'The other team scored with a wrong answer' },
+  { id: 'other', label: 'Other' }
 ];
 
 // "Protest this question", on the question. A protest that means "whatever we
@@ -2244,7 +2245,10 @@ const PROTEST_REASONS = [
 const protestOpen = new Set();     // row numbers whose picker is open
 const protestNotes = new Map();    // row number -> what happened last time
 
-function protestRow(n) {
+// askPart: the game has bonuses and this question's bonus was read, so the
+// player says which one they mean.
+const protestParts = new Map();   // row number -> 'tossup' | 'bonus', kept across redraws
+function protestRow(n, askPart) {
   const wrap = el('div', { className: 'ss-protest-start' });
   const note = el('span', { className: 'ss-fb-note', textContent: protestNotes.get(n) || '' });
 
@@ -2260,17 +2264,40 @@ function protestRow(n) {
 
   const sel = el('select', { className: 'ss-protest-reason' });
   for (const r of PROTEST_REASONS) sel.append(el('option', { value: r.id, textContent: r.label }));
+  // Tossup or bonus, as two buttons; nothing is picked until the player picks.
+  let partBox = null;
+  if (askPart) {
+    partBox = el('div', { className: 'ss-protest-part', role: 'radiogroup', 'aria-label': 'Tossup or bonus' });
+    for (const [id, label] of [['tossup', 'Tossup'], ['bonus', 'Bonus']]) {
+      const b = el('button', { className: 'ss-fb-chip', textContent: label, type: 'button', role: 'radio' });
+      const on = protestParts.get(n) === id;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+      b.onclick = () => {
+        protestParts.set(n, id);
+        for (const x of partBox.children) {
+          const pick = x === b;
+          x.classList.toggle('on', pick);
+          x.setAttribute('aria-checked', pick ? 'true' : 'false');
+        }
+        note.textContent = '';
+      };
+      partBox.append(b);
+    }
+  }
   const send = el('button', { className: 'ss-fb-chip', textContent: 'Tell the moderator' });
   send.onclick = () => {
+    const part = askPart ? protestParts.get(n) : 'tossup';
+    if (!part) { note.textContent = 'Pick tossup or bonus first.'; return; }
     note.textContent = 'Telling the moderator…';
-    socket.emit('protest_lodge', { cycle: n, reason: sel.value }, (res) => {
+    socket.emit('protest_lodge', { cycle: n, part, reason: sel.value }, (res) => {
       const said = res?.error
         ? (PROTEST_ERRORS[res.error] || res.error)
         : res.existed
           ? 'Your team already lodged that protest.'
           : 'Sent. The moderator will take it at the next break.';
       protestNotes.set(n, said);
-      if (!res?.error) protestOpen.delete(n);
+      if (!res?.error) { protestOpen.delete(n); protestParts.delete(n); }
       note.textContent = said;
       if (state.snapshot) renderScoresheet(state.snapshot);
     });
@@ -2278,8 +2305,10 @@ function protestRow(n) {
   const cancel = el('button', { className: 'ss-fb-chip', textContent: 'Never mind' });
   cancel.onclick = () => {
     protestOpen.delete(n);
+    protestParts.delete(n);
     if (state.snapshot) renderScoresheet(state.snapshot);
   };
+  if (partBox) wrap.append(partBox);
   wrap.append(el('div', { className: 'ss-protest-pick' }, sel, send, cancel), note);
   return wrap;
 }
@@ -2297,6 +2326,7 @@ const PROTEST_ERRORS = {
   cooldown: 'Wait a moment and try again.',
   too_many: 'This room has too many protests.',
   not_player: 'Only players can protest.',
+  no_part: 'Pick tossup or bonus first.',
   not_open: 'The moderator hasn\'t opened that protest yet.',
   not_involved: 'Only the two teams playing can write here.',
   empty: 'Write something first.'
@@ -2328,7 +2358,7 @@ function renderProtests(s) {
     const li = el('li', { className: 'protest-item' });
 
     const head = el('div', { className: 'protest-head' },
-      el('span', { className: 'protest-q', textContent: `Question ${p.cycle}` }),
+      el('span', { className: 'protest-q', textContent: `${p.part === 'bonus' ? 'Bonus' : 'Question'} ${p.cycle}` }),
       el('span', { className: 'protest-by', textContent: `${p.byTeam}` }));
     if (p.reasonLabel) head.append(el('span', { className: 'protest-reason', textContent: p.reasonLabel }));
     head.append(el('span', { className: `protest-status st-${p.status}`, textContent: PROTEST_STATUS_WORD[p.status] || p.status }));
@@ -3019,7 +3049,7 @@ function renderBuzzer(s) {
     setBuzzer(
       offline ? 'OFFLINE' : pos === 0 ? "YOU'RE IN" : pos > 0 ? `#${pos + 1} IN LINE` : canBuzz ? 'BUZZ' : bonus ? 'BONUS' : 'LOCKED',
       offline ? 'reconnecting…'
-        : pos === 0 ? 'you have the floor'
+        : pos === 0 ? ''
           : pos > 0 ? 'wait your turn'
             : canBuzz ? 'or press Space'
               : has ? `${q[0].name} buzzed`
