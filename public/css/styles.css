@@ -35,6 +35,7 @@
   --ok-bg: #eaf4ea;
   --mine-fill: #2f7d4f;   /* the buzzer when the buzz is YOURS */
   --on-mine: #fff;
+  --super-fill: #0d6158;  /* a superpower: a step past a power's green */
   --warn: #9a6400;
   --warn-bg: #fbedd6;
   --warn-bg-soft: #fffaf0;
@@ -94,6 +95,7 @@
   --ok-bg: #1c3024;
   --mine-fill: #2e7d4f;   /* deep enough for white text on the dark ground too */
   --on-mine: #fff;
+  --super-fill: #137a6f;
   --warn: #e8b04c;
   --warn-bg: #3a2c12;
   --warn-bg-soft: #2e2618;
@@ -1668,3 +1670,13 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
   opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 50; }
 .say-toast.show { opacity: 1; transform: translate(-50%, 0); }
 .say-toast.bad { border-color: var(--bad); color: var(--bad); }
+
+/* Superpowers: a deeper teal than a power, so the two read as different tiers. */
+.scoresheet .ss-superpower { background: var(--super-fill); border-left-color: var(--super-fill); color: var(--on-mine); font-weight: 700; }
+.archive-chip.ss-superpower { background: var(--super-fill); color: var(--on-mine); font-weight: 700; }
+.ruling-toast.rt-correct.rt-power { background: var(--mine-fill); color: var(--on-mine); border-color: var(--mine-fill); }
+.ruling-toast.rt-correct.rt-superpower { background: var(--super-fill); color: var(--on-mine); border-color: var(--super-fill); }
+/* Which tossup the room is on, above the buzzer (MODAQ rooms). */
+.cycle-label { text-align: center; font-family: var(--mono); font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+/* Under the scoresheet: how long the packet is. */
+.ss-packet-total { margin: 6px 2px 0; font-size: .8rem; color: var(--muted); }

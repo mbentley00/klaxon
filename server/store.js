@@ -2610,6 +2610,11 @@ export function setScoresheet(room, match, currentQuestion, hasBonuses = true, p
   const questionCeiling = texts.length ? Math.max(0, ceiling - reveal.lag) : 0;
   room.scoresheet = buildPlayerScoresheet(match, currentQuestion, hasBonuses, protests, cats, ceiling,
     answerLines, texts, questionCeiling);
+  // How many tossups the packet has: the reader sends one category entry per
+  // tossup, whether or not players see categories. A count only, nothing more.
+  if (room.scoresheet && Array.isArray(categories) && categories.length) {
+    room.scoresheet.packetTotal = Math.min(categories.length, CATEGORY_MAX);
+  }
   // The moderator page clears the live sheet just before it moves the room on,
   // so the evening's totals take the game from the last sheet it had.
   if (room.scoresheet) room.eveningSheet = room.scoresheet;

@@ -847,7 +847,8 @@ function showRuling(buzz, sheet, ruledQuestion) {
     points ? el('span', { className: 'rt-points' }, points) : ''
   );
   box.setAttribute('aria-label', `${who} ${correct ? 'correct' : 'wrong'}${points ? ', ' + points : ''}`);
-  box.className = `ruling-toast ${correct ? 'rt-correct' : 'rt-wrong'}`;
+  const tier = buzzTier(buzz.points, getValueOf(sheet));
+  box.className = `ruling-toast ${correct ? 'rt-correct' : 'rt-wrong'}${tier === 'power' || tier === 'superpower' ? ' rt-' + tier : ''}`;
   // Restart the animation even when the same kind of ruling lands twice running.
   void box.offsetWidth;
   box.classList.add('rt-show');
@@ -978,6 +979,21 @@ function renderEvening(s) {
   $('#evening-table').replaceChildren(el('thead', {}, head), el('tbody', {}, ...rows));
 }
 
+// A tossup buzz's tier from its points. The sheet doesn't carry the format, so
+// a get is the smallest positive the game has scored (10, unless the format is
+// cheaper), a power is anything above it, and a superpower is at least double
+// a get (20 when a get is 10).
+function getValueOf(sheet) {
+  let get = 10;
+  for (const r of sheet?.rows || []) for (const z of r.buzzes || []) if (z.points > 0 && z.points < get) get = z.points;
+  return get;
+}
+function buzzTier(points, get) {
+  if (points <= 0) return points < 0 ? 'neg' : 'zero';
+  if (points >= get * 2) return 'superpower';
+  return points > get ? 'power' : 'get';
+}
+
 // ---- Live scoresheet (read-only) ----
 // The server sends only what it deems safe for players (store.buildPlayerScoresheet):
 // team/player names and the scoring events up to the question being read. This
@@ -1043,16 +1059,16 @@ function renderScoresheet(s) {
   thead.append(hr);
 
   const byN = new Map(sheet.rows.map((r) => [r.n, r]));
-  const total = Math.max(sheet.total || 0, sheet.rows.length);
+  // Only the questions the room has reached, newest first: the latest thing
+  // that happened is always the top row.
+  const reached = Math.max(0, Number(sheet.current) || 0);
   const tbody = el('tbody');
+  const getValue = getValueOf(sheet);
+  // Each row's running score is the latest scored row at or before it.
+  const scoreAt = [];
   let carried = sheet.teams.map(() => 0);
-  let currentRow = null;
-  // A power is any tossup worth more than a plain get. The sheet doesn't carry
-  // the format, so a get is 10 — or less, if the game has scored a smaller
-  // positive (a format with cheaper tossups).
-  let getValue = 10;
-  for (const r of sheet.rows) for (const z of r.buzzes) if (z.points > 0 && z.points < getValue) getValue = z.points;
-  for (let n = 1; n <= total; n++) {
+  for (let n = 1; n <= reached; n++) { const r = byN.get(n); if (r) carried = r.scores; scoreAt[n] = carried; }
+  for (let n = reached; n >= 1; n--) {
     const row = byN.get(n);
     const tr = el('tr', { className: n === sheet.current ? 'ss-current' : '' });
     const num = el('td', { className: 'ss-num' });
@@ -1081,7 +1097,7 @@ function renderScoresheet(s) {
         const team = sheet.teams[z.team]?.name ?? '';
         const desc = z.points > 0 ? `for ${z.points} ✓` : `for ${z.points} ✗`;
         // Coloured by outcome, so a neg or a power stands out at a glance.
-        const kind = z.points > getValue ? 'ss-power' : z.points > 0 ? 'ss-get' : z.points < 0 ? 'ss-neg' : 'ss-zero';
+        const kind = 'ss-' + buzzTier(z.points, getValue);
         ev.append(el('div', { className: `ss-item ss-buzz ${kind}` }, `${z.player} (${team}) ${desc}`));
       }
       if (row.bonus) {
@@ -1105,29 +1121,29 @@ function renderScoresheet(s) {
           : `${pr.team} protests tossup #${pr.question}${pr.position ? ` at word ${pr.position}` : ''} (answer given: "${pr.givenAnswer}")`;
         ev.append(el('div', { className: 'ss-item ss-protest' }, text));
       }
-      carried = row.scores;
     }
+    const at = scoreAt[n] || sheet.teams.map(() => 0);
     ev.append(el('div', { className: 'ss-score-line' },
-      `(${sheet.teams.map((_t, i) => carried[i] ?? 0).join(' - ')})`));
+      `(${sheet.teams.map((_t, i) => at[i] ?? 0).join(' - ')})`));
     tr.append(num, ev);
     tbody.append(tr);
-    if (n === sheet.current) currentRow = tr;
   }
   table.append(thead, tbody);
-  // Keep the question being read in view, as MODAQ does for the reader — by
-  // scrolling the scoresheet's own box only. scrollIntoView also scrolls the
-  // PAGE, and on a phone (scoresheet under the buzzer) every update dragged
-  // the player down to it, away from the buzzer.
-  if (currentRow) keepRowInView(table.closest('.ss-scroll'), currentRow);
+  // How long the packet is, under the sheet.
+  const box = table.closest('.ss-scroll');
+  let foot = $('#ss-packet-total');
+  if (!foot && box) { foot = el('p', { id: 'ss-packet-total', className: 'ss-packet-total' }); box.after(foot); }
+  if (foot) {
+    foot.textContent = sheet.packetTotal ? `${sheet.packetTotal} tossups in this packet` : '';
+    foot.classList.toggle('hidden', !sheet.packetTotal);
+  }
+  // A new question goes in at the top: bring the top back into view, in the
+  // sheet's own box only (scrolling the page would drag a phone away from the
+  // buzzer).
+  if (box && reached !== ssLastReached) box.scrollTop = 0;
+  ssLastReached = reached;
 }
-
-function keepRowInView(box, row) {
-  if (!box || box.scrollHeight <= box.clientHeight) return;   // nothing to scroll
-  const b = box.getBoundingClientRect();
-  const r = row.getBoundingClientRect();
-  if (r.top < b.top) box.scrollTop -= b.top - r.top;
-  else if (r.bottom > b.bottom) box.scrollTop += Math.min(r.bottom - b.bottom, r.top - b.top);
-}
+let ssLastReached = -1;
 
 // ---- the full scoresheet, in a dialog ----
 // The rail's sheet is the room's events as they happen — what MODAQ's Events
@@ -2884,7 +2900,20 @@ function myTeamLocked(s) {
   return !!team && (s.lockedTeams || []).includes(team);
 }
 
+// MODAQ rooms: which tossup the room is on, above the buzzer. A team that has
+// answered stays locked until the moderator moves on, and this says where the
+// moderator is.
+function renderCycle(s) {
+  const box = $('#cycle-label');
+  if (!box) return;
+  const cur = Number(s.scoresheet?.current) || 0;
+  const total = Number(s.scoresheet?.packetTotal) || 0;
+  box.textContent = cur ? `Tossup ${cur}${total ? ` of ${total}` : ''}` : '';
+  box.classList.toggle('hidden', !cur);
+}
+
 function renderPhase(s) {
+  renderCycle(s);
   const q = s.queue || [];
   const label = $('#phase-label');
   // Someone else's game: what the room's buzzer is doing isn't this player's business yet.
