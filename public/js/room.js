@@ -1139,7 +1139,7 @@ function renderScoresheet(s) {
   let foot = $('#ss-packet-total');
   if (!foot && box) { foot = el('p', { id: 'ss-packet-total', className: 'ss-packet-total' }); box.after(foot); }
   if (foot) {
-    foot.textContent = sheet.packetTotal ? `${sheet.packetTotal} tossups in this packet` : '';
+    foot.textContent = sheet.packetTotal ? `${sheet.packetTotal} tossups in this game` : '';
     foot.classList.toggle('hidden', !sheet.packetTotal);
   }
   // A new question goes in at the top: bring the top back into view, in the
@@ -2969,7 +2969,9 @@ function renderCycle(s) {
   if (!box) return;
   const cur = Number(s.scoresheet?.current) || 0;
   const total = Number(s.scoresheet?.packetTotal) || 0;
-  box.textContent = cur ? `Tossup ${cur}${total ? ` of ${total}` : ''}` : '';
+  // Past regulation the game is in overtime: no "of", which would be wrong.
+  box.textContent = !cur ? '' : total && cur > total ? `Tossup ${cur} · overtime`
+    : `Tossup ${cur}${total ? ` of ${total}` : ''}`;
   box.classList.toggle('hidden', !cur);
 }
 

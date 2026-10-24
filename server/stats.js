@@ -248,6 +248,7 @@ export function liveGameRows(liveMatches, describeRoom = () => null) {
       readers: Array.isArray(about.readers) ? about.readers : [],
       currentQuestion: num(qbj._currentQuestion) || 0,
       tuh: num(qbj.tossups_read),
+      regulation: num(qbj._regulationTossupCount) || 0,
       startedAt: num(qbj._startedAt) || 0,
       updatedAt: num(m?.savedAt) || 0,
       teams,

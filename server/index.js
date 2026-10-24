@@ -31,6 +31,7 @@ import { parseYellowFruit, planImport } from './yfimport.js';
 import { buildYft } from './yft.js';
 import { parseQbjRoster } from './qbjroster.js';
 import { summarizeQbj, summarizeModaq } from './gamesummary.js';
+import * as gameEnd from './gameEnd.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -1839,10 +1840,24 @@ app.post('/api/rooms/:code/export', ah(async (req, res) => {
 // (POST /export) and every live change, which now rides on the reader's
 // modaq_game update instead of a request of its own (the same QBJ was being
 // sent twice per change).
-async function syncRoomExport(room, { round, qbj, inProgress, currentQuestion }) {
+// Games left on their last question: finished for the moderator who didn't
+// press Save & next game (see gameEnd.js).
+setInterval(() => {
+  for (const room of store.allRooms()) {
+    const w = room.gameEnd;
+    if (!gameEnd.isDue(w)) continue;
+    w.done = true;
+    syncRoomExport(room, { round: w.round, qbj: w.qbj, inProgress: false, currentQuestion: w.question })
+      .catch((e) => console.error('auto-finish failed:', e));
+  }
+}, Number(process.env.KLAXON_GAME_END_SWEEP_MS) || 15000).unref();
+
+async function syncRoomExport(room, { round, qbj, inProgress, currentQuestion, regulation }) {
+  if (Number(regulation) > 0) room.regulation = Number(regulation);
   const saved = await artifacts.saveExport(store.bucketForRoom(room), {
     room: room.code, round, qbj, inProgress: inProgress === true,
     currentQuestion: Number(currentQuestion) || undefined,
+    regulation: room.regulation,
     at: Date.now()
   });
   // Anyone the moderator added mid-game joins the shared roster (best-effort).
@@ -2013,7 +2028,17 @@ app.get('/api/tournaments/:code/live', ah(async (req, res) => {
   try { matches = await artifacts.readAllExports(bucket); } catch { matches = []; }
   if (!t && matches.length === 0) return res.status(404).json({ error: 'not_found' });
   const live = matches.filter((m) => m?.qbj?._inProgress === true);
-  res.json({ games: liveGameRows(live, store.describeRoom), now: Date.now() });
+  // The board: every room in the tournament, and each room's latest finished
+  // game, so the director sees at a glance who is playing, who is done and who
+  // hasn't started.
+  const finals = matches.filter((m) => m?.qbj && m.qbj._inProgress !== true);
+  const latest = new Map();
+  for (const row of liveGameRows(finals, store.describeRoom)) {
+    const prev = latest.get(row.room);
+    if (!prev || row.updatedAt > prev.updatedAt) latest.set(row.room, row);
+  }
+  const rooms = t ? [...t.roomCodes].map((c) => ({ code: c, name: store.describeRoom(c)?.name || '' })) : [];
+  res.json({ games: liveGameRows(live, store.describeRoom), finished: [...latest.values()], rooms, now: Date.now() });
 }));
 
 // Links between the served report pages (relative to /t/CODE/stats/).
@@ -3439,6 +3464,8 @@ io.on('connection', (socket) => {
           room.packetLists = { categories: payload.categories, answers: payload.answers, questions: payload.questions };
         }
         const lists = room.packetLists || {};
+        // The game's regulation length, for the players' "Tossup N of M" (see store.setScoresheet).
+        if (Number(payload.export?.regulation) > 0) room.regulation = Number(payload.export.regulation);
         store.teamLockoutFromGame(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false);
         store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false,
           payload.protests, lists.categories, lists.answers, lists.questions,
@@ -3462,10 +3489,17 @@ io.on('connection', (socket) => {
         // The live stats file, when the reader asks for it here rather than
         // with a separate POST /export (see syncRoomExport).
         if (payload.qbj && payload.export && typeof payload.export === 'object' && !room.correctionOf) {
-          if (roundAllowed(ctx.staffRounds ?? ALL_ROUNDS, payload.export.round)) syncRoomExport(room, {
-            round: payload.export.round, qbj: payload.qbj, inProgress: payload.export.inProgress === true,
-            currentQuestion: payload.currentQuestion
-          }).catch((e) => console.error('live export failed:', e));
+          if (roundAllowed(ctx.staffRounds ?? ALL_ROUNDS, payload.export.round)) {
+            syncRoomExport(room, {
+              round: payload.export.round, qbj: payload.qbj, inProgress: payload.export.inProgress === true,
+              currentQuestion: payload.currentQuestion, regulation: payload.export.regulation
+            }).catch((e) => console.error('live export failed:', e));
+            // A game on its last question may be finished without the moderator (see gameEnd.js).
+            gameEnd.noteUpdate(room, {
+              round: payload.export.round, qbj: payload.qbj, currentQuestion: payload.currentQuestion,
+              atEnd: payload.export.atEnd === true, hasBonuses: payload.hasBonuses !== false
+            });
+          }
         }
         emitState(room);
         return ack?.(needLists ? { ok: true, needLists: true } : { ok: true });
@@ -3479,6 +3513,7 @@ io.on('connection', (socket) => {
         if (payload.qbj == null) return ack?.({ error: 'missing_qbj' });
         if (room.correctionOf) return ack?.({ error: 'correction_room' });
         if (!roundAllowed(ctx.staffRounds ?? ALL_ROUNDS, payload.round)) return ack?.({ error: 'not_your_round' });
+        if (payload.inProgress !== true) room.gameEnd = null;   // the moderator finished it
         try {
           const saved = await syncRoomExport(room, {
             round: payload.round, qbj: payload.qbj, inProgress: payload.inProgress === true,

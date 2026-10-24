@@ -508,7 +508,7 @@ export async function listGames(roomCode) {
 // per-change sync) overwrites the same file, so the tournament ends up with one
 // current QBJ per match instead of hundreds of timestamped duplicates. The file
 // mtime records when it was last synced.
-export async function saveExport(bucket, { room, round, qbj, inProgress = false, currentQuestion, at }) {
+export async function saveExport(bucket, { room, round, qbj, inProgress = false, currentQuestion, regulation, at }) {
   const roomPart = safeName(room, 'room');
   const roundPart = safeName(round, 'r');
   const filename = `${roomPart}-${roundPart}.qbj`;
@@ -518,6 +518,7 @@ export async function saveExport(bucket, { room, round, qbj, inProgress = false,
   const file = path.join(bucketDir(bucket), 'exports', filename);
   if (obj && typeof obj === 'object') {
     obj = { ...obj, _round: String(round ?? ''), _room: String(room ?? '') };
+    if (Number(regulation) > 0) obj._regulationTossupCount = Number(regulation);
     // A live sync marks the match in progress so stats don't count a half-played
     // game as a W/L yet. Final is sticky per matchup: once this room+round has
     // been saved as final for the same teams, post-game review edits (which sync

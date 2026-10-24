@@ -254,6 +254,10 @@ export function getRoom(code) {
   return rooms.get((code || '').toUpperCase());
 }
 
+export function allRooms() {
+  return rooms.values();
+}
+
 // Which artifact bucket a room's MODAQ files live in: the tournament's, if the
 // room belongs to one (so a whole tournament shares rosters/packets/exports),
 // otherwise the room's own bucket (a standalone MODAQ room still works).
@@ -2638,10 +2642,14 @@ export function setScoresheet(room, match, currentQuestion, hasBonuses = true, p
   const questionCeiling = texts.length ? Math.max(0, ceiling - reveal.lag) : 0;
   room.scoresheet = buildPlayerScoresheet(match, currentQuestion, hasBonuses, protests, cats, ceiling,
     answerLines, texts, questionCeiling);
-  // How many tossups the packet has: the reader sends one category entry per
+  // How many tossups the game has: the reader sends one category entry per
   // tossup, whether or not players see categories. A count only, nothing more.
+  // Regulation when the packet is longer: the rest are overtime questions (a
+  // MASSINGER game keeps its banned tossups at the end for a tie), so "of 26"
+  // would be wrong for every game that doesn't tie.
   if (room.scoresheet && Array.isArray(categories) && categories.length) {
-    room.scoresheet.packetTotal = Math.min(categories.length, CATEGORY_MAX);
+    const reg = Number(room.regulation) || Infinity;
+    room.scoresheet.packetTotal = Math.min(categories.length, CATEGORY_MAX, reg);
   }
   // The moderator page clears the live sheet just before it moves the room on,
   // so the evening's totals take the game from the last sheet it had.

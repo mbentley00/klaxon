@@ -611,26 +611,101 @@ function initPublicStats() {
   setInterval(refreshLive, 15000);
 }
 
+// A live game with no change for this long is flagged: a moderator who left
+// the page open, or a room that needs a look.
+const LIVE_IDLE_MS = 10 * 60 * 1000;
+
+function ago(ms) {
+  const m = Math.max(0, Math.round(ms / 60000));
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h} h ago`;
+  return `${Math.round(h / 24)} days ago`;
+}
+
+// One room's state, from its live game (if any) or its last finished one.
+function liveStatus(g, live, now) {
+  if (!g) return { key: 'none', label: 'No game yet' };
+  if (!live) return { key: 'finished', label: 'Finished' };
+  const quiet = now - (g.updatedAt || 0);
+  if (g.updatedAt && quiet >= LIVE_IDLE_MS) return { key: 'idle', label: `Idle ${ago(quiet).replace(' ago', '')}` };
+  const reg = g.regulation || 0;
+  if (reg && g.currentQuestion > reg) return { key: 'overtime', label: 'Overtime' };
+  return { key: 'playing', label: 'Playing' };
+}
+
+function liveRow(roomLabel, g, live, now) {
+  const st = liveStatus(g, live, now);
+  const row = el('div', { className: `live-row ${st.key}` });
+  const status = el('div', { className: 'live-status' });
+  status.append(el('span', { className: `live-pill ${st.key}` }, st.label));
+  row.append(status);
+  const room = el('div', { className: 'live-room' });
+  room.append(el('b', {}, roomLabel));
+  if (g?.round) room.append(el('small', {}, /^\d+$/.test(g.round) ? `Round ${g.round}` : g.round));
+  row.append(room);
+  const score = el('div', { className: 'live-score' });
+  if (g?.teams?.length) {
+    const top = Math.max(...g.teams.map((t) => t.total));
+    const leaders = g.teams.filter((t) => t.total === top).length;
+    for (const t of g.teams) {
+      const line = el('div', { className: `team${t.total === top && leaders === 1 ? ' lead' : ''}` });
+      line.append(el('span', {}, t.name), el('span', {}, String(t.total)));
+      score.append(line);
+    }
+  } else score.append(el('small', {}, '—'));
+  row.append(score);
+  const meta = el('div', { className: 'live-meta' });
+  if (g && live) {
+    // Out of regulation, until the game goes past it (overtime counts on).
+    const q = g.currentQuestion || 0;
+    // Regulation, or the packet if it is shorter (a tie only adds questions).
+    const reg = Math.min(g.regulation || Infinity, g.tuh || Infinity);
+    const of = Number.isFinite(reg) && q <= reg ? reg : 0;
+    meta.append(el('span', {}, of ? `Q${q} of ${of}` : `Q${q}`));
+    if (of) {
+      const bar = el('div', { className: 'live-bar' });
+      const fill = el('i', {});
+      fill.style.width = `${Math.min(100, Math.round((q / of) * 100))}%`;
+      bar.append(fill);
+      meta.append(bar);
+    }
+    const who = g.readers?.length ? g.readers.join(', ') : '';
+    meta.append(el('small', {}, [who, g.updatedAt ? `updated ${ago(now - g.updatedAt)}` : ''].filter(Boolean).join(' · ')));
+  } else if (g) {
+    meta.append(el('small', {}, g.updatedAt ? `saved ${ago(now - g.updatedAt)}` : ''));
+  }
+  row.append(meta);
+  return { row, key: st.key };
+}
+
 async function refreshLive() {
   try {
-    const { games, now } = await api('GET', `/api/tournaments/${code}/live`);
-    $('#live-count').textContent = games.length ? `(${games.length})` : '';
-    $('#live-empty').classList.toggle('hidden', games.length > 0);
-    const ul = $('#live-list');
-    ul.innerHTML = '';
-    for (const g of games) {
-      const li = el('li', {});
-      const col = el('span', { className: 'pcol' });
-      const score = [...g.teams].sort((a, b) => b.total - a.total).map((t) => `${t.name} ${t.total}`).join(', ');
-      col.append(el('span', { className: 'pname' }, `${g.roomName || `Room ${g.room}`} · Round ${g.round} · ${score}`));
-      const bits = [];
-      if (g.readers?.length) bits.push(`read by ${g.readers.join(', ')}`);
-      if (g.currentQuestion) bits.push(`on question ${g.currentQuestion}${g.tuh ? ` of ${g.tuh}` : ''}`);
-      if (g.startedAt) bits.push(`running ${Math.max(0, Math.round((now - g.startedAt) / 60000))} min`);
-      if (g.room && g.roomName) bits.push(`code ${g.room}`);
-      col.append(el('span', { className: 'pjoined' }, bits.join(' · ')));
-      li.append(col);
-      ul.append(li);
+    const { games, finished = [], rooms = [], now } = await api('GET', `/api/tournaments/${code}/live`);
+    const board = $('#live-board');
+    board.innerHTML = '';
+    const counts = {};
+    const add = (label, g, live) => {
+      const { row, key } = liveRow(label, g, live, now);
+      counts[key] = (counts[key] || 0) + 1;
+      board.append(row);
+    };
+    const label = (c, name) => name || roomNames[c] || `Room ${c}`;
+    const seen = new Set();
+    for (const r of rooms) {
+      seen.add(r.code);
+      const mine = games.filter((g) => g.room === r.code);
+      if (mine.length) for (const g of mine) add(label(r.code, r.name), g, true);
+      else add(label(r.code, r.name), finished.find((f) => f.room === r.code) || null, false);
+    }
+    // A live game from a room no longer listed still shows.
+    for (const g of games) if (!seen.has(g.room)) add(label(g.room, g.roomName), g, true);
+    $('#live-empty').classList.toggle('hidden', board.childElementCount > 0);
+    const sum = $('#live-summary');
+    sum.innerHTML = '';
+    for (const [key, word] of [['playing', 'playing'], ['overtime', 'in overtime'], ['idle', 'idle'], ['finished', 'finished'], ['none', 'not started']]) {
+      if (counts[key]) sum.append(el('span', { className: `live-pill ${key}` }, `${counts[key]} ${word}`));
     }
   } catch { /* stats may not exist yet; leave the panel as-is */ }
 }
