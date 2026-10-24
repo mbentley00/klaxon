@@ -173,10 +173,37 @@ export function reveal(room, playerId) {
  * theirs to revise until they send it, and there is nobody behind them for the
  * append-only rule to protect.
  */
+// Keystrokes per player: a bucket of 20 that refills at 10 a second. A page
+// sends at most 10 a second (room.js throttles), so only a page that has been
+// tampered with, or a script, ever runs it dry. Every keystroke reaches the
+// moderator, so this is what keeps one player from flooding their screen.
+const TYPE_BURST = 20;
+const TYPE_PER_SEC = 10;
+const typeBuckets = new WeakMap();   // room -> Map(playerId -> { tokens, at })
+function typeAllowed(room, playerId, now) {
+  let m = typeBuckets.get(room);
+  if (!m) { m = new Map(); typeBuckets.set(room, m); }
+  const b = m.get(playerId) || { tokens: TYPE_BURST, at: now };
+  b.tokens = Math.min(TYPE_BURST, b.tokens + ((now - b.at) / 1000) * TYPE_PER_SEC);
+  b.at = now;
+  m.set(playerId, b);
+  if (b.tokens < 1) return false;
+  b.tokens -= 1;
+  return true;
+}
+
+// Answers a player gives out loud (Enter): one every 2 seconds, and no more
+// than 8 on one question. Each goes on the moderator's screen, into the chat
+// and to the whole room, so a player mashing Enter on a changing answer was
+// flooding all three. The moderator recording one for them isn't limited.
+export const SPEAK_GAP_MS = 2000;
+export const SPEAK_MAX = 8;
+
 export function type(room, playerId, textIn) {
   const a = state(room);
   if (!a) return { error: 'not_open' };
   const now = Date.now();
+  if (!typeAllowed(room, playerId, now)) return { error: 'slow_down', text: a.locked.get(playerId)?.text ?? '' };
 
   const text = String(textIn ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
   const prev = a.locked.get(playerId);
@@ -198,7 +225,7 @@ export function type(room, playerId, textIn) {
  * moderator recorded what they said). It goes on the record so the duplicate
  * rule below has something to consult.
  */
-export function speak(room, playerId, textIn) {
+export function speak(room, playerId, textIn, { byPlayer = false } = {}) {
   const a = state(room);
   if (!a) return { error: 'not_open' };
   const text = String(textIn ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
@@ -210,6 +237,10 @@ export function speak(room, playerId, textIn) {
   // that isn't already there.
   const mine = [...a.spoken].reverse().find((sp) => sp.playerId === (playerId || null));
   if (mine && sameAnswer(mine.text, text)) return { ok: true, spoken: a.spoken.length, already: true };
+  if (byPlayer && playerId) {
+    if (mine && Date.now() - mine.at < SPEAK_GAP_MS) return { error: 'too_fast' };
+    if (a.spoken.filter((sp) => sp.playerId === playerId).length >= SPEAK_MAX) return { error: 'too_many' };
+  }
   a.spoken.push({ playerId: playerId || null, text, at: Date.now() });
   return { ok: true, spoken: a.spoken.length };
 }

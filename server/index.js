@@ -191,6 +191,15 @@ app.use(express.static(publicDir));
 
 app.post('/api/rooms', (req, res) => {
   const { name, tournamentCode, settings } = req.body || {};
+  // A tournament's rooms are made by its director, often a dozen at once, so
+  // they need the director's key and aren't counted. Anyone else gets
+  // CREATE_PER_WINDOW rooms every few minutes.
+  if (tournamentCode) {
+    const t = store.getTournament(tournamentCode);
+    if (!t || !directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  } else if (limited(recentRoomCreates, req, CREATE_WINDOW_MS, CREATE_PER_WINDOW)) {
+    return res.status(429).json({ error: 'too_many_rooms' });
+  }
   const room = store.createRoom({ name, tournamentCode, settings });
   res.json({
     code: room.code,
@@ -247,6 +256,9 @@ app.get('/api/rooms/:code', ah(async (req, res) => {
 }));
 
 app.post('/api/tournaments', ah(async (req, res) => {
+  if (limited(recentTournamentCreates, req, CREATE_WINDOW_MS, CREATE_PER_WINDOW)) {
+    return res.status(429).json({ error: 'too_many_tournaments' });
+  }
   const { name, schedule, defaults, format, requireReaderAccounts, date, listed } = req.body || {};
   const t = store.createTournament({
     name, schedule, defaults, format, requireReaderAccounts, date, listed,
@@ -382,9 +394,45 @@ function throttled(seen, ip, windowMs, perWindow) {
 
 const feedbackThrottled = (ip) => throttled(recentFeedback, ip, FEEDBACK_WINDOW_MS, FEEDBACK_PER_WINDOW);
 
-// The caller's own address, as far behind Fly's proxy as we can see.
+// The caller's own address. Fly's proxy sets Fly-Client-IP itself; the first
+// X-Forwarded-For entry is whatever the caller sent, so it's only a fallback.
 const callerIp = (req) =>
-  String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim() || 'unknown';
+  String(req.headers['fly-client-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '')
+    .split(',')[0].trim() || 'unknown';
+
+// --- limits on making things and on signing in ---------------------------
+// Per address. A request straight from this machine (no Fly proxy in front:
+// local testing) isn't limited unless KLAXON_LOCAL_LIMITS=1.
+const CREATE_WINDOW_MS = 5 * 60 * 1000;
+const CREATE_PER_WINDOW = 3;                 // rooms, and separately tournaments
+const REGISTER_WINDOW_MS = 60 * 60 * 1000;
+const REGISTER_PER_WINDOW = 3;               // new accounts per address per hour
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_FAILS_PER_IP = 10;               // wrong passwords per address
+const LOGIN_FAILS_PER_NAME = 5;              // wrong passwords per username, from anywhere
+const LOGIN_FAIL_DELAY_MS = 800;             // every wrong password waits this long
+const recentRoomCreates = new Map();
+const recentTournamentCreates = new Map();
+const recentRegisters = new Map();
+const loginFailsByIp = new Map();
+const loginFailsByName = new Map();
+const isLocalCaller = (req) => !req.headers['fly-client-ip'] && process.env.KLAXON_LOCAL_LIMITS !== '1' &&
+  /^(::1|127\.|::ffff:127\.)/.test(req.socket.remoteAddress || '');
+// Counts this request; true once the address is over the limit.
+const limited = (seen, req, windowMs, perWindow) =>
+  !isLocalCaller(req) && throttled(seen, callerIp(req), windowMs, perWindow);
+// How many hits a key has had in the window, without adding one.
+function recentHits(seen, key, windowMs) {
+  const now = Date.now();
+  return (seen.get(key) || []).filter((t) => now - t < windowMs).length;
+}
+function noteHit(seen, key) {
+  const now = Date.now();
+  seen.set(key, [...(seen.get(key) || []), now].slice(-50));
+  if (seen.size > 2000) {
+    for (const [k, v] of seen) if (!v.some((t) => now - t < LOGIN_WINDOW_MS)) seen.delete(k);
+  }
+}
 
 app.post('/api/feedback', ah(async (req, res) => {
   const message = String(req.body?.message ?? '').trim();
@@ -552,17 +600,42 @@ app.get('/api/tournaments/:code', (req, res) => {
 });
 
 // --- reader accounts (optional) --------------------------------------------
+// A few new accounts per address per hour: plenty for a household or a club
+// signing up together, and slow for a script.
 app.post('/api/accounts/register', (req, res) => {
+  const ip = callerIp(req);
+  if (!isLocalCaller(req) && recentHits(recentRegisters, ip, REGISTER_WINDOW_MS) >= REGISTER_PER_WINDOW) {
+    return res.status(429).json({ error: 'too_many_accounts' });
+  }
   const r = accounts.register(req.body?.username, req.body?.password, req.body?.displayName, req.body?.email);
   if (r.error) return res.status(400).json({ error: r.error });
+  noteHit(recentRegisters, ip);
   res.json({ sessionToken: r.sessionToken, account: accounts.publicAccount(r.account) });
 });
 
-app.post('/api/accounts/login', (req, res) => {
+// Wrong passwords are counted per address and per username, and each one
+// waits LOGIN_FAIL_DELAY_MS before it's answered. Past either limit, signing
+// in is refused for a while, even with the right password, so guessing gets
+// nowhere. A right password doesn't clear the count.
+app.post('/api/accounts/login', ah(async (req, res) => {
+  const ip = callerIp(req);
+  const name = String(req.body?.username || '').trim().toLowerCase();
+  const local = isLocalCaller(req);
+  if (!local && (recentHits(loginFailsByIp, ip, LOGIN_WINDOW_MS) >= LOGIN_FAILS_PER_IP ||
+      (name && recentHits(loginFailsByName, name, LOGIN_WINDOW_MS) >= LOGIN_FAILS_PER_NAME))) {
+    return res.status(429).json({ error: 'too_many_attempts' });
+  }
   const r = accounts.login(req.body?.username, req.body?.password);
-  if (r.error) return res.status(401).json({ error: r.error });
+  if (r.error) {
+    if (!local) {
+      noteHit(loginFailsByIp, ip);
+      if (name) noteHit(loginFailsByName, name);
+    }
+    await new Promise((done) => setTimeout(done, LOGIN_FAIL_DELAY_MS));
+    return res.status(401).json({ error: r.error });
+  }
   res.json({ sessionToken: r.sessionToken, account: accounts.publicAccount(r.account) });
-});
+}));
 
 app.post('/api/accounts/logout', (req, res) => {
   accounts.endSession(req.body?.sessionToken);
@@ -2844,6 +2917,12 @@ io.on('connection', (socket) => {
     // the room has to be possible from inside it.
     if (!staffRole && room.ended) return ack?.({ error: 'game_ended' });
 
+    // At most MAX_PLAYERS players connected at once. Someone already in the
+    // room always gets back in; only a new player is turned away.
+    if (role === 'player' && !room.members.has(payload?.playerId) && store.roomIsFull(room)) {
+      return ack?.({ error: 'room_full' });
+    }
+
     // Someone picking a tournament team that isn't playing here yet joins as
     // that team's player and waits (store.refreshWaiting) rather than failing
     // the roster link and being reported as off the roster.
@@ -3367,6 +3446,9 @@ io.on('connection', (socket) => {
           // filed under the right one when the room moves on (see
           // setShootoutCurrent). Absent in every other mode.
           typeof payload.packet === 'string' ? payload.packet : null);
+        // A team's protest is filed once MODAQ's game has it (the moderator
+        // saved MODAQ's protest dialog; see protests.fileFromModaq).
+        protests.fileFromModaq(room, payload.protests);
         // Reading on puts a line in the chat, so the talking can be read back
         // against the game. Only for real progress — see store.cycleDivider.
         const divider = store.cycleDivider(room, payload.qbj ?? null);
@@ -3387,6 +3469,26 @@ io.on('connection', (socket) => {
         }
         emitState(room);
         return ack?.(needLists ? { ok: true, needLists: true } : { ok: true });
+      }
+      // Filing the game (Save & next game, or the last change before leaving).
+      // Over the socket because the moderator's session was checked when they
+      // joined: whichever way they proved it (reader link or approved account),
+      // nothing has to be presented again, so the save can't be refused for a
+      // credential the page didn't happen to send.
+      case 'save_game': {
+        if (payload.qbj == null) return ack?.({ error: 'missing_qbj' });
+        if (room.correctionOf) return ack?.({ error: 'correction_room' });
+        if (!roundAllowed(ctx.staffRounds ?? ALL_ROUNDS, payload.round)) return ack?.({ error: 'not_your_round' });
+        try {
+          const saved = await syncRoomExport(room, {
+            round: payload.round, qbj: payload.qbj, inProgress: payload.inProgress === true,
+            currentQuestion: payload.currentQuestion
+          });
+          return ack?.({ ok: true, filename: saved?.filename });
+        } catch (e) {
+          console.error('save_game failed:', e);
+          return ack?.({ error: 'save_failed' });
+        }
       }
       // MODAQ's serialized game from one moderator, fanned out to the others
       // and kept for whoever (re)opens the page next. `json: null` means the
@@ -3733,7 +3835,7 @@ io.on('connection', (socket) => {
     const playerId = staff ? (payload?.playerId ?? null) : ctx.playerId;
     // A player may only speak for themselves, and only when they have the floor.
     if (!staff && room.queue[0]?.playerId !== ctx.playerId) return ack?.({ error: 'not_your_turn' });
-    const res = answers.speak(room, playerId, payload?.text);
+    const res = answers.speak(room, playerId, payload?.text, { byPlayer: !staff });
     if (res.error) return ack?.({ error: res.error });
     if (!res.already) announceAnswer(room, playerId, payload?.text);
     emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));

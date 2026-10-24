@@ -1826,7 +1826,7 @@ $('#add-rooms').onclick = async () => {
   try {
     for (let i = 0; i < qty; i++) {
       const name = `${base} ${startIndex + i + 1}`;
-      const r = await api('POST', '/api/rooms', { tournamentCode: code, name });
+      const r = await api('POST', '/api/rooms', { tournamentCode: code, name, directorToken });
       rooms.push({ code: r.code, name: r.name, readerToken: r.readerToken, coReaderToken: r.coReaderToken });
       saveRooms(rooms);          // persist incrementally so nothing is lost
       render();

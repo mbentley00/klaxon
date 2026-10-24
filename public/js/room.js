@@ -389,7 +389,9 @@ function doJoin(role, name, team, roster) {
             ? 'Enter a team name to join.'
             : resp?.error === 'full_name_required'
               ? 'Enter a first and last name, 2+ letters each.'
-              : 'Could not join. Try again.';
+              : resp?.error === 'room_full'
+                ? 'This room is full (50 players). Ask the host.'
+                : 'Could not join. Try again.';
       if (resp?.error === 'team_required') $('#gate-team').focus();
       return;
     }
@@ -927,7 +929,10 @@ $('#me-team-form')?.addEventListener('submit', (e) => {
   socket.emit('set_my_team', { team }, (resp) => {
     const msg = $('#me-team-msg');
     if (!resp?.ok) {
-      msg.textContent = resp?.error === 'team_required' ? 'This room needs a team name.' : "Couldn't change your team.";
+      msg.textContent = resp?.error === 'team_required' ? 'This room needs a team name.'
+        : resp?.error === 'too_fast' ? 'Wait a few seconds before switching again.'
+        : resp?.error === 'too_many' ? "You've switched teams a lot. Try again in a few minutes."
+        : "Couldn't change your team.";
       return;
     }
     remember('team', team);
@@ -1018,7 +1023,7 @@ function renderScoresheet(s) {
   renderFullSheet(s);
   $('#ss-full')?.classList.toggle('hidden', !on);
   const tog = $('#ss-toggle');
-  if (tog) tog.textContent = wanted ? 'Hide' : 'Show scoresheet';
+  if (tog) tog.textContent = wanted ? 'Hide' : 'Mini scoresheet';
   if (!on) { ssLastKey = ''; return; }
 
   // However many sides the game has — two reads as "A: 120, B: 95", and a
@@ -1522,7 +1527,10 @@ $('#answer-box').addEventListener('keydown', (e) => {
     return;
   }
   socket.emit('answer_spoken', { text }, (res) => {
-    if (res?.error) { $('#answer-note').textContent = 'Could not send that: ' + res.error; return; }
+    if (res?.error) {
+      $('#answer-note').textContent = SPOKEN_ERRORS[res.error] || 'Could not send that: ' + res.error;
+      return;
+    }
     answerSpokenAt = Date.now();
     answerSentText = text;
     $('#answer-note').textContent = res.already
@@ -1531,7 +1539,23 @@ $('#answer-box').addEventListener('keydown', (e) => {
   });
 });
 
+const SPOKEN_ERRORS = {
+  too_fast: 'Wait a moment before sending another.',
+  too_many: "That's the most answers you can give on this question."
+};
+
+// Typing goes to the server at most every 100ms, always ending on what is in
+// the box. The server drops keystrokes that come faster than that.
+const TYPE_EVERY_MS = 100;
+let typeTimer = null;
+let typeLastAt = 0;
 $('#answer-box').addEventListener('input', () => {
+  if (typeTimer) return;   // a send is already queued; it takes the latest text
+  const wait = Math.max(0, typeLastAt + TYPE_EVERY_MS - Date.now());
+  typeTimer = setTimeout(() => { typeTimer = null; typeLastAt = Date.now(); sendTyped(); }, wait);
+});
+
+function sendTyped() {
   const box = $('#answer-box');
   // Mirror the server's append-only rule locally so a rejected keystroke never
   // looks like the box eating your typing.
@@ -1544,6 +1568,12 @@ $('#answer-box').addEventListener('input', () => {
   answerSent = text;
   socket.emit('answer_type', { text }, (res) => {
     if (res?.ok) { answerCommitted = res.text; return; }
+    if (res?.error === 'slow_down') {
+      // Not taken: send what's in the box again shortly.
+      answerSent = null;
+      setTimeout(sendTyped, 500);
+      return;
+    }
     if (res?.error === 'no_deleting') {
       // The server kept what it had; put it back rather than leaving the box
       // showing something that was never committed.
@@ -1552,7 +1582,7 @@ $('#answer-box').addEventListener('input', () => {
       $('#answer-note').textContent = "Too late to delete. You can only add.";
     }
   });
-});
+}
 
 
 
@@ -2234,7 +2264,7 @@ const PROTEST_REASONS = [
   { id: 'other', label: 'Other' }
 ];
 
-// "Protest this question", on the question. A protest that means "whatever we
+// "Protest", on the question. A protest that means "whatever we
 // were on" is a different question by the time the moderator reads it, and a
 // player looking at a row of the scoresheet is looking at the thing they
 // actually want to argue about.
@@ -2253,7 +2283,7 @@ function protestRow(n, askPart) {
   const note = el('span', { className: 'ss-fb-note', textContent: protestNotes.get(n) || '' });
 
   if (!protestOpen.has(n)) {
-    const start = el('button', { className: 'ss-fb-chip', textContent: 'Protest this question' });
+    const start = el('button', { className: 'ss-fb-chip', textContent: 'Protest' });
     start.onclick = () => {
       protestOpen.add(n);
       if (state.snapshot) renderScoresheet(state.snapshot);
@@ -2320,6 +2350,8 @@ function rowPlayed(row) {
 }
 
 const PROTEST_ERRORS = {
+  too_fast: 'Wait a few seconds before saving again.',
+  too_many_edits: "You've changed your statement as many times as you can.",
   no_team: "You're not on a team. Ask the moderator to add you.",
   no_question: 'No question to protest yet.',
   not_started: 'Nothing has happened on that question yet.',
@@ -2338,14 +2370,13 @@ function renderProtests(s) {
   const view = $('#protest-view');
   const list = s.protests || [];
   const mine = myTeam(s);
-  const playing = !!mine && (state.role === 'player');
-  // The panel appears once there is a game to protest, or a protest to watch.
-  const canLodge = playing && Number.isFinite(Number(s.scoresheet?.current));
-  if (!list.length && !canLodge) { view.classList.add('hidden'); return; }
+  // Only while a protest is in progress (lodged or taking statements), or the
+  // moderator has shown the room a protested question. Lodging is done from
+  // the scoresheet, so an empty panel has nothing to offer.
+  const active = list.some((p) => p.status === 'lodged' || p.status === 'open' || p.questionShown);
+  if (!active) { view.classList.add('hidden'); return; }
   view.classList.remove('hidden');
-  $('#protest-where').textContent = canLodge
-    ? 'To protest, press “Protest this question” on the scoresheet.'
-    : '';
+  $('#protest-where').textContent = '';
   $('#protest-count').textContent = list.length ? `(${list.length})` : '';
 
   const ul = $('#protest-list');

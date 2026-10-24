@@ -105,7 +105,9 @@ const friendly = (e) => ({
   bad_email: "That doesn't look like an email address.",
   email_required: 'Enter your email address.',
   email_taken: 'That email is already on another account.',
-  not_logged_in: 'Please log in.'
+  not_logged_in: 'Please log in.',
+  too_many_attempts: 'Too many wrong passwords. Try again in 15 minutes.',
+  too_many_accounts: 'Too many new accounts from here. Try again in an hour.'
 }[e] || e);
 
 async function init() {

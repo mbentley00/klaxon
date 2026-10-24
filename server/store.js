@@ -615,12 +615,23 @@ export function eveningSummary(room) {
  * team stays there until the next packet (the game can't change its lineups
  * underneath the reader); otherwise the move is immediate.
  */
+const TEAM_SWITCH_GAP_MS = 10 * 1000;
+const TEAM_SWITCH_MAX = 5;
+const TEAM_SWITCH_WINDOW_MS = 10 * 60 * 1000;
+
 export function setOwnTeam(room, playerId, team) {
   const member = room.members.get(playerId);
   if (!member || member.role !== 'player') return { error: 'no_member' };
   if (room.tournamentCode || room.settings.shootout || room.settings.rosterJoin) return { error: 'not_allowed' };
   const name = String(team ?? '').trim().slice(0, 100);
   if (!name && room.settings.requireTeam) return { error: 'team_required' };
+  // Each switch goes to the whole room and into the log: one every
+  // TEAM_SWITCH_GAP_MS, and TEAM_SWITCH_MAX in TEAM_SWITCH_WINDOW_MS.
+  const now = Date.now();
+  const recent = (member.teamSwitches || []).filter((t) => now - t < TEAM_SWITCH_WINDOW_MS);
+  if (recent.length && now - recent[recent.length - 1] < TEAM_SWITCH_GAP_MS) return { error: 'too_fast' };
+  if (recent.length >= TEAM_SWITCH_MAX) return { error: 'too_many' };
+  member.teamSwitches = [...recent, now];
   const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   if (norm(effectiveTeam(member)) !== norm(name)) member.isCaptain = false;
   if (member.rosterTeam && norm(member.rosterTeam) !== norm(name)) {
@@ -766,6 +777,15 @@ export function ensurePlayerKey(tournament) {
 // --- membership -----------------------------------------------------------
 
 const ROLES = new Set(['reader', 'co-reader', 'spectator', 'player']);
+
+// Players connected at once. Disconnected ones don't count, so a player who
+// dropped can always come back.
+export const MAX_PLAYERS = 50;
+export function roomIsFull(room) {
+  let n = 0;
+  for (const m of room.members.values()) if (m.role === 'player' && m.connected) n++;
+  return n >= MAX_PLAYERS;
+}
 
 // `role` here is already validated/authorized by the server (see index.js).
 export function joinRoom(room, { playerId, name, role, team, rosterTeam, rosterPlayer }) {
@@ -1437,6 +1457,12 @@ export function withdraw(room, playerId, { byPlayer = false, by = null } = {}) {
 const FULL_BUZZ_CAP = 5000;
 function logBuzzAttempt(room, member, { clampedTime, arrival, accepted, reason }) {
   if (!room.buzzLog) room.buzzLog = [];
+  // One line per player per buzz (a cycle runs from one buzzer reset to the
+  // next). Pressing again after losing the race, or while waiting in the
+  // queue, adds nothing: the first press is the one that says when they knew.
+  if (room.buzzLogged?.cycleNo !== room.cycleNo) room.buzzLogged = { cycleNo: room.cycleNo, ids: new Set() };
+  if (!accepted && room.buzzLogged.ids.has(member.id)) return;
+  room.buzzLogged.ids.add(member.id);
   room.buzzLog.push({
     at: arrival,
     t: clampedTime,

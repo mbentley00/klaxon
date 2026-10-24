@@ -113,7 +113,9 @@ $('#create-form').addEventListener('submit', async (e) => {
     say(`Created room ${r.code}. Opening as reader…`);
     location.href = modaq ? `/modaq?room=${r.code}` : `/r/${r.code}?role=reader`;
   } catch (err) {
-    say('Could not create room: ' + err.message, false);
+    say(err.message === 'too_many_rooms'
+      ? "You've made 3 rooms in the last few minutes. Wait a few minutes, or reuse one."
+      : 'Could not create room: ' + err.message, false);
   }
 });
 

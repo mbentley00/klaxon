@@ -332,7 +332,9 @@ $('#create-tournament').addEventListener('click', async () => {
     say(`Tournament ${r.code} created.${note} Opening director console…`);
     location.href = '/t/' + r.code;
   } catch (err) {
-    say('Could not create tournament: ' + err.message, false);
+    say(err.message === 'too_many_tournaments'
+      ? "You've made 3 tournaments in the last few minutes. Wait a few minutes and try again."
+      : 'Could not create tournament: ' + err.message, false);
     btn.disabled = false;
   }
 });
@@ -373,7 +375,7 @@ async function createShootout() {
   });
   remember('directorToken:' + r.code, r.directorToken);
   const uploaded = await uploadPackets(r);
-  const room = await api('POST', '/api/rooms', { tournamentCode: r.code, name: 'Shootout' });
+  const room = await api('POST', '/api/rooms', { tournamentCode: r.code, name: 'Shootout', directorToken: r.directorToken });
   remember('staffToken:' + room.code, room.readerToken);
   remember('coReaderToken:' + room.code, room.coReaderToken);
   const note = uploaded ? ` Uploaded ${uploaded} packet${uploaded > 1 ? 's' : ''}, ready for the rooms.` : '';

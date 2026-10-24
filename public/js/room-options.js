@@ -1,4 +1,4 @@
-import { recall, playerId, $ } from './util.js';
+import { recall, remember, playerId, $ } from './util.js';
 
 // A room's settings on a page of their own, for the reader of a MODAQ room:
 // the reader page there is MODAQ, and the plain buzzer view (with its own game
@@ -15,13 +15,18 @@ if (window.opener) {
   $('#ro-back').onclick = (e) => { e.preventDefault(); window.close(); };
 }
 
-const role = recall('staffRole:' + code);
+// Same rule as the MODAQ reader page (klaxonClient readCredentials): with no
+// saved role, a browser holding the room's key (or signed in) asks as the
+// reader, and the server decides. A room reopened from "Rooms you've created"
+// or an old reader link has the key but no saved role.
+const savedRole = recall('staffRole:' + code) || recall('role:' + code);
+const role = savedRole === 'co-reader' ? 'co-reader' : 'reader';
 const staffToken = recall('staffToken:' + code);
 const sessionToken = localStorage.getItem('bz_sessionToken') || '';
 const msg = $('#ro-msg');
 const say = (t, ok = true) => { msg.textContent = t; msg.className = 'msg ' + (ok ? 'good' : 'bad'); };
 
-if (!role || !(staffToken || sessionToken)) {
+if (!(staffToken || sessionToken)) {
   $('#ro-denied').classList.remove('hidden');
 } else {
   const socket = io({ transports: ['websocket', 'polling'], reconnection: true });
@@ -34,6 +39,7 @@ if (!role || !(staffToken || sessionToken)) {
       $('#ro-denied').classList.remove('hidden');
       return;
     }
+    if (resp.role === 'reader' || resp.role === 'co-reader') remember('staffRole:' + code, resp.role);
     $('#ro-form').classList.remove('hidden');
     $('#ro-links').classList.remove('hidden');
   });

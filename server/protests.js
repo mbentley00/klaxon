@@ -50,6 +50,10 @@ const MAX_PROTESTS = 40;              // per room, across the whole game
 const MAX_STATEMENTS = 12;            // per protest — a squad plus its coach
 const MAX_TEXT = 1500;
 const LODGE_COOLDOWN_MS = 20 * 1000;  // per player, so the button can't be spammed
+// Each saved statement goes to the whole room: one save every 10 seconds per
+// person, and 10 saves of their statement on one protest.
+const STATEMENT_GAP_MS = 10 * 1000;
+const MAX_STATEMENT_EDITS = 10;
 
 const text = (v, cap = MAX_TEXT) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, cap);
 const newId = () => 'p' + Math.random().toString(36).slice(2, 9);
@@ -147,6 +151,10 @@ export function addStatement(room, id, actor, body) {
 
   const existing = p.statements.find((s) => s.playerId === actor.id);
   if (existing) {
+    if (existing.text === said) return { ok: true, protest: p, statement: existing };
+    if (Date.now() - existing.at < STATEMENT_GAP_MS) return { error: 'too_fast' };
+    if ((existing.edits || 0) >= MAX_STATEMENT_EDITS) return { error: 'too_many_edits' };
+    existing.edits = (existing.edits || 0) + 1;
     existing.text = said;
     existing.at = Date.now();
     existing.side = side;
@@ -173,6 +181,28 @@ export function file(room, id) {
   if (!p) return { error: 'no_protest' };
   p.status = 'filed';
   return { ok: true, protest: p };
+}
+
+/**
+ * Files the teams' protests that MODAQ's game now records. The moderator's
+ * "Complete lodging protest" opens MODAQ's own protest dialog; saving it puts
+ * the protest in the game MODAQ sends here, and that is what files it (a
+ * cancelled dialog leaves it open). A tossup protest matches on question and
+ * team; a bonus protest on question alone, since MODAQ works out the team of
+ * a bonus protest itself.
+ */
+export function fileFromModaq(room, modaqProtests) {
+  if (!Array.isArray(modaqProtests) || !room.protests?.length) return 0;
+  const norm = (t) => String(t ?? '').trim().toLowerCase();
+  let filed = 0;
+  for (const p of room.protests) {
+    if (p.status !== 'open' && p.status !== 'lodged') continue;
+    const part = p.part || 'tossup';
+    const hit = modaqProtests.some((m) => Number(m?.cycle) === p.cycle && m?.type === part &&
+      (part === 'bonus' || norm(m?.team) === norm(p.byTeam)));
+    if (hit) { p.status = 'filed'; filed++; }
+  }
+  return filed;
 }
 
 export function dismiss(room, id) {
