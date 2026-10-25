@@ -283,6 +283,21 @@ function teamSettings() {
 }
 
 if (editCode) startEditing();
+else checkSignedIn();
+
+// Creating needs an account: without one, ask for a log-in first.
+async function checkSignedIn() {
+  const s = localStorage.getItem('bz_sessionToken');
+  let ok = false;
+  if (s) {
+    try { await api('GET', `/api/accounts/me?sessionToken=${encodeURIComponent(s)}`); ok = true; } catch { /* signed out */ }
+  }
+  if (ok) return;
+  $('#signin-gate-link').href = '/account?return=' + encodeURIComponent(location.pathname + location.search);
+  $('#signin-gate').classList.remove('hidden');
+  $('#create-tournament').disabled = true;
+  say('Log in to create a tournament.', false);
+}
 
 $('#create-tournament').addEventListener('click', async () => {
   const btn = $('#create-tournament');
@@ -334,7 +349,10 @@ $('#create-tournament').addEventListener('click', async () => {
   } catch (err) {
     say(err.message === 'too_many_tournaments'
       ? "You've made 3 tournaments in the last few minutes. Wait a few minutes and try again."
-      : 'Could not create tournament: ' + err.message, false);
+      : err.message === 'sign_in_required'
+        ? 'Log in to create a tournament.'
+        : 'Could not create tournament: ' + err.message, false);
+    if (err.message === 'sign_in_required') $('#signin-gate').classList.remove('hidden');
     btn.disabled = false;
   }
 });

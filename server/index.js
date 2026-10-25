@@ -257,6 +257,9 @@ app.get('/api/rooms/:code', ah(async (req, res) => {
 }));
 
 app.post('/api/tournaments', ah(async (req, res) => {
+  // Only signed-in accounts make tournaments.
+  const account = accounts.accountForSession(req.body?.sessionToken);
+  if (!account) return res.status(401).json({ error: 'sign_in_required' });
   if (limited(recentTournamentCreates, req, CREATE_WINDOW_MS, CREATE_PER_WINDOW)) {
     return res.status(429).json({ error: 'too_many_tournaments' });
   }
@@ -270,9 +273,8 @@ app.post('/api/tournaments', ah(async (req, res) => {
     showQuestions: req.body?.showQuestions === true,
     questionLag: req.body?.questionLag
   });
-  // Whoever makes a tournament can read in it: a signed-in creator is approved.
-  const account = accounts.accountForSession(req.body?.sessionToken);
-  if (account) await approveDirector(t, account);
+  // Whoever makes a tournament can read in it.
+  await approveDirector(t, account);
   res.json({ code: t.code, directorToken: t.directorToken, name: t.name, defaults: t.roomDefaults, format: t.format });
 }));
 
@@ -3465,7 +3467,8 @@ io.on('connection', (socket) => {
         }
         const lists = room.packetLists || {};
         // The game's regulation length, for the players' "Tossup N of M" (see store.setScoresheet).
-        if (Number(payload.export?.regulation) > 0) room.regulation = Number(payload.export.regulation);
+        const regulation = Number(payload.regulation ?? payload.export?.regulation);
+        if (regulation > 0) room.regulation = regulation;
         store.teamLockoutFromGame(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false);
         store.setScoresheet(room, payload.qbj ?? null, payload.currentQuestion, payload.hasBonuses !== false,
           payload.protests, lists.categories, lists.answers, lists.questions,

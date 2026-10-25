@@ -721,120 +721,190 @@ button.active { background: var(--accent-fill); color: var(--on-accent); }
 .export-game .export-remove { font-size: .7rem; padding: .15em .45em; box-shadow: none; }
 .export-game.removed .chip, .export-game.removed .export-teams { opacity: .45; text-decoration: line-through; }
 
-/* ---- MASSINGER pick/ban board (room page, read-only mirror) ---- */
-.massinger .ms-status { font-weight: 700; margin: .2em 0 .6em; }
-.massinger .ms-status.expired { color: var(--bad); animation: ms-blink 1s steps(2) infinite; }
-.massinger .ms-status.done { color: var(--ok-deep); }
-@keyframes ms-blink { 50% { opacity: .35; } }
-.ms-board {
-  list-style: none; margin: 0; padding: 0;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px;
-}
-.ms-board li {
-  display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
-  border: 1.5px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--surface);
-}
-.ms-board li.banned { opacity: .45; }
-.ms-board li.banned .ms-label { text-decoration: line-through; }
-.ms-board li.protected { background: var(--ok-bg); border-color: var(--ok-deep); }
-/* One line per row: the label takes the slack (wrapping inside itself only if
-   it must) and the Ban/Protect buttons never drop to a second line. Rows size
-   to their own content, not their grid neighbour's. */
-.ms-board { align-items: start; }
-.ms-board li { flex-wrap: nowrap; row-gap: 2px; align-items: center; }
-.ms-board li.protected { flex-wrap: wrap; }
-.ms-board .ms-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.ms-board .ms-pick { flex: none; }
-.ms-board .ms-mark { font-size: .78rem; color: var(--muted); white-space: nowrap; }
-/* A protect names the team, which can be long: its own line, wrapping. */
-.ms-board li.protected .ms-mark { flex-basis: 100%; white-space: normal; overflow-wrap: anywhere; }
-.massinger .ms-status.mine { color: var(--accent); }
-.massinger .ms-hint { margin: .1em 0 .7em; font-size: .85rem; color: var(--muted); }
-.ms-board .ms-pick { display: flex; gap: 4px; margin-left: auto; }
-.ms-board .ms-pick button { padding: .15em .5em; font-size: .72rem; box-shadow: 2px 2px 0 var(--shadow-ink); }
-/* Above the buzzer now: a gap before it. "Starting soon" is the loud state. */
+/* ---- MASSINGER pick/ban (room page) ----
+   One pinned bar (turn, kind, clock, picks left), the board right under it,
+   the order beside it on wide screens, one footer line for the last pick. */
 #massinger-view { margin-bottom: 18px; }
 #massinger-view.lobby { border-color: var(--accent); }
-.massinger .ms-status.soon { color: var(--accent); font-size: 1.15rem; }
-.massinger.lobby .ms-hint { font-size: 1rem; color: var(--ink); }
-.ms-board-wrap > summary { cursor: pointer; font-size: .85rem; color: var(--muted); margin-bottom: 6px; }
-
-/* The pick clock: big enough to read across a room. */
-.ms-clock { margin: .2em 0 .7em; text-align: center; }
-.ms-clock-num {
-  font-size: clamp(3.2rem, 14vw, 6rem); font-weight: 800; line-height: 1;
-  font-variant-numeric: tabular-nums; color: var(--ink); letter-spacing: -.02em;
+.ms-bar {
+  position: sticky; top: var(--room-bar-h, 0px); z-index: 4;
+  margin: -14px -16px 0; padding: 12px 16px 10px; background: var(--surface);
+  border-bottom: 2px solid var(--line); display: flex; flex-direction: column; gap: 8px;
 }
-.ms-clock-bar { height: 12px; border: 1.5px solid var(--line); border-radius: 99px; overflow: hidden; margin-top: 8px; background: var(--surface); }
-.ms-clock-bar span { display: block; height: 100%; background: var(--accent); transition: width .2s linear; }
+.massinger.lobby .ms-bar, .massinger.done .ms-bar { border-bottom: 0; }
+.ms-bar.mine { background: var(--accent-bg); }
+.ms-bar-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.massinger h3.ms-eyebrow { margin: 0; font-size: .75rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.ms-bar-right { display: flex; align-items: center; gap: 10px; }
+.ms-left { font-size: .85rem; color: var(--muted); }
+.ms-left b { color: var(--ink); }
+#ms-sound-btn { font-size: .75rem; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+#ms-sound-btn[aria-pressed="false"] { color: var(--muted); }
+#ms-sound-btn svg { width: 14px; height: 14px; }
+.massinger .ms-status { font-weight: 700; }
+.massinger .ms-status:empty { display: none; }
+.massinger .ms-status.done { color: var(--ok-deep); }
+.massinger .ms-status.soon { color: var(--accent); font-size: 1.15rem; }
+@keyframes ms-blink { 50% { opacity: .35; } }
+
+/* Whose turn: the kind as a coloured tag, the team, the clock at the right. */
+.ms-turnbig { display: flex; align-items: center; gap: 12px; }
+.ms-turnbig-kind {
+  flex: none; font-size: .85rem; font-weight: 800; letter-spacing: .12em; color: #fff;
+  background: var(--accent-fill); padding: .3em .7em; border-radius: var(--radius);
+}
+.ms-turnbig.ban .ms-turnbig-kind { background: var(--bad-fill); }
+.ms-turnbig-team {
+  flex: 1; min-width: 0; font-family: var(--display); font-size: clamp(1.15rem, 4.2vw, 1.6rem);
+  font-weight: 800; line-height: 1.15; overflow-wrap: anywhere;
+}
+.ms-turnbig-team small { font-family: var(--sans); font-weight: 400; font-size: .7em; color: var(--muted); }
+.ms-clock { flex: none; width: clamp(84px, 22vw, 190px); display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.ms-clock-num { font-family: var(--mono); font-weight: 700; font-size: clamp(1.3rem, 5vw, 1.8rem); line-height: 1; font-variant-numeric: tabular-nums; }
+.ms-clock-bar { width: 100%; height: 7px; border: 1.5px solid var(--line); border-radius: 99px; overflow: hidden; background: var(--surface); }
+.ms-clock-bar span { display: block; height: 100%; background: var(--accent-fill); transition: width .2s linear; }
 .ms-clock.warn .ms-clock-num { color: var(--warn); }
 .ms-clock.warn .ms-clock-bar span { background: var(--warn); }
 .ms-clock.urgent .ms-clock-num { color: var(--bad); animation: ms-pulse .5s ease-in-out infinite alternate; }
 .ms-clock.urgent .ms-clock-bar span { background: var(--bad); }
-.ms-clock.expired .ms-clock-num { color: var(--bad); font-size: clamp(2.2rem, 9vw, 3.6rem); animation: ms-blink 1s steps(2) infinite; }
+.ms-clock.expired .ms-clock-num { color: var(--bad); font-size: 1rem; animation: ms-blink 1s steps(2) infinite; }
 @keyframes ms-pulse { from { transform: scale(1); } to { transform: scale(1.12); } }
 
-/* Whose turn, and what they're doing: as loud as the clock. */
-.ms-turnbig {
-  display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 4px 14px;
-  margin: .2em 0 .3em; padding: 10px 14px; border-radius: 10px; border: 2px solid var(--accent);
-  background: var(--surface); text-align: center;
+/* The two teams, slim: name, who's here, picks left. The one picking stands out. */
+.ms-teamcards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ms-teamcard { display: flex; align-items: center; gap: 10px; min-width: 0; border: 1.5px solid var(--soft); border-radius: var(--radius); padding: 5px 10px; }
+.ms-teamcard.on { border: 2.5px solid var(--accent-fill); padding: 4px 9px; background: var(--accent-bg); }
+.ms-teamcard-main { flex: 1; min-width: 0; }
+.ms-teamcard-name { font-weight: 700; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-teamcard.mine .ms-teamcard-name::after { content: ' (your team)'; font-weight: 400; color: var(--muted); font-size: .85em; }
+.ms-teamcard-who { font-size: .78rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-teamcard-who b { color: var(--accent-deep); }
+.ms-teamcard .ms-cap { color: var(--warn); font-weight: 700; }
+.ms-teamcard-left { flex: none; font-size: .78rem; text-align: right; line-height: 1.45; }
+.ms-teamcard-left .ms-sep { display: block; }
+@media (max-width: 560px) {
+  .ms-teamcards { grid-template-columns: 1fr; gap: 3px; }
+  .ms-teamcard, .ms-teamcard.on { border: 0; padding: 0; background: none; }
+  .ms-teamcard-left { line-height: 1.2; }
+  .ms-teamcard-left .ms-sep { display: inline; }
+  .ms-teamcard-left .ms-sep::before { content: ' · '; }
+  .ms-teamcard-who { display: none; }
 }
-.ms-turnbig-team { font-size: clamp(1.4rem, 6vw, 2.1rem); font-weight: 800; color: var(--ink); overflow-wrap: anywhere; }
-.ms-turnbig-kind { font-size: clamp(1.2rem, 5vw, 1.7rem); font-weight: 900; letter-spacing: .1em; color: var(--accent); }
-.ms-turnbig.ban { border-color: var(--bad); }
-.ms-turnbig.ban .ms-turnbig-kind { color: var(--bad); }
-.ms-turnbig.protect { border-color: var(--ok-deep); }
-.ms-turnbig.protect .ms-turnbig-kind { color: var(--ok-deep); }
-.ms-turnbig.mine { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); }
 
-/* The two teams: who's on each, picks left; the team picking stands out. */
-.ms-teamcards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 .5em; }
-.ms-teamcard { border: 1.5px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--surface); opacity: .7; min-width: 0; }
-.ms-teamcard.on { border: 2.5px solid var(--accent); opacity: 1; }
-.ms-teamcard-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.ms-teamcard-head strong { font-size: 1.05rem; overflow-wrap: anywhere; }
-.ms-teamcard.mine .ms-teamcard-head strong::after { content: ' (your team)'; font-weight: 400; color: var(--muted); font-size: .85rem; }
-.ms-teamcard-badge { font-size: .7rem; font-weight: 800; letter-spacing: .08em; color: #fff; background: var(--accent); border-radius: 4px; padding: 1px 6px; }
-.ms-teamcard-left { font-size: .8rem; color: var(--muted); margin: 2px 0 4px; }
-.ms-teamcard ul { list-style: none; margin: 0; padding: 0; font-size: .88rem; }
-.ms-teamcard li { padding: 1px 0; overflow-wrap: anywhere; }
-.ms-teamcard .ms-cap { color: var(--warn); font-weight: 700; font-size: .78rem; }
-.ms-teamcard-empty { margin: 0; font-size: .82rem; color: var(--muted); }
-@media (max-width: 420px) { .ms-teamcards { grid-template-columns: 1fr; } }
-.ms-next { color: var(--muted); font-size: .85rem; margin: 0 0 .5em; }
+.massinger .ms-hint { margin: 10px 0 8px; font-size: .85rem; color: var(--muted); }
+.massinger .ms-hint:empty { display: none; }
+.massinger.lobby .ms-hint { font-size: 1rem; color: var(--ink); }
 
-/* The last pick, in the page above the board (never over it); flashes as it lands. */
-.ms-lastpick {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
-  margin: 0 0 .7em; padding: 8px 12px; border-radius: 8px; border: 2px solid currentColor; background: var(--surface);
+/* The board, with the order beside it on wide screens. */
+.ms-body { display: block; }
+@media (min-width: 900px) {
+  .ms-body.with-order { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 14px; align-items: start; }
+  .ms-body.with-order .ms-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ms-body.with-order .ms-order > summary { display: none; }
+  .ms-body.with-order .ms-order { border-left: 2px solid var(--line); padding-left: 14px; margin: 0; }
 }
-.ms-lastpick.ban { color: var(--bad); }
-.ms-lastpick.protect { color: var(--ok-deep); }
-.ms-lastpick-icon { font-size: 1.3rem; line-height: 1; }
-.ms-lastpick-verb { font-weight: 900; letter-spacing: .08em; }
-.ms-lastpick-label { color: var(--ink); font-size: 1.1rem; overflow-wrap: anywhere; }
-.ms-lastpick-by { color: var(--muted); font-size: .85rem; }
+.massinger:not(.done) .ms-board-wrap > summary { display: none; }
+.ms-board-wrap > summary { cursor: pointer; font-size: .85rem; color: var(--muted); margin-bottom: 6px; }
+.ms-board {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; align-items: stretch;
+}
+@media (max-width: 700px) { .ms-board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ms-board li {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px;
+  box-sizing: border-box; border: 1.5px solid var(--line); border-radius: var(--radius);
+  padding: 5px 9px; background: var(--surface); font-size: .9rem; min-width: 0;
+}
+.ms-board .ms-label { min-width: 0; overflow-wrap: break-word; hyphens: auto; }
+.ms-board .ms-mark { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: .72rem; color: var(--muted); max-width: 48%; }
+.ms-board .ms-mark span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-board .ms-mark svg { flex: none; width: 11px; height: 11px; }
+.ms-board li.part .ms-mark { color: var(--bad); background: var(--bad-bg); font-weight: 700; padding: 1px 5px; border-radius: 3px; }
+.ms-board li.banned { border: 1.5px dashed var(--bad); background: var(--bad-bg-soft); }
+.ms-board li.banned .ms-label { text-decoration: line-through; color: var(--muted); }
+.ms-board li.banned .ms-mark { color: var(--bad); font-weight: 700; }
+.ms-board li.protected { border: 2px solid var(--accent-fill); background: var(--accent-bg); }
+.ms-board li.protected .ms-label { font-weight: 600; }
+.ms-board li.protected .ms-mark { color: var(--accent-deep); font-weight: 700; }
+/* Your turn: an open tile is the button (one kind due), or carries both. */
+.ms-board li.tap { padding: 0; border: 0; background: none; }
+.ms-tilebtn {
+  width: 100%; min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 5px 9px; font: inherit; font-size: .9rem; text-align: left; color: var(--ink);
+  background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--radius);
+  box-shadow: 2px 2px 0 var(--shadow-ink); cursor: pointer;
+}
+.ms-tilebtn:hover:not(:disabled) { background: var(--accent-bg); }
+.ms-tilebtn.ban:hover:not(:disabled) { background: var(--bad-bg-soft); border-color: var(--bad); }
+.ms-tilebtn:disabled { box-shadow: none; opacity: .6; cursor: default; }
+.ms-board li.chosen .ms-tilebtn { border: 2.5px solid var(--bad); background: var(--bad-bg); font-weight: 700; box-shadow: 3px 3px 0 var(--bad); }
+.ms-board li.chosen .ms-tilebtn.protect { border-color: var(--accent-fill); background: var(--accent-bg); box-shadow: 3px 3px 0 var(--accent-fill); }
+.ms-board .ms-pick { flex: none; display: flex; gap: 4px; }
+.ms-board .ms-pick button { padding: .15em .5em; font-size: .72rem; box-shadow: 2px 2px 0 var(--shadow-ink); }
+@media (max-width: 560px) {
+  .ms-board li, .ms-tilebtn { min-height: 48px; font-size: .84rem; }
+  .ms-board li:not(.tap) { flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; }
+  .ms-tilebtn { flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; }
+  .ms-board .ms-mark { max-width: 100%; }
+}
+
+/* The order of picks: done, now, still to come. */
+.ms-order { margin-top: 10px; font-size: .82rem; }
+.ms-order > summary { cursor: pointer; font-weight: 700; min-height: 36px; display: flex; align-items: center; }
+.ms-order ol { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ms-order li { display: flex; gap: 8px; line-height: 1.3; }
+.ms-order .n { flex: none; width: 18px; font-family: var(--mono); color: var(--muted); }
+.ms-order li.done { color: var(--muted); }
+.ms-order li.done b { color: var(--ink); }
+.ms-order li.now { background: var(--accent-bg); border: 1.5px solid var(--accent-fill); border-radius: var(--radius); padding: 4px 6px; margin: 0 -7px; }
+.ms-order li.now .n { color: var(--ink); font-weight: 700; }
+.ms-order .now-tag { color: var(--accent-deep); font-weight: 700; }
+
+/* The footer: last pick, then what's next. The last pick flashes as it lands. */
+.ms-foot {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px;
+  margin: 12px -16px -14px; padding: 9px 16px; border-top: 2px solid var(--line); font-size: .88rem;
+}
+.ms-lastpick { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px; border-radius: var(--radius); padding: 1px 4px; margin: -1px -4px; }
+.ms-lastpick-pre { color: var(--muted); }
+.ms-lastpick svg { width: 12px; height: 12px; align-self: center; }
+.ms-lastpick.ban svg { color: var(--bad); }
+.ms-lastpick.protect svg { color: var(--accent-deep); }
+.ms-lastpick-label { overflow-wrap: anywhere; }
+.ms-lastpick-by { color: var(--muted); }
+.ms-next { margin: 0; color: var(--muted); }
 .ms-lastpick.fresh { animation: ms-lastpick-in 2.4s ease-out; }
-/* A pop and a tint that fades; the text stays dark on it throughout. */
 @keyframes ms-lastpick-in {
-  0% { transform: scale(.92); background: color-mix(in srgb, currentColor 30%, var(--surface)); }
-  8% { transform: scale(1.04); }
-  15% { transform: scale(1); background: color-mix(in srgb, currentColor 30%, var(--surface)); }
-  100% { background: var(--surface); }
+  0%, 20% { background: var(--warn-bg); transform: scale(1.04); }
+  30% { transform: scale(1); }
+  100% { background: transparent; }
 }
-.ms-board li.just-banned { animation: ms-row-ban 1.6s ease-out; }
-.ms-board li.just-protected { animation: ms-row-protect 1.6s ease-out; }
+
+/* Phones: a tap selects; this strip makes the pick. */
+.ms-confirm {
+  position: sticky; bottom: 0; z-index: 4; display: flex; align-items: center; gap: 10px;
+  margin: 12px -16px -14px; padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface); border-top: 2px solid var(--line);
+}
+.ms-foot:not(.hidden) + .ms-confirm { margin-top: 0; }
+.ms-foot:has(+ .ms-confirm:not(.hidden)) { margin-bottom: 0; }
+.ms-confirm-q { flex: 1; min-width: 0; font-size: .95rem; line-height: 1.25; overflow-wrap: anywhere; }
+.ms-confirm button { flex: none; min-height: 44px; font-weight: 700; }
+#ms-confirm-go { background: var(--bad-fill); color: var(--on-accent); }
+#ms-confirm-go.protect { background: var(--accent-fill); }
+
+.ms-board li.just-banned, .ms-board li.just-banned .ms-tilebtn { animation: ms-row-ban 1.6s ease-out; }
+.ms-board li.just-protected, .ms-board li.just-protected .ms-tilebtn { animation: ms-row-protect 1.6s ease-out; }
 @keyframes ms-row-ban {
   0%, 30% { background: var(--bad); color: #fff; transform: scale(1.05); opacity: 1; }
   10%, 20% { transform: translateX(-4px) scale(1.05); }
   15%, 25% { transform: translateX(4px) scale(1.05); }
 }
 @keyframes ms-row-protect {
-  0%, 30% { background: var(--ok-deep); color: #fff; transform: scale(1.05); box-shadow: 0 0 0 4px var(--ok-bg); }
+  0%, 30% { background: var(--accent-fill); color: #fff; transform: scale(1.05); box-shadow: 0 0 0 4px var(--accent-bg); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ms-lastpick.fresh, .ms-lastpick.fresh *, .ms-board li.just-banned, .ms-board li.just-protected, .ms-clock-num { animation: none !important; }
+  .ms-lastpick.fresh, .ms-board li.just-banned, .ms-board li.just-protected, .ms-board li .ms-tilebtn, .ms-clock-num { animation: none !important; }
 }
 /* Tournament code in the room's tournament strip: a real link. */
 .tournament h3 .tlink { color: var(--accent); text-decoration: none; border-bottom: 1.5px solid var(--accent); }
@@ -1686,9 +1756,6 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 .older-tournaments > summary { font-size: .85rem; color: var(--muted); margin: 8px 0 4px; font-weight: 600; }
 
 /* The pick/ban heading, with its own sound switch at the right. */
-.massinger h3.ms-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-#ms-sound-btn { font-size: .75rem; font-weight: 600; }
-#ms-sound-btn[aria-pressed="false"] { color: var(--muted); }
 
 /* Help-page screenshots: framed, never wider than the column. Phone shots sit
    side by side when there's room. */

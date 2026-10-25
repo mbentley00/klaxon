@@ -102,26 +102,51 @@
          both teams watch picks land live. Above the buzzer: nothing is read
          until it's done, and once it is, the board folds away. -->
     <section id="massinger-view" class="panel massinger hidden" aria-live="polite">
-      <h3 class="ms-head"><span><span id="ms-title">MASSINGER pick/ban</span> <span id="ms-round" class="muted-count"></span></span>
-        <button id="ms-sound-btn" class="ghost tiny" type="button" aria-pressed="true"
-                title="Pick/ban sounds only">🔔 Pick sounds on</button></h3>
-      <div id="ms-status" class="ms-status"></div>
-      <!-- Whose turn and what they're doing, loudly. -->
-      <div id="ms-turnbig" class="ms-turnbig hidden"><span class="ms-turnbig-team"></span><span class="ms-turnbig-kind"></span></div>
-      <div id="ms-clock" class="ms-clock hidden" aria-hidden="true">
-        <div class="ms-clock-num"></div>
-        <div class="ms-clock-bar"><span></span></div>
+      <!-- One bar, pinned under the room's header: whose turn and what kind of
+           pick, the clock, and each team's picks left. The board sits right
+           under it, so nothing has to be scrolled to while picking. -->
+      <div class="ms-bar">
+        <div class="ms-bar-top">
+          <h3 class="ms-eyebrow"><span id="ms-title">MASSINGER pick/ban</span> <span id="ms-round"></span></h3>
+          <span class="ms-bar-right">
+            <span id="ms-left" class="ms-left hidden"></span>
+            <button id="ms-sound-btn" class="ghost tiny" type="button" aria-pressed="true"
+                    title="Pick/ban sounds only">Pick sounds on</button>
+          </span>
+        </div>
+        <div id="ms-status" class="ms-status"></div>
+        <div id="ms-turnbig" class="ms-turnbig hidden">
+          <span class="ms-turnbig-kind"></span>
+          <span class="ms-turnbig-team"></span>
+          <div id="ms-clock" class="ms-clock hidden" aria-hidden="true">
+            <div class="ms-clock-num"></div>
+            <div class="ms-clock-bar"><span></span></div>
+          </div>
+        </div>
+        <div id="ms-counts" class="ms-teamcards hidden"></div>
       </div>
-      <!-- The two teams: who's on each, picks left; the one picking stands out. -->
-      <div id="ms-counts" class="ms-teamcards hidden"></div>
-      <p id="ms-next" class="ms-next hidden"></p>
       <p id="ms-hint" class="ms-hint"></p>
-      <!-- The last pick, in the page (it never covers the board); flashes when it lands. -->
-      <div id="ms-lastpick" class="ms-lastpick hidden" aria-live="polite"></div>
-      <details id="ms-board-wrap" class="ms-board-wrap" open>
-        <summary>The board</summary>
-        <ul id="ms-board" class="ms-board"></ul>
-      </details>
+      <div class="ms-body">
+        <details id="ms-board-wrap" class="ms-board-wrap" open>
+          <summary>The board</summary>
+          <ul id="ms-board" class="ms-board"></ul>
+        </details>
+        <details id="ms-order" class="ms-order hidden">
+          <summary>Order</summary>
+          <ol></ol>
+        </details>
+      </div>
+      <!-- The last pick and what comes next, one line (it flashes when a pick lands). -->
+      <div id="ms-foot" class="ms-foot hidden">
+        <div id="ms-lastpick" class="ms-lastpick hidden"></div>
+        <p id="ms-next" class="ms-next hidden"></p>
+      </div>
+      <!-- Phones: a tap selects a tile; the pick is made here. -->
+      <div id="ms-confirm" class="ms-confirm hidden">
+        <span class="ms-confirm-q"></span>
+        <button id="ms-confirm-cancel" class="ghost" type="button">Cancel</button>
+        <button id="ms-confirm-go" type="button"></button>
+      </div>
     </section>
     <div class="buzz-row">
       <section id="buzz-area">
