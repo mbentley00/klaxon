@@ -1,5 +1,6 @@
 import { ClockSync } from './clocksync.js';
 import { playerId, staffPlayerId, remember, recall, forget, api, readFileText, $, el } from './util.js';
+import { renderApiAccess } from './api-access.js';
 
 const code = location.pathname.split('/').pop().toUpperCase();
 const params = new URLSearchParams(location.search);
@@ -590,6 +591,11 @@ function enterStage(snapshot) {
   // `?plain=1` bypasses the redirect so a MODAQ moderator can still reach the
   // normal reader controls (buzzer options, invite links) from the MODAQ view.
   const plain = params.get('plain') === '1';
+  // A room scored on Klaxon's own scoresheet sends its staff there instead.
+  if (!plain && isStaffRole(state.role) && snapshot?.settings?.scoreSheet) {
+    location.replace(`/r/${code}/score`);
+    return;
+  }
   if (!plain && isStaffRole(state.role) && snapshot?.settings?.modaqMode) {
     location.replace(`/modaq?room=${code}`);
     return;
@@ -608,6 +614,9 @@ function enterStage(snapshot) {
   $('#players-panel').classList.remove('hidden');
   $('#share-panel').classList.toggle('hidden', !staff);
   if (staff) buildShareLinks();
+  // Outside a tournament the reader can hand out a read-only game data key.
+  $('#opt-api').classList.toggle('hidden', !staff || !!snapshot?.tournamentCode);
+  if (staff && !snapshot?.tournamentCode) showRoomApi();
   // Compact view is staff-only: a reader squeezing the window beside Zoom + the
   // question doc wants just the buzzer and the buzz order. Restore their choice.
   $('#compact-toggle').classList.toggle('hidden', !staff);
@@ -3711,7 +3720,7 @@ function renderOptions(s) {
   // Auto-clear only applies in lock-to-first mode (server ignores it otherwise).
   $('#opt-autoclear').closest('.toggle').classList.toggle('hidden', !!s.settings?.queueMode);
   const modaq = $('#opt-modaq-mode');
-  if (modaq) modaq.value = s.settings?.modaqLite ? 'lite' : s.settings?.modaqMode ? 'full' : 'off';
+  if (modaq) modaq.value = s.settings?.scoreSheet ? 'sheet' : s.settings?.modaqLite ? 'lite' : s.settings?.modaqMode ? 'full' : 'off';
   // Typed answers, and the locked-answer rule that only means anything when
   // there is a queue for people to be waiting in.
   const typed = !!s.settings?.typedAnswers;
@@ -3779,12 +3788,14 @@ function renderEnded(s) {
 // Switching to a MODAQ mode moves this staff view over to the MODAQ reader.
 // The switch is acknowledged before navigating so the MODAQ page never lands
 // on a room that still says "standard buzzer" (it would bounce straight back).
-function setModaqMode(v) { // off | lite | full
-  const options = v === 'lite' ? { modaqMode: true, modaqLite: true }
-    : v === 'full' ? { modaqMode: true, modaqLite: false }
-      : { modaqMode: false, modaqLite: false };
+function setModaqMode(v) { // off | lite | full | sheet
+  const options = v === 'lite' ? { modaqMode: true, modaqLite: true, scoreSheet: false }
+    : v === 'full' ? { modaqMode: true, modaqLite: false, scoreSheet: false }
+      : v === 'sheet' ? { modaqMode: true, modaqLite: false, scoreSheet: true }
+        : { modaqMode: false, modaqLite: false, scoreSheet: false };
   socket.emit('reader_action', { action: 'set_options', options }, () => {
-    if (v !== 'off') location.replace(`/modaq?room=${code}`);
+    if (v === 'sheet') location.replace(`/r/${code}/score`);
+    else if (v !== 'off') location.replace(`/modaq?room=${code}`);
   });
 }
 $('#opt-modaq-mode')?.addEventListener('change', (e) => setModaqMode(e.target.value));
@@ -4183,9 +4194,21 @@ function renderTournament() {
 
 // What a room is doing, in a few characters ("R4 · Q12", "R4 ✓") and in words
 // for the tooltip. Shared with the players' tournament page's idea of a room.
+// A round as short as the room chips need it: "R3" for round 3 (or "Round 3"),
+// "Pkt 3" for a round named after its packet, else the name cut short.
+function shortRound(label) {
+  const s = String(label ?? '').trim();
+  if (!s) return '';
+  if (/^\d+$/.test(s)) return `R${s}`;
+  const r = s.match(/\b(?:round|rd)\.?\s*#?0*(\d+)/i);
+  if (r) return `R${r[1]}`;
+  const p = s.match(/\b(?:packet|pkt)\.?\s*#?0*(\d+)/i);
+  if (p) return `Pkt ${p[1]}`;
+  return s.length > 10 ? `${s.slice(0, 9)}…` : s;
+}
 function roomStateLabel(s) {
   if (!s || s.state === 'none') return { key: 'none', text: '', long: '' };
-  const r = s.round ? (/^\d+$/.test(s.round) ? `R${s.round}` : s.round.slice(0, 10)) : '';
+  const r = shortRound(s.round);
   const longR = s.round ? (/^\d+$/.test(s.round) ? `Round ${s.round}` : s.round) : '';
   const join = (...xs) => xs.filter(Boolean).join(' · ');
   switch (s.state) {
@@ -4237,3 +4260,18 @@ async function showAccount() {
   pill.title = `Signed in as ${account.username}`;
 }
 showAccount();
+
+// --- Game data API: this room's read-only key (rooms outside a tournament) ---
+const roomApiAct = (action, questions) => new Promise((resolve, reject) =>
+  socket.emit('reader_action', { action: 'api_access', op: action, questions }, (r) =>
+    (r?.ok ? resolve(r.api) : reject(new Error(r?.error || 'no answer')))));
+async function showRoomApi() {
+  try {
+    const access = await roomApiAct('get');
+    renderApiAccess($('#opt-api-box'), {
+      api: access,
+      links: (key) => [{ label: 'This room’s current game', url: `${location.origin}/api/rooms/${code}/game?key=${key}` }],
+      act: roomApiAct,
+    });
+  } catch { $('#opt-api').classList.add('hidden'); }
+}

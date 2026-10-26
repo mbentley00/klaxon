@@ -243,7 +243,8 @@ export function showQuestion(room, id, questionText) {
 // protest (the director rules on them later, from the console), but the room
 // itself moves on: once a new game starts, the last game's protests are gone
 // from the players' and the moderator's screens.
-const currentRound = (room) => String(room.modaqState?.round ?? '');
+// The round being played: MODAQ's, or the scoresheet's in a room scored there.
+const currentRound = (room) => String(room.modaqState?.round ?? room.sheet?.round ?? '');
 export function inCurrentGame(room, p) {
   if (p.game != null && p.game !== (room.gameNumber || 1)) return false;
   return String(p.round ?? '') === currentRound(room);

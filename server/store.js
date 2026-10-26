@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { DEFAULTS } from './config.js';
@@ -68,6 +69,11 @@ const serializeRoom = (r) => ({
   ended: r.ended || null,
   // Where the room's MODAQ game is (see noteLiveGame): the room lists show it.
   liveGame: r.liveGame || null,
+  // The Klaxon scoresheet's game as it is being scored (see setSheet): a
+  // reload, or a second scorekeeper's device, picks it up from here.
+  sheet: r.sheet || null,
+  // Read-only game data access (see setApiAccess): non-tournament rooms only.
+  api: r.api || null,
   // What an upheld protest left to be played here (see createReplayRoom).
   replay: r.replay || null,
   // Protests the teams lodged (see protests.js). Durable: a protest outlives
@@ -204,6 +210,10 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
       playerAlerts: eff.playerAlerts !== false, // players may flag a stuck buzzer (on by default)
       modaqMode: !!eff.modaqMode,         // reader gets the embedded MODAQ reader + buzz panel
       modaqLite: !!eff.modaqLite,         // lightweight MODAQ: reader + buzzer only, no tournament artifacts
+      // Staff score on Klaxon's own scoresheet (/r/CODE/score) instead of
+      // reading in MODAQ. The game it files is the same as MODAQ's, so the
+      // room otherwise behaves as a MODAQ room (modaqMode stays on).
+      scoreSheet: eff.scoreSheet === true,
       // --- typed answers (see answers.js), all off unless asked for -------
       // The player with the floor types their answer instead of saying it.
       typedAnswers: eff.typedAnswers === true,
@@ -391,6 +401,7 @@ function normalizeRoomDefaults(d = {}) {
   if (typeof d.playerAlerts === 'boolean') out.playerAlerts = d.playerAlerts;
   if (typeof d.modaqMode === 'boolean') out.modaqMode = d.modaqMode;
   if (typeof d.modaqLite === 'boolean') out.modaqLite = d.modaqLite;
+  if (typeof d.scoreSheet === 'boolean') out.scoreSheet = d.scoreSheet;
   if (typeof d.typedAnswers === 'boolean') out.typedAnswers = d.typedAnswers;
   if (typeof d.lockedAnswers === 'boolean') out.lockedAnswers = d.lockedAnswers;
   if (d.withdrawCooldown != null) out.withdrawCooldown = clampNum(d.withdrawCooldown, 0, 40, 0);
@@ -1532,7 +1543,7 @@ function logBuzzAttempt(room, member, { clampedTime, arrival, accepted, reason }
     name: displayName(member),
     team: effectiveTeam(member) || null,
     modaqPlayer: member.rosterPlayer || null,
-    round: room.modaqState?.round ?? null,
+    round: room.modaqState?.round ?? room.sheet?.round ?? null,
     question: room.scoresheet?.current ?? null,
     accepted,
     reason: reason || null
@@ -1653,6 +1664,45 @@ export function resolveWindow(room) {
   return room.queue;
 }
 
+// --- read-only game data access (GET /api/rooms/:code/game?key=) ----------
+// A tournament's director, or the moderator of a room outside a tournament,
+// can hand out a key that reads the game and nothing else: for a stream
+// overlay, a stats page, a script. `questions`: 'live' shows each question as
+// it is read; 'after' holds the text back until the room has moved past it.
+export const API_QUESTION_MODES = ['live', 'after'];
+const apiKey = () => 'kx_' + crypto.randomBytes(18).toString('base64url');
+// owner: a tournament or a room. action: enable | rotate | disable | set.
+export function setApiAccess(owner, { action, questions } = {}) {
+  const mode = API_QUESTION_MODES.includes(questions) ? questions : null;
+  if (action === 'disable') owner.api = null;
+  else if (action === 'enable' || action === 'rotate') {
+    owner.api = { key: apiKey(), questions: mode || owner.api?.questions || 'after', createdAt: Date.now() };
+  } else if (action === 'set') {
+    if (!owner.api) return { error: 'not_enabled' };
+    if (mode) owner.api.questions = mode;
+  } else if (action !== 'get') return { error: 'bad_action' };
+  if (owner.roomCodes) persistTournament(owner); else persistRooms(true);
+  return { ok: true, api: apiAccessView(owner) };
+}
+export const apiAccessView = (owner) => (owner.api
+  ? { enabled: true, key: owner.api.key, questions: owner.api.questions, createdAt: owner.api.createdAt }
+  : { enabled: false });
+
+// The scoresheet's working state (public/js/scoresheet-model.js), kept for
+// whoever opens the sheet next. Staff only; never sent to players (the game
+// they see comes from the QBJ the sheet sends, like MODAQ's). null clears it.
+export const SHEET_MAX_BYTES = 200_000;
+export function setSheet(room, sheet) {
+  if (sheet == null) room.sheet = null;
+  else {
+    if (typeof sheet !== 'object' || Array.isArray(sheet)) return { error: 'bad_sheet' };
+    if (JSON.stringify(sheet).length > SHEET_MAX_BYTES) return { error: 'too_big' };
+    room.sheet = { ...sheet, savedAt: Date.now() };
+  }
+  persistRooms();
+  return { ok: true };
+}
+
 // Live-update room options (staff only; validated in index.js).
 export function setOptions(room, opts = {}) {
   if (typeof opts.queueMode === 'boolean') room.settings.queueMode = opts.queueMode;
@@ -1663,6 +1713,7 @@ export function setOptions(room, opts = {}) {
   if (typeof opts.playerAlerts === 'boolean') room.settings.playerAlerts = opts.playerAlerts;
   if (typeof opts.modaqMode === 'boolean') room.settings.modaqMode = opts.modaqMode;
   if (typeof opts.modaqLite === 'boolean') room.settings.modaqLite = opts.modaqLite;
+  if (typeof opts.scoreSheet === 'boolean') room.settings.scoreSheet = opts.scoreSheet;
   if (typeof opts.typedAnswers === 'boolean') room.settings.typedAnswers = opts.typedAnswers;
   if (typeof opts.lockedAnswers === 'boolean') room.settings.lockedAnswers = opts.lockedAnswers;
   if (typeof opts.listed === 'boolean') room.settings.listed = opts.listed;

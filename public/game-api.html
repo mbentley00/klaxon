@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <script src="/js/theme.js"></script>
+  <link rel="icon" href="/favicon.ico?v=2" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=2" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+  <title>Game data API — Klaxon</title>
+  <link rel="preload" href="/fonts/bricolage-800.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/css/fonts.css" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="room">
+  <header class="bar">
+    <nav class="bar-left crumbs" aria-label="Breadcrumb">
+      <a class="crumb crumb-mark" href="/">Klaxon</a>
+      <span class="crumb-sep">›</span>
+      <span class="crumb" aria-current="page">Game data API</span>
+    </nav>
+  </header>
+
+  <main class="stage help">
+    <section class="panel">
+      <h3>Game data API</h3>
+      <p>Read a game as it is played: the score, each team's and player's line, every tossup and bonus,
+        and where in each question the buzzes came. For stream overlays, stats pages and scripts.
+        It reads; it can't change anything.</p>
+
+      <h4>Getting a key</h4>
+      <ul>
+        <li><strong>A tournament:</strong> the director opens the console, <em>Moderators &amp; links</em>,
+          <em>Game data API</em>, and creates a read-only key. One key covers every room. Moderators of a
+          tournament room can't make one.</li>
+        <li><strong>A room outside a tournament:</strong> the moderator opens the room's options
+          (in MODAQ, <em>Buzzer options</em>), <em>Game data API</em>.</li>
+      </ul>
+      <p>Making a new key, or turning the API off, stops the old key at once.</p>
+
+      <h4>Question text</h4>
+      <p>The key's owner chooses when question text is included:</p>
+      <ul>
+        <li><strong>After each question is finished</strong> (the default): the tossup being read, and its
+          bonus, come without text until the room moves on. Safe for a stream or a public page.</li>
+        <li><strong>As each question is read:</strong> everything read so far. For staff tools only.</li>
+      </ul>
+
+      <h4>Calls</h4>
+      <p>Pass the key as <code>?key=…</code> or as a header, <code>Authorization: Bearer …</code>.
+        Any site may call these from a browser. Results are at most a second old, so polling once a
+        second is plenty.</p>
+      <dl class="api-calls">
+        <dt><code>GET /api/rooms/ROOM/game?key=KEY</code></dt>
+        <dd>The room's current game. Add <code>&amp;round=3</code> for another round's game.</dd>
+        <dt><code>GET /api/tournaments/CODE/games?key=KEY</code></dt>
+        <dd>Every room in the tournament, each with its status and current game (or <code>null</code>).</dd>
+      </dl>
+
+      <h4>What a game contains</h4>
+      <ul>
+        <li><code>round</code>, <code>inProgress</code>, <code>currentQuestion</code>, <code>regulation</code>,
+          <code>tossupsRead</code>, <code>status</code> (playing, overtime, finished…), and <code>source</code>:
+          <code>modaq</code> or <code>scoresheet</code>.</li>
+        <li><code>teams[]</code>: <code>score</code>, <code>tossupPoints</code>, <code>bonusPoints</code>,
+          <code>bonusesHeard</code>, <code>ppb</code>, and <code>players[]</code> with <code>tuh</code>,
+          <code>answers</code> (count of each value, e.g. <code>{"15": 2, "10": 3, "-5": 1}</code>) and
+          <code>points</code>.</li>
+        <li><code>questions[]</code>, one per tossup read: <code>tossup</code> (<code>question</code>,
+          <code>answer</code>, <code>words</code>), <code>buzzes[]</code> (<code>player</code>, <code>team</code>,
+          <code>value</code>, <code>wordIndex</code>, <code>word</code>, <code>celerity</code>: 1 at the first word,
+          0 at the last), <code>bonus</code> (<code>team</code>, <code>points</code>, <code>leadin</code>,
+          <code>parts[]</code> with <code>text</code>, <code>answer</code>, <code>points</code>), and
+          <code>score</code>, the score after it.</li>
+        <li><code>buzzLog[]</code>: every buzzer press in the room, including the ones that lost the race,
+          with <code>order</code> and <code>msAfterFirst</code>.</li>
+      </ul>
+      <p class="hint">Games scored on Klaxon's scoresheet have no buzz positions: <code>wordIndex</code>,
+        <code>word</code> and <code>celerity</code> are <code>null</code> for them.</p>
+    </section>
+  </main>
+</body>
+</html>

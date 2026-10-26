@@ -1831,3 +1831,12 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 
 /* Protest picker: tossup or bonus, when the question had both. */
 .ss-protest-part { display: flex; gap: 6px; margin: 4px 0; }
+
+/* Game data API panel (api-access.js): the key and its links, each copyable. */
+.api-row { display: flex; flex-direction: column; gap: 2px; margin: 8px 0; }
+.api-label { font-size: .82rem; font-weight: 600; color: var(--muted); }
+.api-url { font-family: var(--mono); font-size: .78rem; min-width: 0; }
+.api-mode { max-width: 100%; }
+#api-access .row, #ro-api .row, #opt-api-box .row { margin-top: 8px; }
+.opt-api { margin: 10px 0; }
+.opt-api summary { margin: 6px 0; }

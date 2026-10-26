@@ -95,6 +95,13 @@
       </label>
       <p class="hint"><a id="ro-log" href="#" download>Download the activity log</a> (buzzes, clears, withdrawals, chat).</p>
     </section>
+
+    <!-- A read-only key for this room's games: rooms outside a tournament only
+         (a tournament's key is its director's to give, on the console). -->
+    <section id="ro-api-panel" class="panel hidden">
+      <h3>Game data API</h3>
+      <div id="ro-api"></div>
+    </section>
   </main>
 
   <script src="/socket.io/socket.io.js"></script>

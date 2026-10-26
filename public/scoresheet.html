@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3efe6" />
+  <script src="/js/theme.js"></script>
+  <link rel="icon" href="/favicon.ico?v=2" sizes="48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=2" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+  <title>Klaxon — scoresheet</title>
+  <link rel="preload" href="/fonts/bricolage-800.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/css/fonts.css" />
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/css/scoresheet.css" />
+</head>
+<body class="sheet-page">
+  <header class="bar">
+    <nav class="bar-left crumbs" aria-label="Breadcrumb">
+      <a class="crumb crumb-mark" href="/">Klaxon</a>
+      <span class="crumb-sep">›</span>
+      <a class="crumb crumb-tournament hidden" id="crumb-tournament"></a>
+      <span class="crumb-sep hidden" id="crumb-tournament-sep">›</span>
+      <a class="crumb" id="crumb-room"></a>
+      <span class="crumb-sep">›</span>
+      <span class="crumb" aria-current="page">Scoresheet</span>
+    </nav>
+    <div class="bar-right">
+      <span id="save-pill" class="pill save-pill">Connecting…</span>
+      <a id="use-modaq" class="pill pill-btn" href="#" title="Read and score in MODAQ instead">Use MODAQ</a>
+    </div>
+  </header>
+
+  <main class="sheet-main">
+    <p id="loading" class="hint">Loading…</p>
+
+    <section id="denied" class="panel sheet-denied hidden">
+      <h2>Staff only</h2>
+      <p id="denied-msg">The scoresheet is for this room's moderator or scorekeeper.</p>
+      <p><a id="denied-link" class="btnlink primary" href="#">Open the room to sign in</a></p>
+    </section>
+
+    <!-- Before the game: round, teams, starting lineups. -->
+    <section id="setup" class="sheet-setup hidden" aria-labelledby="setup-title">
+      <div class="setup-head">
+        <h1 id="setup-title">Set up the game</h1>
+        <label class="setup-round">Round
+          <select id="setup-round"></select>
+        </label>
+        <input id="setup-round-other" class="hidden" placeholder="Round name" maxlength="40" aria-label="Round name" />
+      </div>
+      <p id="setup-schedule" class="setup-note hidden"></p>
+      <div class="setup-teams" id="setup-teams"></div>
+      <div class="setup-go">
+        <button id="setup-start" class="primary big">Start</button>
+        <span id="setup-msg" class="msg bad"></span>
+      </div>
+    </section>
+
+    <!-- The game: scores, the sheet, and the pad. -->
+    <section id="game" class="hidden" aria-label="Game">
+      <div class="sheet-scores" id="sheet-scores"></div>
+      <div class="sheet-body">
+        <section class="sheet-grid-wrap" aria-label="Scoresheet">
+          <div class="sheet-grid-scroll">
+            <div class="sheet-grid" id="sheet-grid"></div>
+          </div>
+        </section>
+        <aside class="sheet-side" aria-label="Score this tossup">
+          <div id="pad" class="pad"></div>
+          <div id="protests" class="recent protests hidden">
+            <h3>Protests</h3>
+            <ul id="protest-list" class="protest-list"></ul>
+          </div>
+          <div class="recent">
+            <h3>Last tossups</h3>
+            <ol id="recent" class="recent-list"></ol>
+            <p class="hint">Double-click a cell in the sheet to change it, or tap a tossup number to enter it again.</p>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- End of game: the result, player lines, then save. -->
+    <section id="review" class="hidden" aria-labelledby="review-title">
+      <p class="review-kicker" id="review-kicker"></p>
+      <h1 id="review-title"></h1>
+      <div class="review-teams" id="review-teams"></div>
+      <ul class="review-notes" id="review-notes"></ul>
+      <div class="review-go">
+        <button id="review-save" class="primary big">Save the game</button>
+        <button id="review-back" class="big">Back to the sheet</button>
+        <span id="review-msg" class="msg"></span>
+      </div>
+      <div id="review-saved" class="review-saved hidden">
+        <p><strong>Saved.</strong> It's in the standings and stats. The director can still edit it.</p>
+        <button id="review-next" class="primary big">Set up the next game</button>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="lineup-dlg" class="sheet-dialog" aria-labelledby="lineup-title">
+    <form method="dialog" id="lineup-form">
+      <h2 id="lineup-title">Change lineup</h2>
+      <p class="hint" id="lineup-from"></p>
+      <div id="lineup-players" class="lineup-players"></div>
+      <div class="row">
+        <input id="lineup-add" placeholder="Add a player" maxlength="60" aria-label="Add a player" />
+        <button type="button" id="lineup-add-btn">Add</button>
+      </div>
+      <p id="lineup-msg" class="msg bad"></p>
+      <div class="row dialog-actions">
+        <button type="submit" value="cancel" class="ghost">Cancel</button>
+        <button type="submit" value="ok" id="lineup-ok" class="primary">Save lineup</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="protest-dlg" class="sheet-dialog" aria-labelledby="protest-title">
+    <form method="dialog">
+      <h2 id="protest-title">Protest</h2>
+      <p class="hint">Write it down now; the director rules on it after the game.</p>
+      <div class="protest-fields">
+        <label>Team protesting <select id="protest-team"></select></label>
+        <label>On <select id="protest-cycle"></select></label>
+        <fieldset class="protest-type">
+          <legend>About</legend>
+          <label class="inline"><input type="radio" name="protest-type" value="tossup" checked /> The tossup</label>
+          <label class="inline"><input type="radio" name="protest-type" value="bonus" /> The bonus</label>
+        </fieldset>
+        <label id="protest-part-row" class="hidden">Bonus part <select id="protest-part"></select></label>
+        <label>What it's about
+          <textarea id="protest-reason" rows="3" maxlength="300" placeholder="e.g. Answered “Mendeleev”; ruled wrong, should be accepted"></textarea>
+        </label>
+      </div>
+      <p id="protest-msg" class="msg bad"></p>
+      <div class="row dialog-actions">
+        <button type="submit" value="cancel" class="ghost">Cancel</button>
+        <button type="submit" value="ok" id="protest-ok" class="primary">Add protest</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/js/scoresheet.js"></script>
+</body>
+</html>

@@ -25,6 +25,7 @@ import { startBackups } from './backup.js';
 import { roundSummary } from './scorecard.js';
 import { buildZip } from './zip.js';
 import { toPacketNumbers } from './packetNumbers.js';
+import { buildGameState } from './gameState.js';
 import { checkMassingerPacket } from './massingerCheck.js';
 import * as accounts from './accounts.js';
 import { parseYellowFruit, planImport } from './yfimport.js';
@@ -1646,6 +1647,152 @@ app.put('/api/rooms/:code/buzzer-roster', ah(async (req, res) => {
   res.json({ roster: store.publicState(room).roster });
 }));
 
+// A game, everything about it, as one JSON document (see gameState.js): the
+// score, team and player lines, every tossup and bonus with its text, buzz
+// points and the room's buzz log. The room's current game, or ?round=. It
+// carries the questions, so only the room's staff (reader link token, or an
+// approved moderator's sessionToken) or the tournament's director
+// (directorToken) may have it.
+// Also readable with a read-only API key (?key=, or "Authorization: Bearer"):
+// the tournament's, which the director makes on the console, or a room's
+// outside a tournament, which its moderator makes in the room's options. A key
+// reads game data and nothing else, from any site (an overlay page fetches it
+// straight from the browser).
+const apiKeyOf = (req) => {
+  const h = String(req.headers.authorization || '');
+  return String(req.query.key || (h.toLowerCase().startsWith('bearer ') ? h.slice(7) : '')).trim();
+};
+const gameApiCors = (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+};
+app.options(['/api/rooms/:code/game', '/api/tournaments/:code/games'], gameApiCors);
+
+// A key's question mode, if this key opens this room: 'live' | 'after' | null.
+function apiKeyMode(room, key) {
+  if (!key) return null;
+  const t = room.tournamentCode ? store.getTournament(room.tournamentCode) : null;
+  if (t?.api?.key && key === t.api.key) return t.api.questions;
+  if (!room.tournamentCode && room.api?.key && key === room.api.key) return room.api.questions;
+  return null;
+}
+
+// One room's game as gameState.js builds it, or { error, status }. Answers for
+// the same game and question mode are reused for a second, so a page polling
+// it every second (or ten of them) costs one build.
+const gameCache = new Map();
+async function gameStateFor(room, round, mode) {
+  round = String(round ?? room.liveGame?.round ?? room.sheet?.round ?? room.modaqState?.round ?? '');
+  if (!round) return { error: 'no_game', status: 404 };
+  const ck = `${room.code}\u0000${round}\u0000${mode}`;
+  const hit = gameCache.get(ck);
+  if (hit && Date.now() - hit.at < 1000) return hit.body;
+  const bucket = store.bucketForRoom(room);
+  const stored = await artifacts.getRoomRoundExport(bucket, room.code, round);
+  if (!stored) return { error: 'no_game', status: 404, round };
+  let packet = null;
+  try { const text = await artifacts.getPacket(bucket, round); packet = text ? JSON.parse(text) : null; } catch { packet = null; }
+  let qbj = stored;
+  if (packet) {
+    try { qbj = (await inPacketNumbers([{ qbj: stored }], new Map([[round, packet]]))).matches[0].qbj; } catch { qbj = stored; }
+  }
+  const since = Number(stored._startedAt) || 0;
+  const log = store.fullBuzzExport(room).buzzes
+    .filter((b) => (b.round != null ? String(b.round) === round : b.at >= since));
+  const body = buildGameState({ qbj, packet, buzzLog: log, room, status: store.roomStatus(room, Date.now()), questions: mode });
+  gameCache.set(ck, { at: Date.now(), body });
+  if (gameCache.size > 500) gameCache.delete(gameCache.keys().next().value);
+  return body;
+}
+
+app.get('/api/rooms/:code/game', gameApiCors, ah(async (req, res) => {
+  const room = roomOr(res, req.params.code); if (!room) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const keyMode = apiKeyMode(room, apiKeyOf(req));
+  let rounds = keyMode ? ALL_ROUNDS : null;
+  const t = room.tournamentCode ? store.getTournament(room.tournamentCode) : null;
+  if (!rounds && t && directorOk(t, req.query.directorToken)) rounds = ALL_ROUNDS;
+  if (!rounds) rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
+  const round = req.query.round ?? null;
+  if (round != null && !roundAllowed(rounds, round)) return res.status(403).json({ error: 'not_your_round' });
+  const body = await gameStateFor(room, round, keyMode || 'live');
+  if (body.error) return res.status(body.status || 404).json({ error: body.error, round: body.round });
+  if (!roundAllowed(rounds, body.round)) return res.status(403).json({ error: 'not_your_round' });
+  res.json(body);
+}));
+
+// Every room's current game in a tournament, for a key (or the director).
+app.get('/api/tournaments/:code/games', gameApiCors, ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const key = apiKeyOf(req);
+  const mode = t.api?.key && key === t.api.key ? t.api.questions : directorOk(t, req.query.directorToken) ? 'live' : null;
+  if (!mode) return res.status(403).json({ error: 'forbidden' });
+  const rooms = [];
+  for (const rc of t.roomCodes) {
+    const room = store.getRoom(rc);
+    if (!room) continue;
+    const game = await gameStateFor(room, null, mode).catch(() => ({ error: 'failed' }));
+    rooms.push({ code: rc, name: room.name, status: store.roomStatus(room, Date.now()), game: game.error ? null : game });
+  }
+  res.json({ tournament: { code: t.code, name: t.name }, questions: mode, rooms, at: Date.now() });
+}));
+
+// The director's read-only key for the tournament: see it, make one, make a
+// new one (the old stops working), switch it off, or change the question mode.
+app.get('/api/tournaments/:code/api-access', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  res.json({ api: store.apiAccessView(t) });
+});
+app.post('/api/tournaments/:code/api-access', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const r = store.setApiAccess(t, { action: req.body?.action, questions: req.body?.questions });
+  if (r.error) return res.status(400).json(r);
+  for (const k of [...gameCache.keys()]) gameCache.delete(k);
+  res.json(r);
+});
+
+// What the scoresheet needs to set a game up: the format, the rounds it can
+// score, the teams to pick from (the tournament's roster), who the schedule
+// puts in this room each round, and the game already being scored here.
+// Staff only, by the same credentials as the room's other staff calls.
+app.get('/api/rooms/:code/sheet-setup', ah(async (req, res) => {
+  const room = roomOr(res, req.params.code); if (!room) return;
+  const rounds = await roomRounds(room, reqToken(req), reqSession(req));
+  if (!rounds) return res.status(403).json({ error: 'forbidden' });
+  const t = room.tournamentCode ? store.getTournament(room.tournamentCode) : null;
+  const bucket = store.bucketForRoom(room);
+  const teams = t ? await tournamentTeamsFor(room) : (room.roster?.teams || []);
+  const schedule = (t?.schedule || [])
+    .filter((s) => s.room === room.code && roundAllowed(rounds, s.round))
+    .map((s) => ({ round: s.round, teams: s.teams }));
+  let packetRounds = [];
+  try {
+    const open = packetsAlwaysOpen(t);
+    packetRounds = (await artifacts.listPackets(bucket))
+      .filter((p) => (p.visible || open) && !p.tiebreaker && roundAllowed(rounds, p.round))
+      .map((p) => p.round);
+  } catch { /* no packets: rounds come from the schedule, or are typed */ }
+  const roundList = [...new Set([...packetRounds, ...schedule.map((s) => s.round)])];
+  res.json({
+    room: { code: room.code, name: room.name, tournamentCode: room.tournamentCode || null },
+    tournament: t ? { code: t.code, name: t.name } : null,
+    format: { tossupScheme: t?.format?.tossupScheme || '15/10/-5', hasBonuses: t ? t.format?.hasBonuses !== false : true },
+    regulation: 20,
+    rounds: roundList,
+    anyRound: rounds === ALL_ROUNDS,
+    teams: teams.map((x) => ({ name: x.name, players: [...x.players] })),
+    schedule,
+    sheet: room.sheet && (rounds === ALL_ROUNDS || roundAllowed(rounds, room.sheet.round)) ? room.sheet : null
+  });
+}));
+
 // Moderators only see rounds the director has made visible.
 // A shootout tournament with a single room is one person's evening: they
 // upload the packets and read them, so there is nothing to release - every
@@ -2279,6 +2426,7 @@ app.get('/advanced', (_req, res) => res.redirect(301, '/create'));
 // tournament hub: create / open / browse, plus reader accounts
 app.get('/tournament-mode', (_req, res) => res.sendFile(path.join(publicDir, 'tournament-mode.html')));
 app.get('/tournament-help', (_req, res) => res.sendFile(path.join(publicDir, 'tournament-help.html')));
+app.get('/game-api', (_req, res) => res.sendFile(path.join(publicDir, 'game-api.html')));
 app.get('/massinger-help', (_req, res) => res.sendFile(path.join(publicDir, 'massinger-help.html')));
 
 // create-tournament page
@@ -2427,6 +2575,8 @@ app.get('/tp/:code', (_req, res) => res.sendFile(path.join(publicDir, 'player-to
 // room.html serves any /r/CODE deep link
 app.get('/r/:code', (_req, res) => res.sendFile(path.join(publicDir, 'room.html')));
 // A room's settings on their own page (the MODAQ reader's "Room options").
+// Klaxon's own scoresheet: score a game without MODAQ (see scoresheet.js).
+app.get('/r/:code/score', (_req, res) => res.sendFile(path.join(publicDir, 'scoresheet.html')));
 app.get('/r/:code/options', (_req, res) => res.sendFile(path.join(publicDir, 'room-options.html')));
 
 // klaxonbuzz.com/CODE — the shortest possible link to hand a player. A room
@@ -3594,6 +3744,24 @@ io.on('connection', (socket) => {
       // joined: whichever way they proved it (reader link or approved account),
       // nothing has to be presented again, so the save can't be refused for a
       // credential the page didn't happen to send.
+      // The scoresheet's working state, for a reload or a second device (see
+      // store.setSheet); the other staff screens get it straight away.
+      // A read-only game data key for this room (see setApiAccess). Only
+      // outside a tournament: a tournament's key is its director's to give.
+      case 'api_access': {
+        if (room.tournamentCode) return ack?.({ error: 'tournament_room' });
+        const r = store.setApiAccess(room, { action: payload?.op || 'get', questions: payload?.questions });
+        for (const k of [...gameCache.keys()]) if (k.startsWith(room.code + '\u0000')) gameCache.delete(k);
+        return ack?.(r);
+      }
+      case 'sheet_state': {
+        const sheet = payload?.sheet ?? null;
+        if (sheet && !roundAllowed(ctx.staffRounds ?? ALL_ROUNDS, sheet.round)) return ack?.({ error: 'not_your_round' });
+        const r = store.setSheet(room, sheet);
+        if (r.error) return ack?.(r);
+        emitToStaff(room.code, 'sheet_state', { sheet: room.sheet }, socket.id);
+        return ack?.({ ok: true });
+      }
       case 'save_game': {
         if (payload.qbj == null) return ack?.({ error: 'missing_qbj' });
         if (room.correctionOf) return ack?.({ error: 'correction_room' });
@@ -3774,7 +3942,7 @@ io.on('connection', (socket) => {
     const res = protests.lodge(room, actor, {
       cycle: which.cycle,
       part,
-      round: room.modaqState?.round ?? null,
+      round: room.modaqState?.round ?? room.sheet?.round ?? null,
       reason: payload?.reason,
       teams: store.activeTeams(room)
     });

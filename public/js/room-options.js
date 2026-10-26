@@ -1,4 +1,5 @@
 import { recall, remember, staffPlayerId, $ } from './util.js';
+import { renderApiAccess } from './api-access.js';
 
 // A room's settings on a page of their own, for the reader of a MODAQ room:
 // the reader page there is MODAQ, and the plain buzzer view (with its own game
@@ -42,10 +43,27 @@ if (!(staffToken || sessionToken)) {
     if (resp.role === 'reader' || resp.role === 'co-reader') remember('staffRole:' + code, resp.role);
     $('#ro-form').classList.remove('hidden');
     $('#ro-links').classList.remove('hidden');
+    // Outside a tournament, the moderator can hand out a read-only key.
+    if (!resp.state?.tournamentCode) showApi();
   });
   socket.on('connect', () => { pill.textContent = 'connected'; pill.className = 'pill good'; join(); });
   socket.on('disconnect', () => { pill.textContent = 'reconnecting…'; pill.className = 'pill bad'; });
   socket.on('state', render);
+
+  const apiAct = (action, questions) => new Promise((resolve, reject) =>
+    socket.emit('reader_action', { action: 'api_access', op: action, questions }, (r) =>
+      (r?.ok ? resolve(r.api) : reject(new Error(r?.error || 'no answer')))));
+  async function showApi() {
+    try {
+      const access = await apiAct('get');
+      $('#ro-api-panel').classList.remove('hidden');
+      renderApiAccess($('#ro-api'), {
+        api: access,
+        links: (key) => [{ label: 'This room’s current game', url: `${location.origin}/api/rooms/${code}/game?key=${key}` }],
+        act: apiAct,
+      });
+    } catch { /* a tournament room, or not the reader: no panel */ }
+  }
 
   const set = (options) => socket.emit('reader_action', { action: 'set_options', options }, (r) => {
     if (r?.error) say('Could not change that: ' + r.error, false);

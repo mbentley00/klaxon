@@ -101,6 +101,9 @@ export function tournamentBuzzpointsExport(t, rounds, matches, { gamesOnly = fal
     const roundGames = matches
       .map((m) => m.qbj)
       .filter((q) => q && String(q._round ?? '') === String(r.round) && q._inProgress !== true
+        // A game scored on Klaxon's scoresheet has no buzz positions, only who
+        // got what: as buzz points it would say every buzz came on word 0.
+        && q._scoresheet !== true
         && Array.isArray(q.match_teams) && q.match_teams.length >= 2);
     if (roundGames.length === 0 || (!r.packet && !gamesOnly)) return;
 

@@ -197,7 +197,7 @@ async function startEditing() {
     $('#fmt-massinger-timer').value = f.massingerTimerSec ?? 30;
     $('#fmt-massinger-control').value = f.massingerControl || 'anyone';
     showMassingerOptions();
-    $('#t-def-modaq-mode').value = !d.modaqMode ? 'off' : d.modaqLite ? 'lite' : 'full';
+    $('#t-def-modaq-mode').value = d.scoreSheet ? 'sheet' : !d.modaqMode ? 'off' : d.modaqLite ? 'lite' : 'full';
     $('#t-def-queue').checked = d.queueMode === true;
     $('#t-def-withdraw').checked = d.allowWithdraw === true;
     $('#t-def-autoclear').checked = d.autoClear === true;
@@ -255,7 +255,7 @@ async function saveEdits() {
 
 // What a team tournament's form says, shared by Create and Save.
 function teamSettings() {
-  const modaqMode = $('#t-def-modaq-mode').value; // off | lite | full
+  const modaqMode = $('#t-def-modaq-mode').value; // off | lite | full | sheet
   return {
     defaults: {
       queueMode: $('#t-def-queue').checked,
@@ -265,7 +265,9 @@ function teamSettings() {
       rosterJoin: $('#t-def-roster-join').checked,
       playerAlerts: $('#t-def-player-alerts').checked,
       modaqMode: modaqMode !== 'off',
-      modaqLite: modaqMode === 'lite'
+      modaqLite: modaqMode === 'lite',
+      // Klaxon's own scoresheet: a MODAQ room whose staff score on /r/CODE/score.
+      scoreSheet: modaqMode === 'sheet'
     },
     format: {
       hasBonuses: $('#fmt-bonuses').checked,

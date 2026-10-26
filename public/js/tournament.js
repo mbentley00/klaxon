@@ -1,5 +1,6 @@
 import { api, remember, recall, readFileText, $, el } from './util.js';
 import { parseSpreadsheet, teamsFromRoster, mergeTeams, checkTeams, toStoredRoster, toYellowFruitQbj } from './roster-parse.js';
+import { renderApiAccess } from './api-access.js';
 
 const code = location.pathname.split('/').pop().toUpperCase();
 $('#t-code').textContent = code;
@@ -757,11 +758,28 @@ function initModaq() {
     // A file named like a round that's already here replaces that round's
     // packet: say so first.
     let existing = [];
+    let have = new Map();
     try {
       const { packets } = await api('GET', `/api/tournaments/${code}/packets?directorToken=${qt(directorToken)}`);
-      const have = new Map(packets.map((x) => [x.round, x]));
-      existing = files.map((f) => have.get(f.name.replace(/\.[^.]+$/, ''))).filter(Boolean);
+      have = new Map(packets.map((x) => [x.round, x]));
     } catch { /* the upload says what happened */ }
+    // Rounds are numbered ("Round 3" everywhere, "R3" on the room chips), not
+    // named after the file: the number after "Round" or "Packet" in the file
+    // name, its only number, or else the next number free. A file named like a
+    // round that's already here keeps that round; tiebreakers keep their name.
+    files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    const taken = new Set(have.keys());
+    const rounds = files.map((f) => {
+      const base = f.name.replace(/\.[^.]+$/, '');
+      if (tiebreaker || have.has(base)) return base;
+      const named = base.match(/\b(?:round|rd|packet|pkt)\.?\s*#?0*(\d+)/i);
+      const only = base.match(/\d+/g);
+      let n = named ? named[1] : only?.length === 1 ? String(Number(only[0])) : null;
+      if (n == null || (taken.has(n) && !have.has(n))) { let k = 1; while (taken.has(String(k))) k++; n = String(k); }
+      taken.add(n);
+      return n;
+    });
+    existing = rounds.map((r) => have.get(r)).filter(Boolean);
     if (existing.length) {
       const played = existing.filter((x) => x.games > 0);
       if (!confirm(`Replace ${existing.length === 1 ? 'round' : 'rounds'} `
@@ -769,11 +787,11 @@ function initModaq() {
         + (played.length ? `\n\nGames already played on ${played.map((x) => `"${x.round}"`).join(', ')} keep their scores.` : ''))) return;
     }
     let ok = 0;
-    for (const file of files) {
+    for (const [fi, file] of files.entries()) {
       try {
         const packet = JSON.parse(await file.text());
         if (!Array.isArray(packet.tossups)) throw new Error('no tossups');
-        const round = file.name.replace(/\.[^.]+$/, '');
+        const round = rounds[fi];
         // Only a ticked box changes the setting: a corrected file for an
         // existing tiebreaker round mustn't turn it back into a playing round.
         await api('POST', `/api/tournaments/${code}/packets`, { directorToken, round, packet, ...(tiebreaker ? { tiebreaker } : {}) });
@@ -1992,3 +2010,28 @@ function render() {
 }
 
 init();
+
+// --- Game data API: the tournament's read-only key ---------------------------
+async function loadApiAccess() {
+  const box = $('#api-access');
+  if (!box || !directorToken) return;
+  try {
+    const [{ api: access }, t] = await Promise.all([
+      api('GET', `/api/tournaments/${code}/api-access?directorToken=${encodeURIComponent(directorToken)}`),
+      api('GET', `/api/tournaments/${code}`),
+    ]);
+    const origin = location.origin;
+    renderApiAccess(box, {
+      api: access,
+      what: 'this tournament',
+      links: (key) => [
+        { label: 'Every room’s current game', url: `${origin}/api/tournaments/${code}/games?key=${key}` },
+        ...t.rooms.map((rc) => ({ label: t.roomNames?.[rc] || rc, url: `${origin}/api/rooms/${rc}/game?key=${key}` })),
+      ],
+      act: async (action, questions) => (await api('POST', `/api/tournaments/${code}/api-access`, { directorToken, action, questions })).api,
+    });
+  } catch (e) {
+    box.replaceChildren(el('p', { className: 'msg bad', textContent: `Could not load: ${e.message}` }));
+  }
+}
+loadApiAccess();

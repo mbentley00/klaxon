@@ -391,10 +391,16 @@
         <option value="off">Standard buzzer</option>
         <option value="lite">MODAQ — lite (reader + buzzer)</option>
         <option value="full">MODAQ — with roster / packets / exports</option>
+        <option value="sheet">Klaxon scoresheet (no MODAQ)</option>
       </select>
       <label class="toggle"><input type="checkbox" id="opt-listed" /> List this game on the Klaxon home page</label>
       <p class="hint" id="opt-listed-hint">Shows on the home page while someone's in the room.</p>
       <label class="toggle"><input type="checkbox" id="opt-disconnect-sound" /> Play a sound when a player disconnects</label>
+      <!-- A read-only key for this room's games (outside a tournament only). -->
+      <details id="opt-api" class="opt-api hidden">
+        <summary>Game data API</summary>
+        <div id="opt-api-box"></div>
+      </details>
       <div class="end-row">
         <button id="end-game" class="ghost tiny">End game for everyone</button>
         <button id="reopen-game" class="ghost tiny hidden">Reopen the game</button>
