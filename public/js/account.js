@@ -1,4 +1,4 @@
-import { api, $, el, remember } from './util.js';
+import { api, $, el, remember, recall } from './util.js';
 
 // The account session is shared with the moderator page under this key.
 const SESSION_KEY = 'bz_sessionToken';
@@ -26,10 +26,11 @@ function showSignedIn(account) {
   $('#signed-out').classList.add('hidden');
 }
 
-// Logging in makes the account's name the default for "Your name" fields
-// (the join gate reads the same key), and brings back the player settings the
-// account carries (buzz sound, volume, spoken names, team) on this device.
-const syncName = (account) => { if (account.displayName) remember('name', account.displayName); };
+// Logging in fills "Your name" fields with the account's name on a device that
+// has none (the join gate reads the same key), never over a name the player
+// already uses, and brings back the player settings the account carries (buzz
+// sound, volume, spoken names, team) on this device.
+const syncName = (account) => { if (account.displayName && !recall('name')) remember('name', account.displayName); };
 function applyPrefs(account) {
   for (const [k, v] of Object.entries(account?.prefs || {})) remember(k, v);
 }
@@ -158,7 +159,7 @@ $('#save-display').onclick = async () => {
     const { account } = await api('PATCH', '/api/accounts/me',
       { sessionToken: session(), displayName: $('#acct-display').value });
     $('#acct-display').value = account.displayName;
-    syncName(account);
+    if (account.displayName) remember('name', account.displayName);  // chosen just now: use it
     say('Name saved.');
   } catch (err) {
     say('Could not save: ' + friendly(err.message), false);

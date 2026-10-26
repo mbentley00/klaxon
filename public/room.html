@@ -19,7 +19,9 @@
     <nav class="bar-left crumbs" aria-label="Breadcrumb">
       <a class="crumb crumb-mark" href="/">Klaxon</a>
       <span class="crumb-sep">›</span>
-      <a class="crumb" href="/" title="Create or join another room">New room</a>
+      <a class="crumb" id="crumb-new" href="/" title="Create or join another room">New room</a>
+      <!-- In a tournament room: the tournament, linking to its rooms and standings. -->
+      <a class="crumb crumb-tournament hidden" id="crumb-tournament"></a>
       <span class="crumb-sep">›</span>
       <span class="room-code" id="room-code">····</span>
       <span class="room-name" id="room-name"></span>
@@ -27,6 +29,8 @@
     <div class="bar-right">
       <button id="compact-toggle" class="pill pill-btn hidden" title="Toggle compact view" aria-pressed="false">Compact</button>
       <button id="copy-link" class="pill pill-btn" title="Copy the player link">Copy link</button>
+      <!-- Signed in or not, at a glance (see showAccount). -->
+      <a id="account-pill" class="pill pill-btn account-pill" href="/account">Log in</a>
       <span id="conn" class="pill" title="Connection">connecting…</span>
       <span id="latency" class="pill" title="Your latency"></span>
     </div>
@@ -73,6 +77,11 @@
     <!-- The reader moved on to the next packet and kept everyone: say so, and
          which team you're on for it (see renderNextPacket). -->
     <div id="next-banner" class="next-banner hidden" role="status"></div>
+    <!-- A spectator can become a player at any time. -->
+    <div id="spectator-banner" class="spectator-banner hidden" role="status">
+      <span>You're watching.</span>
+      <button id="spectator-join" class="tiny" type="button">Join as a player</button>
+    </div>
 
     <!-- Discord shootout: what's being played, where the reader has got to, and
          the one rule players need. One line above the buzzer — it's reference,
@@ -197,8 +206,7 @@
         <!-- Players: ping the moderator about a buzzer left un-reset. -->
         <button id="stuck-alert" class="ghost tiny hidden">Buzzer isn't clear</button>
         <!-- A buzzer that floats above Zoom (Document Picture-in-Picture). -->
-        <button id="pip-open" class="ghost tiny hidden">Pop out buzzer ↗</button>
-        <p id="pip-hint" class="hint hidden">Stays on top of Zoom.</p>
+        <button id="pip-open" class="ghost tiny hidden" title="Stays on top of Zoom">Pop out buzzer ↗</button>
       </section>
 
       <!-- Buzz queue / order — always on screen so nothing below it jumps -->
@@ -414,6 +422,7 @@
     <!-- Tournament strip -->
     <section id="tournament-strip" class="tournament hidden">
       <h3>Tournament <span id="t-code"></span></h3>
+      <a id="t-all" class="tlink">All rooms &amp; standings →</a>
       <div id="t-links" class="t-rooms"></div>
       <div id="t-next"></div>
       <div id="t-rooms" class="t-rooms"></div>

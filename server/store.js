@@ -66,6 +66,8 @@ const serializeRoom = (r) => ({
   // The host said the game was over (see endGame). Persisted, or a restart
   // would quietly reopen a room the host had closed.
   ended: r.ended || null,
+  // Where the room's MODAQ game is (see noteLiveGame): the room lists show it.
+  liveGame: r.liveGame || null,
   // What an upheld protest left to be played here (see createReplayRoom).
   replay: r.replay || null,
   // Protests the teams lodged (see protests.js). Durable: a protest outlives
@@ -890,6 +892,51 @@ export function setConnected(room, playerId, connected) {
 }
 
 // Reader removes a single player (staff can't be removed this way).
+// What the room is doing, for the players' room lists: one short state per
+// room, from memory (never the stored game files, which every player's page
+// would otherwise read on each poll).
+const LIVE_GAME_QUIET_MS = 10 * 60 * 1000;
+export function noteLiveGame(room, { round, inProgress, currentQuestion }) {
+  room.liveGame = {
+    round: String(round ?? '').slice(0, 40),
+    inProgress: inProgress === true,
+    q: Number(currentQuestion) || 0,
+    at: Date.now()
+  };
+  persistRooms();
+}
+// { state, round, q, of }: state is one of
+//   'setup' (the moderator is setting up the teams), 'pickban', 'playing',
+//   'overtime', 'idle' (no update for 10 minutes), 'finished', 'none'.
+export function roomStatus(room, now = Date.now()) {
+  const m = room.massinger;
+  if (m && m.status === 'active') return { state: 'pickban', round: String(m.round ?? '') };
+  const lobby = room.massingerLobby;
+  if (lobby && now - lobby.at < MASSINGER_LOBBY_TTL && (!m || String(m.round ?? '') !== lobby.round)
+      && String(room.liveGame?.round ?? '') !== lobby.round) {
+    return { state: 'setup', round: lobby.round };
+  }
+  const g = room.liveGame;
+  if (room.ended) return { state: 'finished', round: g?.round || '' };
+  if (!g) return { state: 'none', round: '' };
+  if (!g.inProgress) return { state: 'finished', round: g.round };
+  const of = Number(room.regulation) || 0;
+  if (now - g.at >= LIVE_GAME_QUIET_MS) return { state: 'idle', round: g.round, q: g.q, of };
+  if (of && g.q > of) return { state: 'overtime', round: g.round, q: g.q, of };
+  return { state: 'playing', round: g.round, q: g.q, of };
+}
+
+// A player who has gone on to another room and dropped out of this one has
+// left it, unless this room's game is theirs and still going.
+export function leftForAnotherRoom(room, member) {
+  if (!member || member.role !== 'player' || member.connected) return false;
+  const st = roomStatus(room).state;
+  if (st === 'finished' || st === 'none') return true;
+  const teams = new Set([...(playingTeamNames(room) || []), ...(room.massinger?.teams || [])].map(normTeam));
+  const team = effectiveTeam(member);
+  return !team || !teams.has(normTeam(team));
+}
+
 export function removePlayer(room, playerId) {
   const m = room.members.get(playerId);
   if (!m || m.role !== 'player') return false;
@@ -1102,6 +1149,16 @@ export function autoLinkRosterPlayers(room) {
   }
 
   let linked = 0;
+  // First, who they said they are (a roster pick, theirs or their account's):
+  // that beats any guess from a name, so it goes before the guessing.
+  for (const member of room.members.values()) {
+    if (member.role !== 'player' || member.rosterPlayer || !member.claim) continue;
+    const c = pool.find((x) => x.team === member.claim.team && x.player === member.claim.player);
+    if (c && assignRosterPlayer(room, member.id, c.team, c.player)) {
+      pool.splice(pool.indexOf(c), 1);
+      linked++;
+    }
+  }
   for (const member of room.members.values()) {
     if (member.role !== 'player' || member.rosterPlayer) continue;
     // The name the last game knew them by first (see nextGame), else their own.
@@ -2736,7 +2793,11 @@ function massingerLeft(m, team, type) {
   const limit = m.limits?.[type];
   return Number.isFinite(limit) ? Math.max(0, limit - massingerUsed(m, team, type)) : Infinity;
 }
-const massingerBannable = (m) => m.subcats.filter((sc) => sc.protectedBy == null && sc.banned < sc.indexes.length);
+// A protect covers ONE question of its subcategory: a subcategory with two
+// questions and a protect still has one the other team can ban.
+const massingerBanRoom = (sc) => sc.indexes.length - sc.banned - (sc.protectedBy != null ? 1 : 0);
+const massingerBannable = (m) => m.subcats.filter((sc) => massingerBanRoom(sc) > 0);
+const massingerProtectable = (m) => m.subcats.filter((sc) => sc.protectedBy == null && sc.banned < sc.indexes.length);
 
 // Whose turn it is follows the schedule.
 function massingerSyncTurn(m) {
@@ -2847,9 +2908,10 @@ export function massingerPick(room, { type, label, by, step: seen, player } = {}
   if (player === true && m.pauseUntil && Date.now() < m.pauseUntil) return { error: 'wait' };
   const sc = m.subcats.find((x) => x.label === label);
   if (!sc) return { error: 'no_subcat' };
-  if (sc.protectedBy != null) return { error: 'protected' };
-  if (sc.banned >= sc.indexes.length) return { error: 'exhausted' };
   if (type !== 'protect' && type !== 'ban') return { error: 'bad_type' };
+  if (sc.banned >= sc.indexes.length) return { error: 'exhausted' };
+  if (type === 'protect' && sc.protectedBy != null) return { error: 'protected' };
+  if (type === 'ban' && massingerBanRoom(sc) <= 0) return { error: 'protected' };
   const step = massingerStep(m);
   if (step) {
     m.turn = step.team;
@@ -2935,7 +2997,7 @@ export function massingerRandomBan(room, by) {
   const type = step ? step.type
     : massingerLeft(m, m.turn, 'ban') > 0 ? 'ban' : massingerLeft(m, m.turn, 'protect') > 0 ? 'protect' : null;
   if (!type) return { error: 'no_picks_left' };
-  const pool = massingerBannable(m);   // what can be banned can also be protected
+  const pool = type === 'ban' ? massingerBannable(m) : massingerProtectable(m);
   if (pool.length === 0) return { error: 'exhausted' };
   const sc = pool[Math.floor(Math.random() * pool.length)];
   return massingerPick(room, { type, label: sc.label, by: by || 'random' });

@@ -825,13 +825,17 @@ app.get('/api/tournaments/:code/player-link', (req, res) => {
 // Everything the player landing page shows, gated by the secret key.
 app.get('/api/tournaments/:code/player-view', (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
-  if (!t.playerKey || String(req.query.key || '') !== t.playerKey) {
+  // The director's player link, or a link to one of its rooms: players share
+  // room links, and from any room you can get to the rest of the tournament.
+  const viaRoom = t.roomCodes.has(String(req.query.room || '').toUpperCase());
+  if (!viaRoom && (!t.playerKey || String(req.query.key || '') !== t.playerKey)) {
     return res.status(403).json({ error: 'bad_key' });
   }
+  const now = Date.now();
   const rooms = [...t.roomCodes]
     .map((rc) => store.getRoom(rc))
     .filter(Boolean)
-    .map((r) => ({ code: r.code, name: r.name }));
+    .map((r) => ({ code: r.code, name: r.name, status: store.roomStatus(r, now) }));
   res.json({
     code: t.code,
     name: t.name,
@@ -841,6 +845,20 @@ app.get('/api/tournaments/:code/player-view', (req, res) => {
     rooms,
     statsPath: `/t/${t.code}/stats/standings`,
   });
+});
+
+// What each room is doing (round, tossup, pick/ban, finished), for the room
+// switcher on every room page. Public, like the room list: no scores, and it
+// is built from memory so polling it costs nothing.
+app.get('/api/tournaments/:code/room-status', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  const now = Date.now();
+  const rooms = {};
+  for (const rc of t.roomCodes) {
+    const r = store.getRoom(rc);
+    if (r) rooms[rc] = store.roomStatus(r, now);
+  }
+  res.set('Cache-Control', 'no-store').json({ rooms, now });
 });
 
 // Director sends a message to the readers of one room (or every room). It
@@ -1856,6 +1874,7 @@ setInterval(() => {
 
 async function syncRoomExport(room, { round, qbj, inProgress, currentQuestion, regulation }) {
   if (Number(regulation) > 0) room.regulation = Number(regulation);
+  store.noteLiveGame(room, { round, inProgress, currentQuestion });
   const saved = await artifacts.saveExport(store.bucketForRoom(room), {
     room: room.code, round, qbj, inProgress: inProgress === true,
     currentQuestion: Number(currentQuestion) || undefined,
@@ -2921,6 +2940,17 @@ io.on('connection', (socket) => {
       }
     }
 
+    // A refused staff join changes nothing in the room. Both staff pages answer
+    // a refusal by leaving (the gate, or the room's player page), and joining
+    // this socket would overwrite whoever this browser already is here: a
+    // player tab's member turned spectator, out of the list, its buzzes refused.
+    if (staffDenied) {
+      return ack?.({
+        ok: true, playerId: payload?.playerId, role: 'spectator', staffDenied, denyReason,
+        state: store.publicState(room), serverTime: Date.now()
+      });
+    }
+
     // "Require team name": players must identify their team before the room
     // admits them. Staff and spectators are exempt, and a member who already
     // has a team on record keeps it across reconnects without resending it.
@@ -2929,12 +2959,16 @@ io.on('connection', (socket) => {
       if (!String(payload?.team ?? known ?? '').trim()) return ack?.({ error: 'team_required' });
     }
 
+    // Already playing here (connected or not). A spectator switching to play
+    // counts as a new player for the checks below.
+    const wasPlayer = room.members.get(payload?.playerId)?.role === 'player';
+
     // A shootout's leaderboard runs all evening and is read by name, so a new
     // player gives a first and a last name, two letters or more each: "Ann"
     // and "A" are three different people by the second packet. Only for
     // someone new to the room — a player already in it reconnects under the
     // name they have.
-    if (role === 'player' && room.settings.shootout && !room.members.has(payload?.playerId)
+    if (role === 'player' && room.settings.shootout && !wasPlayer
         && !shootout.fullName(payload?.name)) {
       return ack?.({ error: 'full_name_required' });
     }
@@ -2946,7 +2980,7 @@ io.on('connection', (socket) => {
 
     // At most MAX_PLAYERS players connected at once. Someone already in the
     // room always gets back in; only a new player is turned away.
-    if (role === 'player' && !room.members.has(payload?.playerId) && store.roomIsFull(room)) {
+    if (role === 'player' && !wasPlayer && store.roomIsFull(room)) {
       return ack?.({ error: 'room_full' });
     }
 
@@ -2955,8 +2989,28 @@ io.on('connection', (socket) => {
     // the roster link and being reported as off the roster.
     let joinName = payload?.name, joinTeam = payload?.team;
     let rosterTeam = payload?.rosterTeam, rosterPlayer = payload?.rosterPlayer;
+    // Who they are on the tournament roster. A pick from the gate is saved on
+    // their account; an account with a saved pick and no pick sent (a typed
+    // name, an automatic rejoin) gets it back, so every room of the
+    // tournament links them whatever name the account carries. A player who
+    // said "I'm not on the roster" (guest) is taken at their word.
+    const joinAccount = role === 'player' ? accounts.accountForSession(payload?.sessionToken) : null;
+    let claim = null;
     if (role === 'player' && room.tournamentCode && !room.settings.shootout) {
-      await tournamentTeamsFor(room);
+      const tteams = await tournamentTeamsFor(room);
+      const onRoster = (team, player) => [...tteams, ...(room.roster?.teams || [])]
+        .some((t) => t.name === team && t.players.includes(player));
+      if (rosterTeam && rosterPlayer && onRoster(rosterTeam, rosterPlayer)) {
+        claim = { team: rosterTeam, player: rosterPlayer };
+        if (joinAccount) accounts.setRosterPick(joinAccount, room.tournamentCode, claim);
+      } else if (!rosterPlayer && !payload?.guest && joinAccount) {
+        const saved = joinAccount.rosterPicks?.[room.tournamentCode];
+        if (saved && onRoster(saved.team, saved.player)) {
+          claim = { team: saved.team, player: saved.player };
+          rosterTeam = joinTeam = saved.team;
+          rosterPlayer = saved.player;
+        }
+      }
       const playing = new Set(store.playingTeamNames(room));
       if (rosterTeam && !playing.has(rosterTeam) &&
           (room.tournamentTeams || []).some((t) => t.name === rosterTeam)) {
@@ -2974,7 +3028,26 @@ io.on('connection', (socket) => {
       rosterTeam,
       rosterPlayer
     });
-    if (role === 'player') store.refreshWaiting(room);
+    if (role === 'player') {
+      member.accountId = joinAccount?.id || null;
+      if (claim) member.claim = claim;
+      else if (payload?.guest || payload?.rosterPlayer) member.claim = null;
+      store.refreshWaiting(room);
+    }
+
+    // Joining another room of the tournament is leaving the earlier ones this
+    // browser has dropped out of, once their game is over (or isn't theirs).
+    if (role === 'player' && room.tournamentCode) {
+      const t = store.getTournament(room.tournamentCode);
+      for (const rc of t?.roomCodes || []) {
+        if (rc === room.code) continue;
+        const other = store.getRoom(rc);
+        const was = other?.members.get(member.id);
+        if (!was || !store.leftForAnotherRoom(other, was)) continue;
+        store.removePlayer(other, member.id);
+        emitState(other);
+      }
+    }
 
     // Someone joined a roster room under a name the roster doesn't have: the
     // director wants to know (a sub, a late addition, or a typo to fix).
@@ -3215,7 +3288,16 @@ io.on('connection', (socket) => {
         break;
       case 'assign_roster_player':
         // Answer (and broadcast) immediately; persistence is coalesced.
-        store.assignRosterPlayer(room, payload.playerId, payload.team, payload.player);
+        if (store.assignRosterPlayer(room, payload.playerId, payload.team, payload.player)) {
+          // The moderator says who this buzzer is: remember it for the
+          // player's account (and the next game here), as a gate pick would.
+          const m = room.members.get(payload.playerId);
+          if (m && payload.team && payload.player) {
+            m.claim = { team: payload.team, player: payload.player };
+            const acct = m.accountId && room.tournamentCode ? accounts.getAccount(m.accountId) : null;
+            if (acct) accounts.setRosterPick(acct, room.tournamentCode, m.claim);
+          }
+        }
         emitState(room);
         return ack?.({ ok: true });
       // The moderator takes the protest: from here both teams may write (H.3).

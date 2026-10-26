@@ -151,6 +151,30 @@ export function setPrefs(account, prefs) {
   return account;
 }
 
+// Who this account is on each tournament's roster: picked on a join gate (or
+// linked by a moderator), then used in every other room of that tournament,
+// whatever the account's display name. Keyed by tournament code; the oldest
+// are dropped past ROSTER_PICKS_MAX. A null pick forgets the tournament.
+const ROSTER_PICKS_MAX = 50;
+export function setRosterPick(account, tournamentCode, pick) {
+  const code = String(tournamentCode || '').slice(0, 20);
+  if (!code) return account;
+  const out = { ...(account.rosterPicks || {}) };
+  if (!pick) delete out[code];
+  else {
+    const team = String(pick.team || '').slice(0, 100), player = String(pick.player || '').slice(0, 100);
+    if (!team || !player) return account;
+    if (out[code]?.team === team && out[code]?.player === player) return account;
+    delete out[code];
+    out[code] = { team, player, at: Date.now() };
+  }
+  const keys = Object.keys(out).sort((a, b) => (out[a].at || 0) - (out[b].at || 0));
+  while (keys.length > ROSTER_PICKS_MAX) delete out[keys.shift()];
+  account.rosterPicks = out;
+  saveToDisk();
+  return account;
+}
+
 // A moderator's MODAQ settings (the Font dialog, read-along, how the screen
 // shows the game), so a new device reads the way the last one did. The keys are
 // MODAQ's device settings (DeviceSettings.ts); values are kept only if they are
@@ -249,7 +273,9 @@ export function publicAccount(account) {
     ? {
         id: account.id, username: account.username, displayName: account.displayName || '',
         email: account.email || '', prefs: account.prefs || {},
-        modaqSettings: account.modaqSettings || {}
+        modaqSettings: account.modaqSettings || {},
+        rosterPicks: Object.fromEntries(Object.entries(account.rosterPicks || {})
+          .map(([k, v]) => [k, { team: v.team, player: v.player }]))
       }
     : null;
 }

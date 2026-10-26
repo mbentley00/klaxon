@@ -4,13 +4,32 @@ import { api, $, el } from './util.js';
 // from the director's shared link; without it the API refuses, so knowing the
 // tournament code alone reveals nothing.
 const code = location.pathname.split('/').pop().toUpperCase();
-const key = new URLSearchParams(location.search).get('key') || '';
+const params = new URLSearchParams(location.search);
+const key = params.get('key') || '';
+// Or a room of the tournament: a player who came from a shared room link.
+const fromRoom = (params.get('room') || '').toUpperCase();
+
+// What a room is doing, in words ("Round 4 · tossup 12 of 20").
+function statusText(s) {
+  if (!s || s.state === 'none') return 'No game yet';
+  const r = s.round ? (/^\d+$/.test(s.round) ? `Round ${s.round}` : s.round) : '';
+  const join = (...xs) => xs.filter(Boolean).join(' · ');
+  switch (s.state) {
+    case 'playing': return join(r, s.q ? `tossup ${s.q}${s.of ? ` of ${s.of}` : ''}` : 'playing');
+    case 'overtime': return join(r, 'overtime');
+    case 'pickban': return join(r, 'pick/ban');
+    case 'setup': return join(r, 'setting up');
+    case 'idle': return join(r, 'no updates for 10+ minutes');
+    case 'finished': return join(r, 'finished ✓');
+    default: return '';
+  }
+}
 
 async function init() {
   $('#tp-name').textContent = `Tournament ${code}`;
   let view;
   try {
-    view = await api('GET', `/api/tournaments/${code}/player-view?key=${encodeURIComponent(key)}`);
+    view = await api('GET', `/api/tournaments/${code}/player-view?key=${encodeURIComponent(key)}&room=${encodeURIComponent(fromRoom)}`);
   } catch (e) {
     $('#tp-locked').classList.remove('hidden');
     if (e.message !== 'bad_key') {
@@ -26,6 +45,12 @@ async function init() {
   $('#tp-body').classList.remove('hidden');
 
   $('#tp-stats').href = view.statsPath;
+  const back = view.rooms.find((r) => r.code === fromRoom);
+  if (back) {
+    $('#tp-back-link').href = `/r/${back.code}`;
+    $('#tp-back-link').textContent = `← Back to ${back.name || back.code}`;
+    $('#tp-back').classList.remove('hidden');
+  }
   if (view.links?.schedule) {
     const a = $('#tp-schedule');
     a.href = view.links.schedule;
@@ -42,9 +67,11 @@ async function init() {
     const li = el('li', {});
     const col = el('span', { className: 'pcol' });
     col.append(el('span', { className: 'pname' }, r.name || `Room ${r.code}`));
-    col.append(el('span', { className: 'pjoined' }, `code ${r.code}`));
+    const st = el('span', { className: 'pjoined' }, statusText(r.status));
+    st.dataset.room = r.code;
+    col.append(st);
     li.append(col);
-    li.append(el('a', { className: 'btnlink tiny', href: `/r/${r.code}` }, 'Join →'));
+    li.append(el('a', { className: 'btnlink tiny', href: `/r/${r.code}` }, r.code === fromRoom ? 'Back →' : 'Join →'));
     rooms.append(li);
   }
   if (view.rooms.length === 0) {
@@ -79,3 +106,14 @@ async function init() {
 }
 
 init();
+
+// Keep each room's state current while the page is open.
+setInterval(async () => {
+  if (document.visibilityState !== 'visible') return;
+  try {
+    const { rooms } = await api('GET', `/api/tournaments/${code}/room-status`);
+    for (const span of document.querySelectorAll('#tp-rooms [data-room]')) {
+      span.textContent = statusText(rooms[span.dataset.room]);
+    }
+  } catch { /* next time */ }
+}, 30000);

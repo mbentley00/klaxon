@@ -24,7 +24,7 @@ if (sessionToken) {
       signedIn = true;
       $('#account-link').textContent = `Account: ${account.displayName || account.username}`;
       $('#account-link').href = '/account';
-      if (account.displayName) remember('name', account.displayName);
+      if (account.displayName && !recall('name')) remember('name', account.displayName);
       for (const [k, v] of Object.entries(account.prefs || {})) remember(k, v);
       $('#join-name').value = recall('name') || '';
     })

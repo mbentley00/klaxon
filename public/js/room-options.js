@@ -1,4 +1,4 @@
-import { recall, remember, playerId, $ } from './util.js';
+import { recall, remember, staffPlayerId, $ } from './util.js';
 
 // A room's settings on a page of their own, for the reader of a MODAQ room:
 // the reader page there is MODAQ, and the plain buzzer view (with its own game
@@ -32,7 +32,7 @@ if (!(staffToken || sessionToken)) {
   const socket = io({ transports: ['websocket', 'polling'], reconnection: true });
   const pill = $('#ro-conn');
   const join = () => socket.emit('join', {
-    roomCode: code, playerId: playerId(), role, name: recall('name') || 'Reader',
+    roomCode: code, playerId: staffPlayerId(), role, name: recall('name') || 'Reader',
     staffToken: staffToken || undefined, sessionToken: sessionToken || undefined
   }, (resp) => {
     if (!resp?.ok || resp.staffDenied) {

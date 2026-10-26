@@ -1,5 +1,5 @@
 import { ClockSync } from './clocksync.js';
-import { playerId, remember, recall, forget, api, readFileText, $, el } from './util.js';
+import { playerId, staffPlayerId, remember, recall, forget, api, readFileText, $, el } from './util.js';
 
 const code = location.pathname.split('/').pop().toUpperCase();
 const params = new URLSearchParams(location.search);
@@ -193,8 +193,58 @@ function maybeAutoJoin() {
     if (name) return doJoin(staffRole, name);  // never default the name to "Reader"
     return showGate('staff', staffRole);       // ask the reader for their name first
   }
-  if (recall('joined:' + code)) return doJoin(recall('role:' + code) || 'player', recall('name'), recall('team'));
+  if (recall('joined:' + code)) return autoRejoin();
   showGate('player');
+}
+
+// Coming back to a room this browser joined. In a room where players pick
+// themselves off the roster, rejoin as the roster player picked before (in
+// this tournament, on this device or on the account); with no pick saved,
+// show the picker rather than join under a typed name nobody can link.
+async function autoRejoin() {
+  const role = recall('role:' + code) || 'player';
+  if (role !== 'player') return doJoin(role, recall('name'), recall('team'));
+  const info = await loadRoomInfo();
+  if (!(info.rosterJoin && info.roster?.teams?.length)) return doJoin('player', recall('name'), recall('team'));
+  const pick = await savedRosterPick(info);
+  if (pick?.guest) return doJoin('player', recall('name'), recall('team'), { guest: true });
+  if (pick) return doJoin('player', pick.player, pick.team, { rosterTeam: pick.team, rosterPlayer: pick.player });
+  showGate('player');
+}
+
+// The roster player this person picked in this tournament: this device's
+// pick first, then the signed-in account's. Only one still on the roster.
+async function savedRosterPick(info) {
+  const tcode = info?.tournamentCode;
+  if (!tcode) return null;
+  let pick = null;
+  try { pick = JSON.parse(recall('rosterPick:' + tcode) || 'null'); } catch { pick = null; }
+  if (!pick) pick = (await myAccount())?.rosterPicks?.[tcode] || null;
+  if (pick?.guest) return pick;
+  const listed = (info.roster?.teams || []).some((t) => t.name === pick?.team && t.players.some((p) => p.name === pick?.player));
+  return listed ? { team: pick.team, player: pick.player } : null;
+}
+function rememberRosterPick(roster) {
+  const tcode = roomInfo?.tournamentCode;
+  if (!tcode || !roster) return;
+  if (roster.guest) remember('rosterPick:' + tcode, JSON.stringify({ guest: true }));
+  else if (roster.rosterPlayer) remember('rosterPick:' + tcode, JSON.stringify({ team: roster.rosterTeam, player: roster.rosterPlayer }));
+}
+
+// The signed-in account, fetched once (null when signed out).
+let accountP = null;
+function myAccount() {
+  const s = localStorage.getItem('bz_sessionToken');
+  if (!s) return Promise.resolve(null);
+  if (!accountP) {
+    accountP = api('GET', `/api/accounts/me?sessionToken=${encodeURIComponent(s)}`)
+      .then((r) => r.account)
+      .catch((e) => {
+        if (e.message === 'not_logged_in') localStorage.removeItem('bz_sessionToken');
+        return null;
+      });
+  }
+  return accountP;
 }
 
 // Room settings the JOIN GATE needs before anyone has joined (currently just
@@ -240,6 +290,7 @@ function applyTeamRequirement(required, shootout) {
 // always offered — subs exist — and tells the director someone new turned up.
 const NOT_ON_ROSTER = '\u0000other';
 
+let gatePick = null;   // the saved pick that prefills the gate (savedRosterPick)
 function renderRosterGate(info) {
   const wrap = $('#gate-roster');
   const roster = info?.roster;
@@ -261,7 +312,8 @@ function renderRosterGate(info) {
       : now.map(opt)),
     el('option', { value: NOT_ON_ROSTER, textContent: "My team isn't listed" })
   );
-  const remembered = recall('team');
+  // Prefill: the pick saved for this tournament, else the last team typed.
+  const remembered = gatePick?.team || recall('team');
   if (remembered && roster.teams.some((t) => t.name === remembered)) teamSel.value = remembered;
 
   const fillPlayers = () => {
@@ -275,7 +327,7 @@ function renderRosterGate(info) {
       })),
       el('option', { value: NOT_ON_ROSTER, textContent: "I'm not on the roster" })
     );
-    const mine = recall('name');
+    const mine = gatePick && gatePick.team === team?.name ? gatePick.player : recall('name');
     if (mine && team?.players.some((p) => p.name === mine)) playerSel.value = mine;
     updateRosterGate();
   };
@@ -338,7 +390,10 @@ function showGate(mode, staffRole) {
     loadRoomInfo().then((info) => {
       if (info.tournamentCode && info.name) $('#gate-title').textContent = `Join ${info.name}`;
       applyTeamRequirement(info.requireTeam, info.shootout);
-      renderRosterGate(info);
+      return savedRosterPick(info).then((pick) => {
+        gatePick = pick?.guest ? null : pick;
+        renderRosterGate(info);
+      });
     });
   } else {
     $('#gate-roster').classList.add('hidden');
@@ -366,10 +421,12 @@ function rememberRecentRoom() {
 // ---- join flow ----
 function doJoin(role, name, team, roster) {
   socket.emit('join', {
-    roomCode: code, playerId: playerId(), name, team, role,
+    roomCode: code, playerId: isStaffRole(role) ? staffPlayerId() : playerId(), name, team, role,
     // A player who picked themselves out of the roster is linked on join.
     rosterTeam: roster?.rosterTeam,
     rosterPlayer: roster?.rosterPlayer,
+    // "I'm not on the roster": don't put them back on their saved pick.
+    guest: roster?.guest || undefined,
     staffToken: isStaffRole(role) ? recall('staffToken:' + code) : undefined,
     // A logged-in account a director approved for this tournament is a
     // moderator credential too — no reader link needed. A logged-in player
@@ -405,6 +462,7 @@ function doJoin(role, name, team, roster) {
     rememberRecentRoom();
     if (name) remember('name', name);
     if (team) remember('team', team);
+    if (resp.role === 'player') rememberRosterPick(roster);
     if (resp.coReaderToken) remember('coReaderToken:' + code, resp.coReaderToken);
     if (resp.staffDenied) {
       // Don't drop them into the room as a silent spectator: explain what's
@@ -487,7 +545,7 @@ $('#gate-join').onclick = () => {
     }
     const finalName = name || 'Player';
     remember('name', finalName); if (team) remember('team', team);
-    doJoin('player', finalName, team);
+    doJoin('player', finalName, team, choice?.offRoster ? { guest: true } : undefined);
   }
 };
 $('#gate-first').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#gate-last').focus(); });
@@ -706,7 +764,6 @@ function renderPipButton() {
   const shootout = !!state.snapshot?.settings?.shootout;
   const show = pipSupported && state.role === 'player' && !shootout;
   b.classList.toggle('hidden', !show);
-  $('#pip-hint')?.classList.toggle('hidden', !show);
   b.textContent = pipWin ? 'Buzzer popped out ✓' : 'Pop out buzzer ↗';
 }
 
@@ -782,6 +839,7 @@ function applyState(s) {
   renderChat(s);
   renderMyTeam(s);
   renderNextPacket(s);
+  renderSpectator(s);
   renderEvening(s);
   announceBuzz(s);
   announceRuling(s);
@@ -1844,6 +1902,20 @@ function say(text, ok = true) {
   sayTimer = setTimeout(() => box.classList.remove('show'), 4500);
 }
 
+// Spectators can switch to playing whenever they like: back to the join gate
+// with their name filled in. Joining there makes the same member a player.
+function renderSpectator(s) {
+  $('#spectator-banner').classList.toggle('hidden', state.role !== 'spectator' || !!s.ended);
+}
+$('#spectator-join').addEventListener('click', () => {
+  forget('joined:' + code); forget('role:' + code);
+  state.role = null;   // a reconnect now waits for the gate instead of rejoining as a spectator
+  $('#stage').classList.add('hidden');
+  document.body.classList.remove('has-chat', 'has-sheet');
+  showGate('player');
+  $('#gate-msg').textContent = '';
+});
+
 $('#leave-game')?.addEventListener('click', () => {
   if (!confirm('Leave the game? Your score is kept.')) return;
   socket.emit('leave_game', {}, (res) => {
@@ -2559,6 +2631,9 @@ const sameTeam = (a, b) => {
 // The board is open while picks are being made and folds away once it's done
 // (it sits above the buzzer). Only on a change, so a player's own toggle sticks.
 let msShownStatus = null;
+// After the last pick, the board stays open this long before folding.
+const MS_LINGER_MS = 5000;
+let msFoldTimer = null;
 
 // Before the board exists: the moderator is setting the teams. Say so plainly
 // (a bare buzzer here reads as "the game has started"), and say which team
@@ -2616,7 +2691,16 @@ function renderMassinger(s) {
   $('#ms-title').textContent = 'MASSINGER pick/ban';
   $('#ms-board-wrap').classList.remove('hidden');
   if (msShownStatus !== m.status) {
-    $('#ms-board-wrap').open = m.status !== 'done';
+    // Watched live to the last pick: leave the board open a few seconds so
+    // everyone sees that pick land, then fold it away for the game.
+    const justFinished = m.status === 'done' && msShownStatus === 'active';
+    $('#ms-board-wrap').open = m.status !== 'done' || justFinished;
+    if (justFinished) {
+      clearTimeout(msFoldTimer);
+      msFoldTimer = setTimeout(() => {
+        if (state.snapshot?.massinger?.status === 'done') $('#ms-board-wrap').open = false;
+      }, MS_LINGER_MS);
+    }
     msShownStatus = m.status;
   }
   $('#ms-round').textContent = m.round ? `Round ${m.round}` : '';
@@ -2731,10 +2815,14 @@ function renderMassinger(s) {
     const left = sc.indexes.length - sc.banned;
     const gone = left === 0;
     const isProtected = sc.protectedBy != null;
-    const open = !gone && !isProtected;
+    // A protect covers one question: with two, the other can still be banned.
+    const banRoom = left - (isProtected ? 1 : 0);
+    const banOk = banRoom > 0;
+    const protectOk = !gone && !isProtected;
+    const open = banOk || protectOk;
     const oneKind = canBan !== canProtect;
-    const tap = mine && open && oneKind;
-    const li = el('li', { className: gone ? 'banned' : isProtected ? 'protected' : sc.banned > 0 ? 'part' : '' });
+    const tap = mine && oneKind && (canBan ? banOk : protectOk);
+    const li = el('li', { className: gone ? 'banned' : isProtected && !banOk ? 'protected' : isProtected || sc.banned > 0 ? 'part' : '' });
     if (tap) li.classList.add('tap');
     if (tap && msChosen?.label === sc.label) li.classList.add('chosen');
     const since = msFlash && msFlash.label === sc.label ? Date.now() - msFlash.at : Infinity;
@@ -2745,7 +2833,8 @@ function renderMassinger(s) {
     const label = el('span', { className: 'ms-label', textContent: sc.label });
     const tag =
       gone ? mark('ban', byLabel.get(`ban:${sc.label}`) || 'banned') :
-      isProtected ? mark('protect', m.teams[sc.protectedBy] ?? '') :
+      isProtected ? mark('protect', (m.teams[sc.protectedBy] ?? '') +
+        (sc.indexes.length > 1 ? (banOk ? ` · 1 of ${sc.indexes.length}` : sc.banned ? ' · 1 banned' : '') : '')) :
       sc.banned > 0 ? mark(null, `${sc.banned} of ${sc.indexes.length} banned`) :
       sc.indexes.length > 1 ? mark(null, `×${sc.indexes.length}`) : null;
     if (tap) {
@@ -2764,9 +2853,9 @@ function renderMassinger(s) {
     // Older boards with no fixed order: either kind, so two buttons.
     if (mine && open && !oneKind) {
       const actions = el('span', { className: 'ms-pick' });
-      if (canProtect) actions.append(el('button', { className: 'tiny', textContent: 'Protect', disabled: paused,
+      if (canProtect && protectOk) actions.append(el('button', { className: 'tiny', textContent: 'Protect', disabled: paused,
         onclick: () => pickTile('protect', sc.label, seen) }));
-      if (canBan) actions.append(el('button', { className: 'tiny', textContent: 'Ban', disabled: paused,
+      if (canBan && banOk) actions.append(el('button', { className: 'tiny', textContent: 'Ban', disabled: paused,
         onclick: () => pickTile('ban', sc.label, seen) }));
       li.append(actions);
     }
@@ -3010,10 +3099,12 @@ function renderPlayers(s) {
     const [ga, ka] = teamRank(teamOf(a)), [gb, kb] = teamRank(teamOf(b));
     if (ga !== gb) return ga - gb;
     if (ka !== kb) return ka < kb ? -1 : 1;
-    return Number(a.connected) - Number(b.connected);
+    // Staff see who dropped first; players see who is here first.
+    return staff ? Number(a.connected) - Number(b.connected) : Number(b.connected) - Number(a.connected);
   });
   for (const p of sorted) {
-    const li = el('li', { className: p.connected ? '' : 'gone' });
+    // Loud for staff (they act on it), quiet for players (nothing to do).
+    const li = el('li', { className: p.connected ? '' : staff ? 'gone' : 'away' });
     const col = el('span', { className: 'pcol' });
     const nameRow = el('span', { className: 'pname-wrap' });
     const mine = p.id === state.me?.id;
@@ -3025,7 +3116,7 @@ function renderPlayers(s) {
     if (under && under === shown) under = null;
     nameRow.append(el('span', { className: 'pname' },
       `${shown}${under ? ` · ${under}` : ''}${mine ? ' (you)' : ''}`));
-    if (!p.connected) nameRow.append(el('span', { className: 'offline-badge' }, 'OFFLINE'));
+    if (!p.connected) nameRow.append(el('span', { className: staff ? 'offline-badge' : 'tag-badge' }, staff ? 'OFFLINE' : 'offline'));
     col.append(nameRow);
     if (staff && p.joinedAt) {
       const j = el('span', { className: 'pjoined', title: new Date(p.joinedAt).toLocaleString() });
@@ -4039,6 +4130,17 @@ function renderTournament() {
   if (!t) return;
   $('#tournament-strip').classList.remove('hidden');
   if (state.snapshot) showRoomName(state.snapshot);   // the tab names the tournament
+  // The breadcrumb names the tournament and leads to all of its rooms and
+  // its standings: a shared room link is how most players arrive.
+  const allHref = `/tp/${t.code}?room=${code}`;
+  const crumb = $('#crumb-tournament');
+  crumb.textContent = t.name || `Tournament ${t.code}`;
+  crumb.href = allHref;
+  crumb.title = 'All rooms and standings';
+  crumb.classList.remove('hidden');
+  $('#crumb-new').classList.add('hidden');
+  $('#t-all').href = allHref;
+  pollRoomStatus();
   // The code reads as a link, so make it one: a director on this device lands
   // in their console, everyone else in the tournament's public stats.
   const tcodeEl = $('#t-code');
@@ -4070,6 +4172,68 @@ function renderTournament() {
   for (const rc of t.rooms) {
     // Its name ("Room 1"), with the code in the tooltip; the code when unnamed.
     const name = t.roomNames?.[rc];
-    rooms.append(el('a', { className: 'chip' + (rc === code ? ' here' : ''), href: `/r/${rc}`, title: name ? rc : '' }, name || rc));
+    const chip = el('a', { className: 'chip room-chip' + (rc === code ? ' here' : ''), href: `/r/${rc}` });
+    chip.append(el('span', {}, name || rc));
+    const st = roomStateLabel(state.roomStatus?.[rc]);
+    if (st.text) chip.append(el('span', { className: 'room-state ' + st.key }, st.text));
+    chip.title = [name ? rc : '', st.long].filter(Boolean).join(' · ');
+    rooms.append(chip);
   }
 }
+
+// What a room is doing, in a few characters ("R4 · Q12", "R4 ✓") and in words
+// for the tooltip. Shared with the players' tournament page's idea of a room.
+function roomStateLabel(s) {
+  if (!s || s.state === 'none') return { key: 'none', text: '', long: '' };
+  const r = s.round ? (/^\d+$/.test(s.round) ? `R${s.round}` : s.round.slice(0, 10)) : '';
+  const longR = s.round ? (/^\d+$/.test(s.round) ? `Round ${s.round}` : s.round) : '';
+  const join = (...xs) => xs.filter(Boolean).join(' · ');
+  switch (s.state) {
+    case 'playing': return { key: 'playing', text: join(r, s.q ? `Q${s.q}` : ''), long: join(longR, s.q ? `tossup ${s.q}${s.of ? ` of ${s.of}` : ''}` : 'playing') };
+    case 'overtime': return { key: 'overtime', text: join(r, 'OT'), long: join(longR, 'overtime') };
+    case 'pickban': return { key: 'pickban', text: join(r, 'pick/ban'), long: join(longR, 'pick/ban') };
+    case 'setup': return { key: 'setup', text: join(r, 'setting up'), long: join(longR, 'setting up') };
+    case 'idle': return { key: 'idle', text: join(r, 'idle'), long: join(longR, 'no updates for 10+ minutes') };
+    case 'finished': return { key: 'finished', text: r ? `${r} ✓` : '✓', long: join(longR, 'finished') };
+    default: return { key: 'none', text: '', long: '' };
+  }
+}
+
+// Every room's state, every 30 seconds while the page is open (and at once on
+// coming back to it). Cheap: the server answers from memory.
+let roomStatusTimer = null;
+async function pollRoomStatus() {
+  const t = state.tournament;
+  if (!t) return;
+  clearTimeout(roomStatusTimer);
+  roomStatusTimer = setTimeout(pollRoomStatus, 30000);
+  if (document.visibilityState !== 'visible') return;
+  try {
+    const { rooms } = await api('GET', `/api/tournaments/${t.code}/room-status`);
+    const before = JSON.stringify(state.roomStatus || {});
+    state.roomStatus = rooms;
+    if (JSON.stringify(rooms) !== before) renderTournament();
+  } catch { /* try again next time */ }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state.tournament) pollRoomStatus(); });
+
+// Signed in or not, top right: the name with a dot, or "Log in".
+async function showAccount() {
+  const pill = $('#account-pill');
+  const back = encodeURIComponent(location.pathname + location.search);
+  const s = localStorage.getItem('bz_sessionToken');
+  const out = () => {
+    pill.textContent = 'Log in';
+    pill.className = 'pill pill-btn account-pill out';
+    pill.href = `/account?return=${back}`;
+    pill.title = 'Not signed in';
+  };
+  if (!s) return out();
+  const account = await myAccount();
+  if (!account) return out();
+  pill.textContent = account.displayName || account.username;
+  pill.className = 'pill pill-btn account-pill in';
+  pill.href = `/account?return=${back}`;
+  pill.title = `Signed in as ${account.username}`;
+}
+showAccount();

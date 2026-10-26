@@ -1,15 +1,20 @@
 // Small shared helpers. No framework, no build step => fewer things to break.
 
 // A stable per-browser identity so reconnects restore who you are.
-export function playerId() {
-  let id = localStorage.getItem('bz_playerId');
+function storedId(key) {
+  let id = localStorage.getItem(key);
   if (!id) {
     id = (crypto.randomUUID && crypto.randomUUID()) ||
       Date.now() + '-' + Math.random().toString(36).slice(2);
-    localStorage.setItem('bz_playerId', id);
+    localStorage.setItem(key, id);
   }
   return id;
 }
+export const playerId = () => storedId('bz_playerId');
+// Staff pages (the moderator, room options, the reader view) join under their
+// own id, so a moderator tab never takes over the same browser's player in
+// that room. The MODAQ moderator page reads the same key (klaxonClient.ts).
+export const staffPlayerId = () => storedId('bz_staffPlayerId');
 
 export const remember = (k, v) => localStorage.setItem('bz_' + k, v);
 export const recall = (k) => localStorage.getItem('bz_' + k);

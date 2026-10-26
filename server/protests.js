@@ -109,6 +109,8 @@ export function lodge(room, actor, { cycle, part, round, reason, teams }) {
     cycle: cycleNo,
     part: partId,
     round: round == null ? null : String(round).slice(0, 40),
+    // Which of the room's games it was lodged in (see currentGame).
+    game: room.gameNumber || 1,
     at: now,
     byTeam,
     againstTeam: other[0] || null,
@@ -237,8 +239,18 @@ export function showQuestion(room, id, questionText) {
  * property of the protest (whether the moderator revealed it), not of who is
  * looking.
  */
+// The room's protests from the game being played now. The room keeps every
+// protest (the director rules on them later, from the console), but the room
+// itself moves on: once a new game starts, the last game's protests are gone
+// from the players' and the moderator's screens.
+const currentRound = (room) => String(room.modaqState?.round ?? '');
+export function inCurrentGame(room, p) {
+  if (p.game != null && p.game !== (room.gameNumber || 1)) return false;
+  return String(p.round ?? '') === currentRound(room);
+}
+
 export function publicProtests(room) {
-  return (room.protests || []).filter((p) => p.status !== 'dismissed').map((p) => {
+  return (room.protests || []).filter((p) => p.status !== 'dismissed' && inCurrentGame(room, p)).map((p) => {
     const reason = PROTEST_REASONS.find((r) => r.id === p.reason);
     return {
       id: p.id,
