@@ -386,7 +386,26 @@ function normalizeFormat(f = {}) {
     massingerTimerSec: clampNum(f.massingerTimerSec, 0, 300, 30),
     // Who makes the picks by default: 'moderator' | 'captain' | 'anyone' |
     // 'random' (random bans, no picks at all).
-    massingerControl: MASSINGER_CONTROLS.includes(f.massingerControl) ? f.massingerControl : 'anyone'
+    massingerControl: MASSINGER_CONTROLS.includes(f.massingerControl) ? f.massingerControl : 'anyone',
+    // Swiss pairing (see swiss.js): off unless the director turns it on. The
+    // director pairs each round from the standings on the console's Schedule
+    // tab; the top `playoffSize` teams (0 = no bracket) then play a bracket.
+    swiss: f.swiss === true,
+    swissRounds: Math.round(clampNum(f.swissRounds, 1, 20, 5)),
+    playoffSize: [0, 2, 4, 8, 16].includes(Number(f.playoffSize)) ? Number(f.playoffSize) : 0,
+    // The playoffs after the Swiss rounds: 'roundrobin' (tiers by standing,
+    // each a round robin: the usual quizbowl shape), 'single' (single
+    // elimination among the top playoffSize), or 'none'.
+    playoffFormat: ['none', 'roundrobin', 'single'].includes(f.playoffFormat) ? f.playoffFormat
+      : (Number(f.playoffSize) > 0 ? 'single' : 'none'),
+    playoffTier: [4, 5, 6, 7, 8].includes(Number(f.playoffTier)) ? Number(f.playoffTier) : 6,
+    // Swiss games between tiermates count in the round robin, not replayed.
+    playoffCarryover: f.playoffCarryover !== false,
+    // After a round robin: 'none', 'single' (top two play once), or
+    // 'advantaged' (ACF: tied → one game; a game ahead → the challenger must
+    // win twice; two ahead → champion, no final).
+    championship: ['none', 'single', 'advantaged'].includes(f.championship) ? f.championship : 'none',
+    swissRound1: f.swissRound1 === 'random' ? 'random' : 'seeded'
   };
 }
 
@@ -1664,6 +1683,42 @@ export function resolveWindow(room) {
   return room.queue;
 }
 
+// --- Swiss pairing: what has been published (see swiss.js, index.js) -------
+// t.swiss = { published: { [round]: { pairings: [{ room, teams }], bye, at,
+// notes } }, dropped: [team], seeds: [team] (the playoff bracket's) }. A
+// published round's rows are also the schedule's rows for that round, which
+// is what every room and page reads.
+export function swissState(t) {
+  if (!t.swiss || typeof t.swiss !== 'object') t.swiss = { published: {}, dropped: [], seeds: null };
+  t.swiss.published ||= {};
+  t.swiss.dropped ||= [];
+  return t.swiss;
+}
+export function publishSwissRound(t, round, { pairings, bye = null, notes = [], seeds = null, playoff = null }) {
+  const s = swissState(t);
+  const r = String(round);
+  s.published[r] = { pairings, bye, notes, at: Date.now() };
+  if (seeds) s.seeds = seeds;
+  if (playoff) s.playoff = playoff;
+  t.schedule = [...(t.schedule || []).filter((row) => row.round !== r),
+    ...pairings.map((p) => ({ round: r, room: p.room, teams: [...p.teams] }))];
+  persistTournament(t);
+  return s.published[r];
+}
+export function withdrawSwissRound(t, round) {
+  const s = swissState(t);
+  const r = String(round);
+  delete s.published[r];
+  t.schedule = (t.schedule || []).filter((row) => row.round !== r);
+  if (!Object.keys(s.published).some((k) => Number(k) > (t.format?.swissRounds || 0))) { s.seeds = null; s.playoff = null; }
+  persistTournament(t);
+}
+export function setSwissDropped(t, teams) {
+  swissState(t).dropped = [...new Set((Array.isArray(teams) ? teams : []).map((x) => String(x).slice(0, 100)))];
+  persistTournament(t);
+  return t.swiss.dropped;
+}
+
 // --- read-only game data access (GET /api/rooms/:code/game?key=) ----------
 // A tournament's director, or the moderator of a room outside a tournament,
 // can hand out a key that reads the game and nothing else: for a stream
@@ -1672,11 +1727,23 @@ export function resolveWindow(room) {
 export const API_QUESTION_MODES = ['live', 'after'];
 const apiKey = () => 'kx_' + crypto.randomBytes(18).toString('base64url');
 // owner: a tournament or a room. action: enable | rotate | disable | set.
-export function setApiAccess(owner, { action, questions } = {}) {
+// A tournament can also hand out room-only keys (roomKeys: { ROOM: key }):
+// each reads that one room and nothing else, for that room's own stream.
+// They share the tournament key's question mode; turning the API off ends
+// them too, and a new tournament key leaves them as they are.
+export function setApiAccess(owner, { action, questions, room } = {}) {
   const mode = API_QUESTION_MODES.includes(questions) ? questions : null;
   if (action === 'disable') owner.api = null;
   else if (action === 'enable' || action === 'rotate') {
-    owner.api = { key: apiKey(), questions: mode || owner.api?.questions || 'after', createdAt: Date.now() };
+    owner.api = { key: apiKey(), questions: mode || owner.api?.questions || 'after', createdAt: Date.now(),
+      roomKeys: action === 'rotate' ? owner.api?.roomKeys || {} : {} };
+  } else if (action === 'room_key' || action === 'room_key_remove') {
+    if (!owner.api) return { error: 'not_enabled' };
+    if (!owner.roomCodes || !owner.roomCodes.has(String(room || '').toUpperCase())) return { error: 'bad_room' };
+    const rc = String(room).toUpperCase();
+    owner.api.roomKeys ||= {};
+    if (action === 'room_key') owner.api.roomKeys[rc] = apiKey();
+    else delete owner.api.roomKeys[rc];
   } else if (action === 'set') {
     if (!owner.api) return { error: 'not_enabled' };
     if (mode) owner.api.questions = mode;
@@ -1685,7 +1752,8 @@ export function setApiAccess(owner, { action, questions } = {}) {
   return { ok: true, api: apiAccessView(owner) };
 }
 export const apiAccessView = (owner) => (owner.api
-  ? { enabled: true, key: owner.api.key, questions: owner.api.questions, createdAt: owner.api.createdAt }
+  ? { enabled: true, key: owner.api.key, questions: owner.api.questions, createdAt: owner.api.createdAt,
+      roomKeys: { ...(owner.api.roomKeys || {}) } }
   : { enabled: false });
 
 // The scoresheet's working state (public/js/scoresheet-model.js), kept for

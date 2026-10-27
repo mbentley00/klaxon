@@ -1840,3 +1840,34 @@ body.compact #shootout-view, body.compact #chat-view, body.compact #session-view
 #api-access .row, #ro-api .row, #opt-api-box .row { margin-top: 8px; }
 .opt-api { margin: 10px 0; }
 .opt-api summary { margin: 6px 0; }
+
+/* Swiss pairing (director console, Schedule tab). */
+.swiss-next { border: 2px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 12px 0; background: var(--surface); }
+.swiss-next h4, .swiss-round h4 { margin: 0 0 8px; }
+.swiss-scroll { overflow-x: auto; }
+.swiss-table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+.swiss-table th { text-align: left; font-size: .75rem; color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--soft); }
+.swiss-table td { padding: 5px 8px; border-bottom: 1px solid var(--soft); vertical-align: middle; }
+.swiss-table select { max-width: 14em; }
+.swiss-table .swiss-v { color: var(--muted); text-align: center; }
+.swiss-rec { font-family: var(--mono); font-size: .8rem; color: var(--muted); }
+.swiss-notes { margin: 8px 0; font-size: .85rem; color: var(--warn); }
+.swiss-round { border-top: 1px solid var(--soft); padding: 10px 0; }
+.swiss-round-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.swiss-games { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: .9rem; }
+.swiss-games .swiss-saved .swiss-state { color: var(--ok); }
+.swiss-games .swiss-live .swiss-state { color: var(--accent); font-weight: 600; }
+.swiss-games .swiss-waiting .swiss-state { color: var(--muted); }
+.swiss-out td { color: var(--muted); text-decoration: line-through; }
+.swiss-out td:last-child { text-decoration: none; }
+/* Six tabs (Swiss adds Schedule): a little tighter, so they still fit one row. */
+.tabbar.six { gap: 4px; }
+.tabbar.six .tab { font-size: .82rem; padding: .45em .55em; }
+
+/* Create tournament, signed out: only the log-in step, never a form whose
+   contents would be lost on the way to log in. */
+body.signin-wait main > :not(#signin-gate):not(#signin-checking) { display: none !important; }
+
+.po-opts { margin: 4px 0 8px 14px; padding-left: 12px; border-left: 2px solid var(--soft); }
+
+.api-sub { margin: 14px 0 2px; }

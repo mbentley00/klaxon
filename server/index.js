@@ -26,6 +26,7 @@ import { roundSummary } from './scorecard.js';
 import { buildZip } from './zip.js';
 import { toPacketNumbers } from './packetNumbers.js';
 import { buildGameState } from './gameState.js';
+import * as swiss from './swiss.js';
 import { checkMassingerPacket } from './massingerCheck.js';
 import * as accounts from './accounts.js';
 import { parseYellowFruit, planImport } from './yfimport.js';
@@ -1676,6 +1677,7 @@ function apiKeyMode(room, key) {
   if (!key) return null;
   const t = room.tournamentCode ? store.getTournament(room.tournamentCode) : null;
   if (t?.api?.key && key === t.api.key) return t.api.questions;
+  if (t?.api?.roomKeys?.[room.code] && key === t.api.roomKeys[room.code]) return t.api.questions;
   if (!room.tournamentCode && room.api?.key && key === room.api.key) return room.api.questions;
   return null;
 }
@@ -1742,6 +1744,316 @@ app.get('/api/tournaments/:code/games', gameApiCors, ah(async (req, res) => {
   res.json({ tournament: { code: t.code, name: t.name }, questions: mode, rooms, at: Date.now() });
 }));
 
+// --- Swiss pairing (director only; off unless the format turns it on) -------
+// Rounds 1..swissRounds are paired from the standings; the rounds after them
+// are the playoff bracket. A published round is written into the schedule,
+// which every room and page already follows.
+const PLAYOFF_NAMES = { 1: ['Final'], 2: ['Semifinals', 'Final'], 3: ['Quarterfinals', 'Semifinals', 'Final'],
+  4: ['Round of 16', 'Quarterfinals', 'Semifinals', 'Final'] };
+async function swissContext(t) {
+  const bucket = { kind: 't', code: t.code };
+  let teams = [];
+  try { const text = await artifacts.getRoster(bucket); if (text) teams = parseQbjRoster(text).teams; } catch { teams = []; }
+  const st = store.swissState(t);
+  const f = t.format || {};
+  const N = f.swissRounds || 5;
+  const pf = f.playoffFormat || 'none';
+  const size = pf === 'single' ? (f.playoffSize || 0) : 0;
+  const swissLabels = Array.from({ length: N }, (_, i) => String(i + 1));
+  const results = (await artifacts.readAllExports(bucket)).map((m) => swiss.matchResult(m.qbj));
+  const swissSet = new Set(swissLabels);
+  const finalSwiss = results.filter((g) => g.final && swissSet.has(g.round));
+  const byes = {};
+  for (const r of swissLabels) { const b = st.published[r]?.bye; if (b) byes[b] = (byes[b] || 0) + 1; }
+  const rows = swiss.rank(swiss.standings(teams, finalSwiss, byes));
+  const swissPlayed = new Set(finalSwiss.map((g) => swiss.pairKey(g.teams[0], g.teams[1])));
+  const played = new Set(swissPlayed);
+  for (const r of swissLabels) for (const p of st.published[r]?.pairings || []) played.add(swiss.pairKey(p.teams[0], p.teams[1]));
+  const same = (a, b) => a.length === 2 && b.length === 2 && swiss.pairKey(a[0], a[1]) === swiss.pairKey(b[0], b[1]);
+  // A published game's result: the saved game for those two teams that round.
+  const gameFor = (round, pair) => results.filter((g) => g.round === String(round) && same(g.teams, pair))
+    .sort((a, b) => Number(b.final) - Number(a.final))[0] || null;
+  const rooms = [...t.roomCodes].map((code) => ({ code, name: store.describeRoom(code)?.name || code }));
+  const active = rows.filter((x) => !st.dropped.includes(x.name));
+
+  // The playoff rounds after the Swiss ones.
+  let playoffLabels = [], rr = null, finals = [];
+  const labels = {};
+  if (pf === 'single') {
+    const count = swiss.playoffRoundCount(size);
+    playoffLabels = Array.from({ length: count }, (_, i) => String(N + i + 1));
+    playoffLabels.forEach((r, i) => { labels[r] = `${PLAYOFF_NAMES[count]?.[i] || 'Playoffs'} (round ${r})`; });
+  } else if (pf === 'roundrobin') {
+    // The plan stored when the first playoff round was published; until then,
+    // the plan today's standings would give.
+    rr = st.playoff?.format === 'roundrobin' ? st.playoff
+      : { format: 'roundrobin', ...swiss.planRoundRobin(active.map((x) => x.name), f.playoffTier || 6,
+        { carryover: f.playoffCarryover !== false, played: swissPlayed }) };
+    const R = rr.rounds.length;
+    playoffLabels = Array.from({ length: R }, (_, i) => String(N + i + 1));
+    playoffLabels.forEach((r, i) => { labels[r] = `Playoffs ${i + 1} of ${R} (round ${r})`; });
+    if (f.championship && f.championship !== 'none') {
+      finals = [String(N + R + 1)];
+      if (f.championship === 'advantaged') finals.push(String(N + R + 2));
+      labels[finals[0]] = f.championship === 'advantaged' ? `Final, game 1 (round ${finals[0]})` : `Final (round ${finals[0]})`;
+      if (finals[1]) labels[finals[1]] = `Final, game 2 (round ${finals[1]})`;
+    }
+  }
+  const label = (r) => (Number(r) <= N ? `Round ${r}` : labels[String(r)] || `Round ${r}`);
+  const status = (round, pair, room) => {
+    const g = gameFor(round, pair);
+    if (g?.final) return { state: 'saved', winner: g.winner, score: g.points };
+    const live = g || (store.getRoom(room)?.liveGame && String(store.getRoom(room).liveGame.round) === String(round));
+    return { state: live ? 'live' : 'waiting' };
+  };
+  // A round-robin tier's standings: its playoff games, plus (with carryover)
+  // the Swiss games tiermates played each other.
+  const tierRank = (tier) => {
+    const inTier = new Set(tier.teams);
+    const rrSet = new Set(playoffLabels);
+    const carry = rr?.carryover ?? (f.playoffCarryover !== false);
+    const games = results.filter((g) => g.final && g.teams.length === 2 && g.teams.every((n) => inTier.has(n))
+      && (rrSet.has(g.round) || (carry && swissSet.has(g.round))));
+    const seedOf = Object.fromEntries(rows.map((x, i) => [x.name, i + 1]));
+    return swiss.rank(swiss.standings(tier.teams.map((n) => ({ name: n, seed: seedOf[n] || 999 })), games));
+  };
+  const ctx = { t, st, N, pf, size, teams, rows, active, played, swissPlayed, swissLabels, playoffLabels, finals, rr, rooms, gameFor, label, status, tierRank };
+  // Whether the round robin is done (every game published and saved), and what
+  // the final then needs.
+  ctx.rrDone = () => pf === 'roundrobin' && !!st.playoff && playoffLabels.every((r) => st.published[r]
+    && st.published[r].pairings.every((p) => gameFor(r, p.teams)?.final));
+  ctx.decision = () => (ctx.rrDone() && rr.tiers?.length ? swiss.finalDecision(tierRank(rr.tiers[0]), f.championship) : null);
+  // A final round that won't be played: no final needed, or the leader
+  // already won game 1 of an advantaged final.
+  ctx.skip = (r) => {
+    if (!finals.includes(String(r))) return null;
+    const d = ctx.decision();
+    if (!d) return null;
+    if (!d.needed) return `${d.champion} wins the top tier by ${d.lead || 2}+ games: no final needed.`;
+    if (String(r) === finals[1]) {
+      if (!d.advantaged) return 'One final game decides it.';
+      const g1 = st.published[finals[0]]?.pairings?.[0];
+      const res = g1 && gameFor(finals[0], g1.teams);
+      if (res?.final && res.winner === d.leader) return `${d.leader} won game 1: champion.`;
+    }
+    return null;
+  };
+  ctx.allLabels = () => [...swissLabels, ...playoffLabels, ...finals];
+  return ctx;
+}
+
+function swissRoundView(ctx, round) {
+  const pub = ctx.st.published[round];
+  const pairings = (pub?.pairings || []).map((p) => ({ ...p, roomName: ctx.rooms.find((r) => r.code === p.room)?.name || p.room,
+    status: ctx.status(round, p.teams, p.room) }));
+  const saved = pairings.filter((p) => p.status.state === 'saved').length;
+  const r = Number(round);
+  const kind = r <= ctx.N ? 'swiss' : ctx.finals.includes(String(round)) ? 'final' : 'playoff';
+  return { round, label: ctx.label(round), kind, published: !!pub, skip: pub ? null : ctx.skip(round),
+    at: pub?.at || null, bye: pub?.bye || null, notes: pub?.notes || [], pairings,
+    progress: { saved, total: pairings.length, started: pairings.some((p) => p.status.state !== 'waiting') } };
+}
+
+// The pairings Klaxon proposes for a round (nothing is saved).
+function swissProposal(ctx, round) {
+  const r = Number(round);
+  const all = ctx.allLabels();
+  if (!all.includes(String(r))) return { error: 'no_such_round' };
+  if (r > 1 && !ctx.st.published[String(r - 1)]) return { error: 'previous_not_published' };
+  const prevView = r > 1 ? swissRoundView(ctx, String(r - 1)) : null;
+  const unsaved = prevView ? prevView.pairings.filter((p) => p.status.state !== 'saved').map((p) => ({ room: p.roomName, teams: p.teams })) : [];
+  const active = ctx.active;
+  let games, bye = null, notes = [], seeds = null, playoff = null;
+  if (r <= ctx.N) {
+    if (active.length < 2) return { error: 'no_teams' };
+    const res = swiss.pairRound(active, ctx.played, {
+      firstRound: r === 1, round1: ctx.t.format?.swissRound1, avoidSchool: true, seedText: `${ctx.t.code}:${r}`,
+    });
+    games = res.pairs.map((teams) => ({ teams }));
+    ({ bye, notes } = res);
+  } else if (ctx.pf === 'single') {
+    const k = r - ctx.N - 1;
+    if (k === 0) {
+      if (active.length < ctx.size) return { error: 'too_few_teams', need: ctx.size };
+      seeds = active.slice(0, ctx.size).map((x) => x.name);
+      games = swiss.playoffPairs(seeds, ctx.size, null).pairs.map((teams) => ({ teams }));
+    } else {
+      const prev = ctx.st.published[String(r - 1)].pairings;
+      const res = swiss.playoffPairs(ctx.st.seeds || [], ctx.size, prev, (teams) => {
+        const g = ctx.gameFor(r - 1, teams);
+        return g?.final ? g.winner : null;
+      });
+      if (res.missing.length) return { error: 'bracket_waiting', missing: res.missing };
+      games = res.pairs.map((teams) => ({ teams }));
+    }
+  } else if (ctx.pf === 'roundrobin' && ctx.playoffLabels.includes(String(r))) {
+    const k = r - ctx.N - 1;
+    if (k === 0) {
+      // Tiers are drawn from the standings now, and kept from here on.
+      const plan = swiss.planRoundRobin(active.map((x) => x.name), ctx.t.format?.playoffTier || 6,
+        { carryover: ctx.t.format?.playoffCarryover !== false, played: ctx.swissPlayed });
+      playoff = { format: 'roundrobin', tierSize: ctx.t.format?.playoffTier || 6, carryover: ctx.t.format?.playoffCarryover !== false, ...plan };
+      games = (plan.rounds[0] || []).map((g) => ({ teams: g.teams, tier: g.tier }));
+      notes = plan.tiers.map((tr) => `${tr.name}: ${tr.teams.join(', ')}`);
+      if (plan.carried.length) notes.push(`Carried over from the Swiss rounds: ${plan.carried.map((c) => c.teams.join(' v ')).join('; ')}.`);
+    } else {
+      games = (ctx.rr.rounds[k] || []).map((g) => ({ teams: g.teams, tier: g.tier }));
+    }
+  } else if (ctx.finals.includes(String(r))) {
+    if (!ctx.rrDone()) return { error: 'playoffs_unfinished' };
+    const skip = ctx.skip(r);
+    if (skip) return { error: 'no_final_needed', detail: skip };
+    const d = ctx.decision();
+    games = [{ teams: d.teams, tier: ctx.rr.tiers[0].name }];
+    notes = [d.advantaged
+      ? `Advantaged final: ${d.leader} finished a game ahead, so ${d.challenger} has to win twice.`
+      : 'One game decides the championship.'];
+  } else {
+    return { error: 'no_such_round' };
+  }
+  if (games.length > ctx.rooms.length) return { error: 'not_enough_rooms', need: games.length, have: ctx.rooms.length };
+  const byName = Object.fromEntries(ctx.rows.map((x) => [x.name, x]));
+  const seedOf = (name) => (seeds || ctx.st.seeds || []).indexOf(name) + 1 || null;
+  return {
+    round: String(r), label: ctx.label(r), kind: r <= ctx.N ? 'swiss' : 'playoff',
+    pairings: games.map((g, i) => ({ room: ctx.rooms[i].code, roomName: ctx.rooms[i].name, teams: g.teams, tier: g.tier,
+      records: g.teams.map((n) => (byName[n] ? swiss.record(byName[n]) : '')),
+      seeds: ctx.pf === 'single' && r > ctx.N ? g.teams.map(seedOf) : undefined })),
+    bye, notes, seeds, playoff, unsaved,
+  };
+}
+
+const swissStandingsView = (ctx) => ctx.rows.map((x, i) => ({ rank: i + 1, name: x.name, record: swiss.record(x),
+  wins: x.wins, losses: x.losses, ties: x.ties, games: x.games, byes: x.byes, pp20: x.pp20, oppWins: x.oppWins,
+  dropped: ctx.st.dropped.includes(x.name) }));
+
+app.get('/api/tournaments/:code/swiss', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.query.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const ctx = await swissContext(t);
+  const rounds = ctx.allLabels().map((r) => swissRoundView(ctx, r));
+  const next = rounds.find((r) => !r.published && !r.skip) || null;
+  const prev = next ? rounds.find((r) => r.round === String(Number(next.round) - 1)) : null;
+  const f = t.format || {};
+  // The round robin's tiers, each with its standings, once they are drawn.
+  const tiers = ctx.pf === 'roundrobin' && ctx.st.playoff ? ctx.st.playoff.tiers.map((tr) => ({
+    name: tr.name, standings: ctx.tierRank(tr).map((x, i) => ({ rank: i + 1, name: x.name, record: swiss.record(x), pp20: x.pp20 })),
+  })) : null;
+  const decision = ctx.decision();
+  res.json({
+    enabled: f.swiss === true, rounds: ctx.N, playoffFormat: ctx.pf, playoffSize: ctx.size,
+    playoffTier: f.playoffTier || 6, playoffCarryover: f.playoffCarryover !== false, championship: f.championship || 'none',
+    round1: f.swissRound1 || 'seeded',
+    teams: ctx.teams.length, suggestedRounds: swiss.suggestRounds(ctx.teams.length - ctx.st.dropped.length),
+    roomsNeeded: Math.floor((ctx.teams.length - ctx.st.dropped.length) / 2), rooms: ctx.rooms,
+    standings: swissStandingsView(ctx), schedule: rounds.filter((r) => r.published || !r.skip), next: next?.round || null,
+    nextReady: !next || next.round === '1' || !prev || prev.progress.saved === prev.progress.total,
+    seeds: ctx.st.seeds || null, dropped: ctx.st.dropped, tiers,
+    champion: decision && !decision.needed ? decision.champion : null,
+    finished: !next && rounds.length > 0,
+  });
+}));
+
+app.post('/api/tournaments/:code/swiss/preview', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  if (t.format?.swiss !== true) return res.status(400).json({ error: 'swiss_off' });
+  const ctx = await swissContext(t);
+  if (ctx.st.published[String(req.body?.round)]) return res.status(409).json({ error: 'already_published' });
+  const p = swissProposal(ctx, req.body?.round);
+  if (p.error) return res.status(400).json(p);
+  res.json(p);
+}));
+
+// Publish a round: the TD's pairings (as previewed, maybe swapped) become the
+// schedule's rows for that round, and every room is told.
+app.post('/api/tournaments/:code/swiss/publish', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  const b = req.body || {};
+  if (!directorOk(t, b.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  if (t.format?.swiss !== true) return res.status(400).json({ error: 'swiss_off' });
+  const ctx = await swissContext(t);
+  const round = String(b.round ?? '');
+  const r = Number(round);
+  if (!ctx.allLabels().includes(round)) return res.status(400).json({ error: 'no_such_round' });
+  if (ctx.st.published[round]) return res.status(409).json({ error: 'already_published' });
+  if (r > 1 && !ctx.st.published[String(r - 1)]) return res.status(400).json({ error: 'previous_not_published' });
+  if (ctx.skip(round)) return res.status(400).json({ error: 'no_final_needed', detail: ctx.skip(round) });
+  const known = new Set(ctx.teams.map((x) => x.name));
+  const roomCodes = new Set(ctx.rooms.map((x) => x.code));
+  const seen = new Set(), usedRooms = new Set();
+  const pairings = [];
+  for (const p of Array.isArray(b.pairings) ? b.pairings : []) {
+    const teams = (Array.isArray(p?.teams) ? p.teams : []).map(String);
+    const room = String(p?.room ?? '').toUpperCase();
+    if (teams.length !== 2 || teams[0] === teams[1]) return res.status(400).json({ error: 'bad_pairing', pairing: p });
+    for (const n of teams) {
+      if (!known.has(n)) return res.status(400).json({ error: 'unknown_team', team: n });
+      if (seen.has(n)) return res.status(400).json({ error: 'team_twice', team: n });
+      seen.add(n);
+    }
+    if (!roomCodes.has(room) || usedRooms.has(room)) return res.status(400).json({ error: 'bad_room', room });
+    usedRooms.add(room);
+    pairings.push({ room, teams, ...(p?.tier ? { tier: String(p.tier).slice(0, 40) } : {}) });
+  }
+  if (!pairings.length) return res.status(400).json({ error: 'no_pairings' });
+  const bye = r <= ctx.N && b.bye && known.has(String(b.bye)) && !seen.has(String(b.bye)) ? String(b.bye) : null;
+  // The first playoff round fixes the bracket's seeds or the round robin's
+  // tiers, worked out here again from the standings (never from the page).
+  let seeds = null, playoff = null;
+  if (r === ctx.N + 1) {
+    const p = swissProposal(ctx, round);
+    if (ctx.pf === 'single') {
+      seeds = (Array.isArray(b.seeds) ? b.seeds.map(String) : []).filter((n) => known.has(n));
+      if (seeds.length !== ctx.size) seeds = p.seeds || null;
+    }
+    if (ctx.pf === 'roundrobin') playoff = p.playoff || null;
+  }
+  store.publishSwissRound(t, round, { pairings, bye, notes: Array.isArray(b.notes) ? b.notes.map((x) => String(x).slice(0, 300)).slice(0, 50) : [], seeds, playoff });
+  // Swiss rounds and the playoffs as phases (round-robin tiers as divisions),
+  // so standings and reports split them; only when the director hasn't set
+  // phases up themselves.
+  if (r === ctx.N + 1) {
+    try {
+      const bucket = { kind: 't', code: t.code };
+      const cur = await artifacts.getStructure(bucket);
+      if (!cur?.phases?.length) {
+        const after = await swissContext(t);
+        const poRounds = [...after.playoffLabels, ...after.finals];
+        await artifacts.saveStructure(bucket, {
+          phases: [{ name: 'Prelims', rounds: ctx.swissLabels }, { name: 'Playoffs', rounds: poRounds }],
+          divisions: [...(cur?.divisions || []),
+            ...(playoff?.tiers || []).map((tr) => ({ phase: 'Playoffs', name: tr.name, teams: tr.teams }))],
+        });
+      }
+    } catch (e) { console.error('swiss structure failed:', e); }
+  }
+  for (const rc of t.roomCodes) io.to(rc).emit('tournament_changed', { code: t.code, round });
+  res.json({ ok: true, round: swissRoundView(await swissContext(t), round) });
+}));
+
+// Take a published round back (to pair it again), until a game in it starts.
+app.post('/api/tournaments/:code/swiss/withdraw', ah(async (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  const ctx = await swissContext(t);
+  const round = String(req.body?.round ?? '');
+  if (!ctx.st.published[round]) return res.status(404).json({ error: 'not_published' });
+  if (ctx.st.published[String(Number(round) + 1)]) return res.status(409).json({ error: 'later_round_published' });
+  const view = swissRoundView(ctx, round);
+  if (view.progress.started) return res.status(409).json({ error: 'started' });
+  store.withdrawSwissRound(t, round);
+  for (const rc of t.roomCodes) io.to(rc).emit('tournament_changed', { code: t.code, round });
+  res.json({ ok: true });
+}));
+
+// Teams out of the event: left out of rounds paired from now on.
+app.put('/api/tournaments/:code/swiss/dropped', (req, res) => {
+  const t = tournamentOr(res, req.params.code); if (!t) return;
+  if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
+  res.json({ dropped: store.setSwissDropped(t, req.body?.teams) });
+});
+
 // The director's read-only key for the tournament: see it, make one, make a
 // new one (the old stops working), switch it off, or change the question mode.
 app.get('/api/tournaments/:code/api-access', (req, res) => {
@@ -1752,7 +2064,7 @@ app.get('/api/tournaments/:code/api-access', (req, res) => {
 app.post('/api/tournaments/:code/api-access', (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
-  const r = store.setApiAccess(t, { action: req.body?.action, questions: req.body?.questions });
+  const r = store.setApiAccess(t, { action: req.body?.action, questions: req.body?.questions, room: req.body?.room });
   if (r.error) return res.status(400).json(r);
   for (const k of [...gameCache.keys()]) gameCache.delete(k);
   res.json(r);
@@ -1780,7 +2092,16 @@ app.get('/api/rooms/:code/sheet-setup', ah(async (req, res) => {
       .map((p) => p.round);
   } catch { /* no packets: rounds come from the schedule, or are typed */ }
   const roundList = [...new Set([...packetRounds, ...schedule.map((s) => s.round)])];
+  // The rounds this room has already saved a final game for, so setup offers
+  // the next scheduled one.
+  let playedRounds = [];
+  try {
+    playedRounds = [...new Set((await artifacts.readAllExports(bucket))
+      .filter((m) => String(m.qbj?._room ?? '').toUpperCase() === room.code && m.qbj?._inProgress !== true)
+      .map((m) => String(m.qbj?._round ?? '')))];
+  } catch { playedRounds = []; }
   res.json({
+    playedRounds,
     room: { code: room.code, name: room.name, tournamentCode: room.tournamentCode || null },
     tournament: t ? { code: t.code, name: t.name } : null,
     format: { tossupScheme: t?.format?.tossupScheme || '15/10/-5', hasBonuses: t ? t.format?.hasBonuses !== false : true },

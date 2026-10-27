@@ -37,6 +37,7 @@
           <li><a href="#before">Before the day</a></li>
           <li><a href="#day">On the day</a></li>
           <li><a href="#after">After the games</a></li>
+          <li><a href="#swiss">Swiss pairing and playoffs</a></li>
           <li><a href="#massinger">MASSINGER (pick/ban) tournaments</a></li>
           <li><a href="#shootout">Shootouts</a></li>
           <li><a href="#faq">Questions</a></li>
@@ -238,6 +239,40 @@
     </section>
 
     <!-- ============================== MASSINGER ============================== -->
+    <section class="panel" id="swiss">
+      <h3>Swiss pairing and playoffs</h3>
+      <p>Off unless you turn it on. Klaxon pairs each round from the standings, you check and publish it, and
+        rooms and players follow. After the last Swiss round, the top teams play a bracket.</p>
+      <ul>
+        <li><strong>Round 1</strong> is seeded by the roster's order: 1 v n/2+1 (or random).</li>
+        <li><strong>Later rounds</strong> pair neighbours in the standings (1 v 2, 3 v 4): wins first, then points per
+          20 tossups heard, then the opponents' wins. No rematches and no two teams of one school, unless nothing else
+          is left; the preview says when a rule had to bend.</li>
+        <li><strong>An odd field</strong>: the lowest-ranked team with the fewest byes sits out. A bye counts for nothing,
+          not a win and not a game.</li>
+        <li><strong>Playoffs</strong>, usually <em>round-robin tiers</em>: the top 6 (or 4–8) by Swiss standing, the
+          next 6, and so on, each tier playing a round robin; a remainder under 3 joins the bottom tier. With
+          <em>carryover</em>, Swiss games between tiermates count and aren't replayed. The top tier can end in a
+          final: one game, or an <em>advantaged final</em> (ACF): tied, one game; the leader a game ahead, the challenger
+          has to win twice; two or more ahead, no final.</li>
+        <li><strong>Or single elimination</strong>: the top 2, 4, 8 or 16, seeded 1 v 8, 4 v 5, 2 v 7, 3 v 6.</li>
+        <li>Swiss rounds become the Prelims phase of the stats and the playoffs the Playoffs phase, each tier a
+          division.</li>
+      </ul>
+
+      <h4>Director checklist</h4>
+      <ol class="help-checklist">
+        <li><strong>Turn it on</strong>: create the tournament (or <em>Edit settings</em>), tick <em>Swiss pairing</em>,
+          and set the number of Swiss rounds and the bracket size. About log2 of the field separates it (12 teams: 4).</li>
+        <li><strong>Upload the roster</strong> in seed order, and <strong>add rooms</strong>: half the field, rounded down.</li>
+        <li><strong>Each round</strong>, on the <em>Schedule</em> tab: <em>Pair</em>, swap teams or rooms if you need to,
+          then <em>Publish</em>. Moderators' setup shows the two teams; players get a link to their room.</li>
+        <li><strong>Next round</strong>: pair it once every game is saved (or pair now anyway). A published round can be
+          withdrawn until one of its games starts.</li>
+        <li><strong>A team leaves</strong>: <em>Drop out</em> in the standings keeps it out of later rounds.</li>
+      </ol>
+    </section>
+
     <section class="panel" id="massinger">
       <h3>MASSINGER (pick/ban) tournaments</h3>
       <p>Before each game, teams take turns. The first team bans. Then each team in turn bans and

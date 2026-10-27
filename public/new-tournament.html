@@ -24,9 +24,10 @@
   </header>
 
   <main class="stage">
+    <p id="signin-checking" class="hint hidden">Checking your account…</p>
     <section id="signin-gate" class="panel hidden">
       <h3>Log in to create a tournament</h3>
-      <p class="hint">Tournaments belong to an account, so you can run them from any device.</p>
+      <p class="hint">Tournaments belong to an account, so you can run them from any device. Log in first: the form opens once you're back.</p>
       <div class="row">
         <a class="btnlink" id="signin-gate-link" href="/account?return=/new-tournament">Log in or create an account</a>
       </div>
@@ -47,6 +48,14 @@
       <input id="t-date" type="date" />
       <label class="toggle"><input type="checkbox" id="t-listed" checked /> List on Klaxon's public
         tournament directory</label>
+    </section>
+
+    <section class="panel create-only">
+      <h3>Round packets <span class="optional">optional</span></h3>
+      <p class="hint"><code>.json</code> packets. File name = round label. <span class="teams-only">New rounds start hidden.</span><span class="shootout-only hidden">With one room, they're ready in this order.</span>
+        Convert <code>.docx</code> with the <a href="/yapp" target="_blank" rel="noopener">packet parser</a>.</p>
+      <input type="file" id="t-packet-files" accept=".json,application/json" multiple />
+      <p id="t-packet-note" class="hint" role="status"></p>
     </section>
 
     <section class="panel shootout-only hidden">
@@ -92,6 +101,7 @@
         <option value="10/-5">10 / −5 &nbsp;(no powers)</option>
       </select>
       <label class="toggle"><input type="checkbox" id="fmt-bonuses" checked /> Bonuses</label>
+      <p id="fmt-bonuses-note" class="hint hidden"></p>
       <label class="toggle"><input type="checkbox" id="fmt-player-scoresheet" checked /> Live scoresheet for players</label>
       <label class="toggle"><input type="checkbox" id="fmt-scoresheet-categories" /> Show categories on the scoresheet</label>
       <label class="toggle"><input type="checkbox" id="fmt-show-questions" /> Show question text after it's read</label>
@@ -104,6 +114,50 @@
         cycle and collect feedback</label>
       <label class="toggle"><input type="checkbox" id="fmt-buzz-points" checked /> Record every buzz, including ones
         that lost the race</label>
+
+      <!-- Swiss pairing: off by default; its settings appear once it's on. -->
+      <label class="toggle"><input type="checkbox" id="fmt-swiss" /> Swiss pairing: pair each round from the standings</label>
+      <div id="swiss-options" class="hidden">
+        <label class="select-label" for="fmt-swiss-rounds">Swiss rounds</label>
+        <input type="number" id="fmt-swiss-rounds" value="5" min="1" max="20" style="width:5em" />
+        <p class="hint">About log2 of the field is enough to separate it (12 teams: 4). The Schedule tab suggests a number once the roster is in.</p>
+        <label class="select-label" for="fmt-playoff-format">Then playoffs</label>
+        <select id="fmt-playoff-format">
+          <option value="roundrobin" selected>Round-robin tiers by standing (the usual)</option>
+          <option value="single">Single elimination</option>
+          <option value="none">No playoffs</option>
+        </select>
+        <div id="po-rr" class="po-opts">
+          <label class="select-label" for="fmt-playoff-tier">Teams per tier</label>
+          <select id="fmt-playoff-tier">
+            <option value="4">4</option><option value="5">5</option><option value="6" selected>6</option>
+            <option value="7">7</option><option value="8">8</option>
+          </select>
+          <p class="hint">Top 6, next 6, and so on; a remainder under 3 joins the bottom tier. Every tier plays a round robin.</p>
+          <label class="toggle"><input type="checkbox" id="fmt-playoff-carryover" checked /> Carryover: Swiss games between tiermates count and aren't replayed</label>
+          <label class="select-label" for="fmt-championship">Championship final (top tier)</label>
+          <select id="fmt-championship">
+            <option value="none">None: the top tier's winner is champion</option>
+            <option value="advantaged" selected>Advantaged final (ACF): tied, one game; a game ahead, the challenger must win twice</option>
+            <option value="single">One final game between the top two</option>
+          </select>
+        </div>
+        <div id="po-single" class="po-opts hidden">
+          <label class="select-label" for="fmt-playoff-size">Bracket of</label>
+          <select id="fmt-playoff-size">
+            <option value="2">Top 2 (a final)</option>
+            <option value="4" selected>Top 4</option>
+            <option value="8">Top 8</option>
+            <option value="16">Top 16</option>
+          </select>
+          <p class="hint">1 v 8, 4 v 5, 2 v 7, 3 v 6, seeded from the Swiss standings; winners meet in bracket order.</p>
+        </div>
+        <label class="select-label" for="fmt-swiss-round1">Round 1</label>
+        <select id="fmt-swiss-round1">
+          <option value="seeded" selected>Seeded by roster order (1 v n/2+1)</option>
+          <option value="random">Random</option>
+        </select>
+      </div>
 
       <!-- MASSINGER last: most tournaments don't use it, and its two settings
            only appear once it's switched on (see new-tournament.js). -->
@@ -120,13 +174,6 @@
         <input type="number" id="fmt-massinger-timer" value="30" min="0" max="300" style="width:6em" />
         <p class="hint">Needs a subcategory on every tossup. <a href="/massinger-help" target="_blank" rel="noopener">How MASSINGER works →</a></p>
       </div>
-    </section>
-
-    <section class="panel create-only">
-      <h3>Round packets <span class="optional">optional</span></h3>
-      <p class="hint"><code>.json</code> packets. File name = round label. <span class="teams-only">New rounds start hidden.</span><span class="shootout-only hidden">With one room, they're ready in this order.</span>
-        Convert <code>.docx</code> with the <a href="/yapp" target="_blank" rel="noopener">packet parser</a>.</p>
-      <input type="file" id="t-packet-files" accept=".json,application/json" multiple />
     </section>
 
     <section class="panel">

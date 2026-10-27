@@ -1,6 +1,7 @@
 import { api, remember, recall, readFileText, $, el } from './util.js';
 import { parseSpreadsheet, teamsFromRoster, mergeTeams, checkTeams, toStoredRoster, toYellowFruitQbj } from './roster-parse.js';
 import { renderApiAccess } from './api-access.js';
+import { mountSwiss } from './swiss-console.js';
 
 const code = location.pathname.split('/').pop().toUpperCase();
 $('#t-code').textContent = code;
@@ -43,7 +44,7 @@ const say = (t, ok = true) => { msg.textContent = t; msg.className = 'msg ' + (o
 // The console is organized into tabs (sections carry data-tab). Selection is
 // mirrored into the hash so a refresh stays on the same tab. Tab switching
 // uses style.display so the .hidden class (director gating) still wins.
-const TAB_NAMES = ['rooms', 'packets', 'results', 'stats', 'settings'];
+const TAB_NAMES = ['rooms', 'schedule', 'packets', 'results', 'stats', 'settings'];
 function initTabs() {
   const bar = $('#tabbar');
   const show = (name) => {
@@ -111,6 +112,14 @@ async function init() {
     }
     document.title = `${t.name || code} — Klaxon`;
     rememberVisit(t.name, t.date);
+    // Swiss pairing: the Schedule tab, for the director, only when it's on.
+    if (t.format?.swiss === true && directorToken) {
+      $('#tab-schedule').classList.remove('hidden');
+      $('#tabbar').classList.add('six');
+      mountSwiss($('#swiss-root'), { code, directorToken });
+    } else if ((location.hash || '') === '#schedule') {
+      document.querySelector('.tab[data-tab="rooms"]')?.click();
+    }
     // Merge any rooms that exist server-side but aren't in our local list
     // (created elsewhere): we can still offer the player link for those.
     const known = loadRooms();
@@ -2026,9 +2035,12 @@ async function loadApiAccess() {
       what: 'this tournament',
       links: (key) => [
         { label: 'Every room’s current game', url: `${origin}/api/tournaments/${code}/games?key=${key}` },
-        ...t.rooms.map((rc) => ({ label: t.roomNames?.[rc] || rc, url: `${origin}/api/rooms/${rc}/game?key=${key}` })),
       ],
-      act: async (action, questions) => (await api('POST', `/api/tournaments/${code}/api-access`, { directorToken, action, questions })).api,
+      roomKeys: {
+        rooms: t.rooms.map((rc) => ({ code: rc, name: t.roomNames?.[rc] || rc })),
+        url: (rc, key) => `${origin}/api/rooms/${rc}/game?key=${key}`,
+      },
+      act: async (action, questions, room) => (await api('POST', `/api/tournaments/${code}/api-access`, { directorToken, action, questions, room })).api,
     });
   } catch (e) {
     box.replaceChildren(el('p', { className: 'msg bad', textContent: `Could not load: ${e.message}` }));

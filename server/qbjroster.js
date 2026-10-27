@@ -68,7 +68,10 @@ export function parseQbjRoster(input) {
       }
       if (!players.length) continue;
       seen.add(name.toLowerCase());
-      teams.push({ name, players });
+      // seed: the order the roster lists the teams in (Swiss round 1 pairs by
+      // it); school: the registration, so two teams of one school can be kept
+      // apart.
+      teams.push({ name, players, seed: teams.length + 1, school: clean(reg?.name) || name });
       if (teams.length >= MAX_TEAMS) break;
     }
     if (teams.length >= MAX_TEAMS) break;

@@ -796,6 +796,13 @@ $('#copy-link').onclick = async (e) => {
 
 // ---- realtime state ----
 socket.on('state', applyState);
+// The director published (or withdrew) a round: read the schedule again.
+socket.on('tournament_changed', ({ code: tcode } = {}) => {
+  const tc = tcode || state.tournament?.code;
+  if (!tc) return;
+  state.tournament = null;
+  loadTournament(tc);
+});
 socket.on('buzzer_reset', () => {
   $('#buzz-feedback').textContent = '';
   state.stuckSentFor = null;
@@ -4170,8 +4177,10 @@ function renderTournament() {
     linksEl.append(el('a', { className: 'chip', href: t.links.discord, target: '_blank', rel: 'noopener noreferrer' }, 'Discord ↗'));
   }
   const myTeam = state.me?.team;
-  const next = myTeam && t.schedule.find((row) =>
-    row.room !== code && row.teams.some((tm) => tm.toLowerCase() === myTeam.toLowerCase()));
+  const mine = myTeam ? t.schedule.filter((row) => row.teams.some((tm) => tm.toLowerCase() === myTeam.toLowerCase())) : [];
+  // Swiss: rounds appear as they're paired, so the newest is where to go next.
+  const pick = t.format?.swiss ? mine.at(-1) : mine.find((row) => row.room !== code);
+  const next = pick && pick.room !== code ? pick : null;
   const nextEl = $('#t-next');
   nextEl.innerHTML = '';
   if (next) {

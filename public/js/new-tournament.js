@@ -43,7 +43,35 @@ $('#t-packet-files').addEventListener('change', (e) => {
   if (e.target.files && e.target.files.length && $('#t-def-modaq-mode').value === 'off') {
     $('#t-def-modaq-mode').value = 'full';
   }
+  matchBonusesToPackets(e.target.files);
 });
+
+// The packets say whether the tournament has bonuses: tick (or untick) the
+// Bonuses box to match, and say why, so the format isn't left saying the
+// opposite of what will be read. The box can still be changed by hand.
+async function matchBonusesToPackets(fileList) {
+  const files = [...(fileList || [])];
+  const note = $('#t-packet-note');
+  const bnote = $('#fmt-bonuses-note');
+  if (!files.length) { note.textContent = ''; bnote.classList.add('hidden'); return; }
+  let read = 0, withBonuses = 0, bad = 0;
+  for (const f of files) {
+    try {
+      const p = JSON.parse(await f.text());
+      if (!Array.isArray(p?.tossups)) { bad++; continue; }
+      read++;
+      if (Array.isArray(p.bonuses) && p.bonuses.length) withBonuses++;
+    } catch { bad++; }
+  }
+  if (!read) { note.textContent = bad ? 'None of these are packet JSON files.' : ''; return; }
+  const has = withBonuses > 0;
+  for (const id of ['#fmt-bonuses', '#so-bonuses']) { const box = $(id); if (box) box.checked = has; }
+  const what = withBonuses === read ? (read === 1 ? 'The packet has bonuses' : 'All the packets have bonuses')
+    : withBonuses ? `${withBonuses} of ${read} packets have bonuses` : (read === 1 ? 'The packet has no bonuses' : 'None of the packets have bonuses');
+  note.textContent = `${read} packet${read === 1 ? '' : 's'} read.${bad ? ` ${bad} file${bad === 1 ? " isn't" : "s aren't"} packet JSON.` : ''}`;
+  bnote.textContent = `${what}, so Bonuses is ${has ? 'on' : 'off'}.`;
+  bnote.classList.remove('hidden');
+}
 
 // MASSINGER's two settings are noise for the tournaments that don't run it, so
 // they only appear once the checkbox is on. They keep their values either way —
@@ -193,6 +221,16 @@ async function startEditing() {
     $('#fmt-question-lag').value = t.questionLag ?? 2;
     showLag();
     $('#fmt-buzz-points').checked = t.buzzPoints === true;
+    $('#fmt-swiss').checked = f.swiss === true;
+    $('#fmt-swiss-rounds').value = f.swissRounds ?? 5;
+    $('#fmt-playoff-format').value = f.playoffFormat || 'none';
+    $('#fmt-playoff-size').value = String(f.playoffSize || 4);
+    $('#fmt-playoff-tier').value = String(f.playoffTier || 6);
+    $('#fmt-playoff-carryover').checked = f.playoffCarryover !== false;
+    $('#fmt-championship').value = f.championship || 'none';
+    showPlayoffOptions();
+    $('#fmt-swiss-round1').value = f.swissRound1 || 'seeded';
+    showSwissOptions();
     $('#fmt-massinger').checked = f.massinger === true;
     $('#fmt-massinger-timer').value = f.massingerTimerSec ?? 30;
     $('#fmt-massinger-control').value = f.massingerControl || 'anyone';
@@ -274,7 +312,15 @@ function teamSettings() {
       tossupScheme: $('#fmt-scheme').value,
       massinger: $('#fmt-massinger').checked,
       massingerTimerSec: Number($('#fmt-massinger-timer').value),
-      massingerControl: $('#fmt-massinger-control').value
+      massingerControl: $('#fmt-massinger-control').value,
+      swiss: $('#fmt-swiss').checked,
+      swissRounds: Number($('#fmt-swiss-rounds').value),
+      playoffFormat: $('#fmt-playoff-format').value,
+      playoffSize: $('#fmt-playoff-format').value === 'single' ? Number($('#fmt-playoff-size').value) : 0,
+      playoffTier: Number($('#fmt-playoff-tier').value),
+      playoffCarryover: $('#fmt-playoff-carryover').checked,
+      championship: $('#fmt-championship').value,
+      swissRound1: $('#fmt-swiss-round1').value
     },
     playerScoresheet: $('#fmt-player-scoresheet').checked,
     scoresheetCategories: $('#fmt-scoresheet-categories').checked,
@@ -287,18 +333,22 @@ function teamSettings() {
 if (editCode) startEditing();
 else checkSignedIn();
 
-// Creating needs an account: without one, ask for a log-in first.
+// Creating needs an account: without one, the form stays shut and only the
+// log-in step shows. Logging in leaves this page, so anything typed into the
+// form first would be lost on the way.
 async function checkSignedIn() {
+  document.body.classList.add('signin-wait');
   const s = localStorage.getItem('bz_sessionToken');
   let ok = false;
   if (s) {
+    $('#signin-checking').classList.remove('hidden');
     try { await api('GET', `/api/accounts/me?sessionToken=${encodeURIComponent(s)}`); ok = true; } catch { /* signed out */ }
+    $('#signin-checking').classList.add('hidden');
   }
-  if (ok) return;
+  if (ok) { document.body.classList.remove('signin-wait'); return; }
   $('#signin-gate-link').href = '/account?return=' + encodeURIComponent(location.pathname + location.search);
   $('#signin-gate').classList.remove('hidden');
   $('#create-tournament').disabled = true;
-  say('Log in to create a tournament.', false);
 }
 
 $('#create-tournament').addEventListener('click', async () => {
@@ -402,3 +452,16 @@ async function createShootout() {
   say(`Shootout ${r.code} created with room ${room.code}.${note} Opening director console…`);
   location.href = '/t/' + r.code;
 }
+
+// Swiss pairing's settings only matter once it's on.
+function showSwissOptions() { $('#swiss-options').classList.toggle('hidden', !$('#fmt-swiss').checked); }
+$('#fmt-swiss').addEventListener('change', showSwissOptions);
+
+// Each kind of playoff shows only its own settings.
+function showPlayoffOptions() {
+  const v = $('#fmt-playoff-format').value;
+  $('#po-rr').classList.toggle('hidden', v !== 'roundrobin');
+  $('#po-single').classList.toggle('hidden', v !== 'single');
+}
+$('#fmt-playoff-format').addEventListener('change', showPlayoffOptions);
+showPlayoffOptions();

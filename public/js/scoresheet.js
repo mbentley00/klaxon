@@ -61,6 +61,14 @@ socket.on('state', (s) => {
   if (view === 'game' && sheet) renderProtests();
 });
 socket.on('staff_revoked', () => deny('You are no longer staff in this room.'));
+// A round was published (Swiss): on the setup screen, read the schedule again.
+socket.on('tournament_changed', async () => {
+  if (view !== 'setup') return;
+  try {
+    setup = await api('GET', `/api/rooms/${code}/sheet-setup?token=${encodeURIComponent(staffToken())}&sessionToken=${encodeURIComponent(session())}`);
+    showSetup();
+  } catch { /* keep what's on screen */ }
+});
 // The other scorekeeper's device changed the game.
 socket.on('sheet_state', ({ sheet: next }) => {
   // Mid-way through typing in a cell: apply it once that's done.
@@ -152,10 +160,13 @@ function showSetup() {
     ...rounds.map((r) => el('option', { value: r, textContent: /^\d+$/.test(r) ? `Round ${r}` : r })),
     ...(setup.anyRound || !rounds.length ? [el('option', { value: OTHER, textContent: rounds.length ? 'Another round…' : 'Type the round…' })] : []),
   );
-  // The round after the one this room last scored, else the first.
+  // The first round the schedule has this room playing that it hasn't saved
+  // yet; else the round after the one this room last scored; else the first.
+  const played = new Set(setup.playedRounds || []);
+  const scheduled = (setup.schedule || []).map((x) => x.round).find((r) => !played.has(r) && rounds.includes(r));
   const last = recall('sheetLastRound:' + code);
   const at = rounds.indexOf(last);
-  sel.value = at >= 0 && rounds[at + 1] ? rounds[at + 1] : (rounds[0] ?? OTHER);
+  sel.value = scheduled ?? (at >= 0 && rounds[at + 1] ? rounds[at + 1] : (rounds[0] ?? OTHER));
   onRound();
 }
 $('#setup-round').onchange = onRound;

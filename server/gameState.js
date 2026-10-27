@@ -31,6 +31,17 @@ export function buildGameState({ qbj, packet = null, buzzLog = [], room = {}, st
   const live = qbj._inProgress === true;
   const onNow = num(qbj._currentQuestion);
   const hidden = (n) => mode === 'after' && live && onNow != null && n >= onNow;
+  // A live MODAQ game carries a cycle for every question in the packet, read
+  // or not. Only what the room has reached goes out: questions up to the one
+  // being read, and tossups heard counted up to the last one finished. (The
+  // rest of the packet must never leave through here, whatever the mode.)
+  const allQs = Array.isArray(qbj.match_questions) ? qbj.match_questions : [];
+  // Live without a current question (an older client): stop after the last
+  // question anything happened on.
+  const lastActive = allQs.reduce((at, q, i) => ((q?.buzzes?.length || q?.bonus) ? i + 1 : at), 0);
+  const reached = live ? (onNow != null ? Math.min(allQs.length, Math.max(0, onNow)) : lastActive) : allQs.length;
+  const heard = live ? (onNow != null ? Math.max(0, Math.min(reached, onNow - 1)) : reached)
+    : Math.min(allQs.length || Infinity, num(qbj.tossups_read) ?? allQs.length);
   const teams = (qbj.match_teams || []).map((mt) => mt?.team?.name ?? '?');
   const tIndex = (name) => teams.indexOf(name);
   const tally = teams.map(() => ({ tossup: 0, bonus: 0, heard: 0 }));
@@ -39,12 +50,31 @@ export function buildGameState({ qbj, packet = null, buzzLog = [], room = {}, st
     if (!players[ti].has(name)) players[ti].set(name, { name, tuh: 0, answers: {}, points: 0 });
     return players[ti].get(name);
   };
+  // Tossups heard from the lineups, cycle by cycle, up to `heard` (MODAQ's
+  // own count covers the whole packet in a live game); a game without
+  // lineups falls back to MODAQ's count, capped.
   (qbj.match_teams || []).forEach((mt, ti) => {
-    for (const mp of mt.match_players || []) line(ti, mp?.player?.name ?? '?').tuh = num(mp?.tossups_heard) ?? 0;
+    const lineups = (Array.isArray(mt.lineups) ? mt.lineups : [])
+      .map((l) => ({ from: num(l?.first_question) ?? 1, players: (l?.players || []).map((p) => p?.name ?? '') }))
+      .sort((a, b) => a.from - b.from);
+    for (const mp of mt.match_players || []) {
+      const name = mp?.player?.name ?? '?';
+      let tuh = 0;
+      if (lineups.length) {
+        for (let c = 1; c <= heard; c++) {
+          let on = null;
+          for (const l of lineups) if (l.from <= c) on = l;
+          if (on?.players.includes(name)) tuh++;
+        }
+      } else {
+        tuh = Math.min(num(mp?.tossups_heard) ?? 0, heard);
+      }
+      line(ti, name).tuh = tuh;
+    }
   });
 
   const running = teams.map(() => 0);
-  const questions = (qbj.match_questions || []).map((q, i) => {
+  const questions = allQs.slice(0, reached).map((q, i) => {
     const tuNum = num(q?.replacement_tossup_question?.question_number ?? q?.tossup_question?.question_number);
     const tu = tuNum != null ? packet?.tossups?.[tuNum - 1] : null;
     const tuWords = tu ? words(tu.question) : null;
@@ -112,8 +142,9 @@ export function buildGameState({ qbj, packet = null, buzzLog = [], room = {}, st
     inProgress: qbj._inProgress === true,
     currentQuestion: num(qbj._currentQuestion),
     regulation: num(qbj._regulationTossupCount) ?? 20,
-    tossupsRead: num(qbj.tossups_read) ?? questions.length,
-    overtimeTossupsRead: num(qbj.overtime_tossups_read) ?? 0,
+    // Finished tossups (in a live game, the ones before the one being read).
+    tossupsRead: heard,
+    overtimeTossupsRead: Math.max(0, heard - (num(qbj._regulationTossupCount) ?? 20)),
     startedAt: num(qbj._startedAt),
     status,
     packet: packet ? { tossups: packet.tossups?.length ?? 0, bonuses: packet.bonuses?.length ?? 0 } : null,
