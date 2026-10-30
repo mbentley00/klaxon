@@ -8,3 +8,4 @@ dist/
 data/
 # Downloaded at image build (see Dockerfile)
 public/models/
+public/vendor/mos/

@@ -8,6 +8,8 @@ COPY . .
 # Fetched at build time so its 40 MB stays out of git. A failed download only
 # means readers fall back to the public copy (see MODAQ's VoskSpeechEngine).
 RUN mkdir -p public/models &&     (wget -q -O public/models/vosk-model-small-en-us-0.15.tar.gz       https://ccoreilly.github.io/vosk-browser/models/vosk-model-small-en-us-0.15.tar.gz      || rm -f public/models/vosk-model-small-en-us-0.15.tar.gz)
+# The mic check's quality model and its runtime (scripts/fetch-mic-model.mjs); same deal.
+RUN node scripts/fetch-mic-model.mjs
 ENV NODE_ENV=production
 EXPOSE 3000
 CMD ["node", "server/index.js"]

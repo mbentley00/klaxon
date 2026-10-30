@@ -6,7 +6,8 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "dev": "node --watch server/index.js"
+    "dev": "node --watch server/index.js",
+    "fetch-mic-model": "node scripts/fetch-mic-model.mjs"
   },
   "engines": {
     "node": ">=20"
