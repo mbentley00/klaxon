@@ -18,11 +18,23 @@ export function renderApiAccess(container, { api, links, act, what = 'this room'
       if (done) container.querySelector('.msg').textContent = done;
     } catch (e) { say(`Could not do that: ${e.message}`, false); }
   };
-  const modeSel = el('select', { className: 'api-mode' },
-    el('option', { value: 'after', textContent: 'After each question is finished (safe for a stream or a public page)' }),
-    el('option', { value: 'live', textContent: 'As each question is read (staff tools only)' }));
-  modeSel.value = api?.questions || 'after';
-  const modeLabel = el('label', { className: 'select-label' }, 'Question text', modeSel);
+  // Two radios, so each choice reads in full (a dropdown cut the long one off).
+  const groupName = `api-mode-${Math.random().toString(36).slice(2, 8)}`;
+  const radio = (value, words, note) => {
+    const input = el('input', { type: 'radio', name: groupName, value, checked: (api?.questions || 'after') === value });
+    return el('label', { className: 'api-mode-choice' }, input,
+      el('span', {}, el('span', { textContent: words }), el('span', { className: 'hint', textContent: ` ${note}` })));
+  };
+  const modeBox = el('fieldset', { className: 'api-mode' },
+    el('legend', { textContent: 'Question text' }),
+    radio('after', 'Expose question text up until the current question being read in this room.', 'Safe for a stream or a public page.'),
+    radio('live', 'Expose question text up to and including the current question being read in this room.', 'Shows the answer while it’s being read: staff tools only.'),
+    el('p', { className: 'hint', textContent: 'Questions this room hasn’t reached are never exposed.' }));
+  const modeSel = {
+    get value() { return modeBox.querySelector('input:checked')?.value || 'after'; },
+    set onchange(fn) { for (const r of modeBox.querySelectorAll('input')) r.onchange = fn; },
+  };
+  const modeLabel = modeBox;
   const docs = el('a', { href: '/game-api', target: '_blank', rel: 'noopener', textContent: 'What the data contains' });
 
   if (!api?.enabled) {

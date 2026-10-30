@@ -40,12 +40,16 @@
       <p>Making a new key, or turning the API off, stops the old key at once.</p>
 
       <h4>Question text</h4>
-      <p>The key's owner chooses when question text is included:</p>
+      <p>The key's owner chooses how far question text goes. Both are counted in each room separately, and
+        questions a room hasn't reached are never exposed:</p>
       <ul>
-        <li><strong>After each question is finished</strong> (the default): the tossup being read, and its
-          bonus, come without text until the room moves on. Safe for a stream or a public page.</li>
-        <li><strong>As each question is read:</strong> everything read so far. For staff tools only.</li>
+        <li><strong>Expose question text up until the current question being read in this room</strong> (the
+          default): the tossup being read, and its bonus, come without text until the room moves on. Safe for a
+          stream or a public page.</li>
+        <li><strong>Expose question text up to and including the current question being read in this room:</strong>
+          the question being read comes with its text and answer. For staff tools only.</li>
       </ul>
+      <p class="hint">Scores, player lines and who buzzed on what come through in both.</p>
 
       <h4>Calls</h4>
       <p>Pass the key as <code>?key=…</code> or as a header, <code>Authorization: Bearer …</code>.
