@@ -27,6 +27,8 @@ const sessionToken = localStorage.getItem('bz_sessionToken') || '';
 const msg = $('#ro-msg');
 const say = (t, ok = true) => { msg.textContent = t; msg.className = 'msg ' + (ok ? 'good' : 'bad'); };
 
+// Whether the game data API key state has loaded (staff, outside a tournament); render shows it for MODAQ rooms
+let apiReady = false;
 if (!(staffToken || sessionToken)) {
   $('#ro-denied').classList.remove('hidden');
 } else {
@@ -56,7 +58,8 @@ if (!(staffToken || sessionToken)) {
   async function showApi() {
     try {
       const access = await apiAct('get');
-      $('#ro-api-panel').classList.remove('hidden');
+      apiReady = true;
+      $('#ro-api-panel').classList.toggle('hidden', !lastState?.settings?.modaqMode);
       renderApiAccess($('#ro-api'), {
         api: access,
         links: (key) => [{ label: 'This room’s current game', url: `${location.origin}/api/rooms/${code}/game?key=${key}` }],
@@ -84,7 +87,11 @@ if (!(staffToken || sessionToken)) {
   $('#ro-evening').onchange = (e) => set({ eveningTotals: e.target.checked });
 }
 
+let lastState = null;
 function render(s) {
+  lastState = s;
+  // The game data API reads MODAQ's (or the scoresheet's) game: nothing to offer a plain buzzer room
+  $('#ro-api-panel').classList.toggle('hidden', !apiReady || !s.settings?.modaqMode);
   const st = s.settings || {};
   const queue = !!st.queueMode;
   const withdraw = !!st.allowWithdraw;

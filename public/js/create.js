@@ -12,6 +12,9 @@ window.addEventListener('pageshow', (e) => {
 });
 
 const useModaq = $('#use-modaq');
+// Klaxon's own scoresheet (/r/CODE/score) files the same game MODAQ does, so it's a
+// kind of MODAQ room. It scores two teams, so not for a shootout.
+const useSheet = $('#use-sheet');
 const queue = $('#opt-queue');
 const withdraw = $('#opt-withdraw');
 const typed = $('#opt-typed');
@@ -45,6 +48,7 @@ useModaq.addEventListener('change', chatDefault);
 // can't promise what the room won't do.
 function sync() {
   const shootout = format() === 'shootout';
+  $('#use-sheet-row').classList.toggle('hidden', shootout || !useModaq.checked);
   $('#opt-withdraw-row').classList.toggle('hidden', !queue.checked);
   $('#opt-cooldown-row').classList.toggle('hidden', !(queue.checked && withdraw.checked));
   // MODAQ clears the buzzer when you rule on the answer.
@@ -58,7 +62,7 @@ function sync() {
 }
 
 for (const r of document.querySelectorAll('input[name=format]')) r.addEventListener('change', preset);
-for (const c of [useModaq, queue, withdraw, typed]) c.addEventListener('change', sync);
+for (const c of [useModaq, useSheet, queue, withdraw, typed]) c.addEventListener('change', sync);
 
 // A MODAQ game is kept on the server (see /games), but a logged-out reader
 // can only get it back from this browser: say so before the room exists.
@@ -78,11 +82,13 @@ $('#create-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const shootout = format() === 'shootout';
   const modaq = useModaq.checked;
+  const sheet = modaq && !shootout && useSheet.checked;
   const q = queue.checked;
   try {
     const settings = {
       modaqMode: modaq,
-      modaqLite: modaq,
+      modaqLite: modaq && !sheet,
+      scoreSheet: sheet,
       shootout,
       queueMode: q,
       allowWithdraw: q && withdraw.checked,
@@ -111,7 +117,7 @@ $('#create-form').addEventListener('submit', async (e) => {
       remember('createdRooms', JSON.stringify(made.slice(0, 8)));
     } catch { remember('createdRooms', JSON.stringify([{ code: r.code, at: Date.now() }])); }
     say(`Created room ${r.code}. Opening as reader…`);
-    location.href = modaq ? `/modaq?room=${r.code}` : `/r/${r.code}?role=reader`;
+    location.href = sheet ? `/r/${r.code}/score` : modaq ? `/modaq?room=${r.code}` : `/r/${r.code}?role=reader`;
   } catch (err) {
     say(err.message === 'too_many_rooms'
       ? "You've made 3 rooms in the last few minutes. Wait a few minutes, or reuse one."

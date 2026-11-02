@@ -33,6 +33,8 @@ if (urlRole || urlToken) {
 const state = { me: null, role: null, snapshot: null, tournament: null, offlineIds: null, soundedWave: null,
   // Whether the socket is up. A page on a phone spends half its life suspended.
   connected: false };
+// Whether this room's game data API key state has loaded (staff, outside a tournament)
+let roomApiReady = false;
 
 // ---- connect ----
 const socket = io({ transports: ['websocket', 'polling'], reconnection: true });
@@ -615,7 +617,7 @@ function enterStage(snapshot) {
   $('#share-panel').classList.toggle('hidden', !staff);
   if (staff) buildShareLinks();
   // Outside a tournament the reader can hand out a read-only game data key.
-  $('#opt-api').classList.toggle('hidden', !staff || !!snapshot?.tournamentCode);
+  // (renderOptions shows it, for MODAQ and scoresheet rooms, once the key state has loaded)
   if (staff && !snapshot?.tournamentCode) showRoomApi();
   // Compact view is staff-only: a reader squeezing the window beside Zoom + the
   // question doc wants just the buzzer and the buzz order. Restore their choice.
@@ -3726,6 +3728,8 @@ function renderOptions(s) {
   $('#opt-withdraw-row').classList.toggle('hidden', !s.settings?.queueMode);
   // Auto-clear only applies in lock-to-first mode (server ignores it otherwise).
   $('#opt-autoclear').closest('.toggle').classList.toggle('hidden', !!s.settings?.queueMode);
+  // The game data API reads MODAQ's (or the scoresheet's) game, so a plain buzzer room has nothing to offer.
+  $('#opt-api').classList.toggle('hidden', !s.settings?.modaqMode || !!s.tournamentCode || !roomApiReady);
   const modaq = $('#opt-modaq-mode');
   if (modaq) modaq.value = s.settings?.scoreSheet ? 'sheet' : s.settings?.modaqLite ? 'lite' : s.settings?.modaqMode ? 'full' : 'off';
   // Typed answers, and the locked-answer rule that only means anything when
@@ -4282,5 +4286,7 @@ async function showRoomApi() {
       links: (key) => [{ label: 'This room’s current game', url: `${location.origin}/api/rooms/${code}/game?key=${key}` }],
       act: roomApiAct,
     });
-  } catch { $('#opt-api').classList.add('hidden'); }
+    roomApiReady = true;
+    $('#opt-api').classList.toggle('hidden', !state.snapshot?.settings?.modaqMode);
+  } catch { roomApiReady = false; $('#opt-api').classList.add('hidden'); }
 }

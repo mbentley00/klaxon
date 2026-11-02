@@ -1878,3 +1878,6 @@ body.signin-wait main > :not(#signin-gate):not(#signin-checking) { display: none
 .api-mode .hint { margin: 0; }
 .api-mode-choice input[type=radio] { width: auto; min-width: 0; padding: 0; height: auto; }
 .api-mode-choice > span { flex: 1 1 auto; min-width: 0; font-size: .92rem; }
+
+/* Create page: the scoresheet choice sits under "Use MODAQ", as a kind of it. */
+.create-sheet { margin-left: 1.8em; }
