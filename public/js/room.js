@@ -37,7 +37,13 @@ const state = { me: null, role: null, snapshot: null, tournament: null, offlineI
 let roomApiReady = false;
 
 // ---- connect ----
-const socket = io({ transports: ['websocket', 'polling'], reconnection: true });
+// After a restart or a stall every page reconnects at once, and each one
+// costs the server a join. Spread them: the first try lands anywhere in
+// 0-3 s instead of 0.5-1.5 s, and later tries back off to 15 s.
+const socket = io({
+  transports: ['websocket', 'polling'], reconnection: true,
+  reconnectionDelay: 1500, reconnectionDelayMax: 15000, randomizationFactor: 1,
+});
 const clock = new ClockSync(socket);
 
 const connPill = $('#conn');
@@ -4140,12 +4146,21 @@ window.addEventListener('pointerdown', maybeAskNotify);
 window.addEventListener('keydown', maybeAskNotify);
 
 // ---- tournament strip ----
+// Called on every state update. Only the first one fetches anything: the
+// room-status poll starts here and keeps its own 30-second clock. (It used to
+// be started from renderTournament, so every buzz in the room sent one or two
+// GETs from every open room page.)
+let tournamentLoading = null;
 async function loadTournament(tcode) {
   if (state.tournament?.code === tcode) return renderTournament();
+  if (tournamentLoading === tcode) return;   // the first fetch is still on its way
+  tournamentLoading = tcode;
   try {
     state.tournament = await api('GET', `/api/tournaments/${tcode}`);
     renderTournament();
+    pollRoomStatus();
   } catch { /* tournament may not exist yet */ }
+  finally { if (tournamentLoading === tcode) tournamentLoading = null; }
 }
 function renderTournament() {
   const t = state.tournament;
@@ -4162,7 +4177,6 @@ function renderTournament() {
   crumb.classList.remove('hidden');
   $('#crumb-new').classList.add('hidden');
   $('#t-all').href = allHref;
-  pollRoomStatus();
   // The code reads as a link, so make it one: a director on this device lands
   // in their console, everyone else in the tournament's public stats.
   const tcodeEl = $('#t-code');

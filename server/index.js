@@ -607,16 +607,16 @@ app.get('/api/tournaments/:code', (req, res) => {
 // --- reader accounts (optional) --------------------------------------------
 // A few new accounts per address per hour: plenty for a household or a club
 // signing up together, and slow for a script.
-app.post('/api/accounts/register', (req, res) => {
+app.post('/api/accounts/register', ah(async (req, res) => {
   const ip = callerIp(req);
   if (!isLocalCaller(req) && recentHits(recentRegisters, ip, REGISTER_WINDOW_MS) >= REGISTER_PER_WINDOW) {
     return res.status(429).json({ error: 'too_many_accounts' });
   }
-  const r = accounts.register(req.body?.username, req.body?.password, req.body?.displayName, req.body?.email);
+  const r = await accounts.register(req.body?.username, req.body?.password, req.body?.displayName, req.body?.email);
   if (r.error) return res.status(400).json({ error: r.error });
   noteHit(recentRegisters, ip);
   res.json({ sessionToken: r.sessionToken, account: accounts.publicAccount(r.account) });
-});
+}));
 
 // Wrong passwords are counted per address and per username, and each one
 // waits LOGIN_FAIL_DELAY_MS before it's answered. Past either limit, signing
@@ -630,7 +630,7 @@ app.post('/api/accounts/login', ah(async (req, res) => {
       (name && recentHits(loginFailsByName, name, LOGIN_WINDOW_MS) >= LOGIN_FAILS_PER_NAME))) {
     return res.status(429).json({ error: 'too_many_attempts' });
   }
-  const r = accounts.login(req.body?.username, req.body?.password);
+  const r = await accounts.login(req.body?.username, req.body?.password);
   if (r.error) {
     if (!local) {
       noteHit(loginFailsByIp, ip);
@@ -1371,7 +1371,7 @@ app.post('/api/tournaments/:code/exports/:filename/correct', ah(async (req, res)
     startedAt: meta.startedAt, accounts: [], events: 1, continues: true };
   // ...and the tournament's stats file for it.
   room.correctionOf = { tournament: t.code, room: gameRoom, round: gameRound, filename: req.params.filename };
-  store.persistNow();
+  store.persistNow(room);
   res.json({ code: room.code, readerToken: room.readerToken });
 }));
 
@@ -2306,10 +2306,16 @@ app.post('/api/rooms/:code/tiebreaker-used', ah(async (req, res) => {
 // Copy a room's full buzz log up to its tournament, when the director asked for
 // buzz points. A no-op otherwise: a room outside a tournament, or one whose
 // director didn't opt in, keeps its log to itself.
-async function flushBuzzPoints(room) {
+async function flushBuzzPoints(room, { onlyIfChanged = false } = {}) {
   if (!room.tournamentCode || !store.buzzPointsOn(room)) return;
+  // The whole log is rewritten each time; skip it when the log hasn't changed
+  // since (store bumps buzzLogRev on every change; undefined after a restart
+  // means "not written yet this run", which writes).
+  const key = room.buzzLogRev ?? 0;
+  if (onlyIfChanged && room._buzzPointsFlushed != null && key === room._buzzPointsFlushed) return;
   await artifacts.saveRoomBuzzPoints({ kind: 't', code: room.tournamentCode },
     room.code, store.fullBuzzExport(room));
+  room._buzzPointsFlushed = key;
 }
 
 app.post('/api/rooms/:code/export', ah(async (req, res) => {
@@ -2340,7 +2346,41 @@ setInterval(() => {
   }
 }, Number(process.env.KLAXON_GAME_END_SWEEP_MS) || 15000).unref();
 
+// A live game's stats file is rewritten at most every LIVE_EXPORT_MS per room:
+// MODAQ sends a change every few seconds while reading, and each write
+// re-reads, re-parses and pretty-prints the game, re-checks the roster and
+// rewrites the buzz log. Where the game is (room.liveGame, the status board)
+// still updates at once; a final save always goes straight to disk.
+const LIVE_EXPORT_MS = Number(process.env.KLAXON_LIVE_EXPORT_MS) || 3000;
+const liveExports = new Map(); // room code -> { timer, room, args }
+function syncRoomExportLive(room, args) {
+  if (args.inProgress !== true) return syncRoomExport(room, args);
+  if (Number(args.regulation) > 0) room.regulation = Number(args.regulation);
+  store.noteLiveGame(room, { round: args.round, inProgress: true, currentQuestion: args.currentQuestion });
+  const pending = liveExports.get(room.code);
+  if (pending) { pending.args = args; return Promise.resolve(); }
+  const entry = { room, args, timer: null };
+  entry.timer = setTimeout(() => {
+    liveExports.delete(room.code);
+    syncRoomExport(entry.room, entry.args).catch((e) => console.error('live export failed:', e));
+  }, LIVE_EXPORT_MS);
+  entry.timer.unref?.();
+  liveExports.set(room.code, entry);
+  return Promise.resolve();
+}
+// Shutdown and the nightly backup: write whatever is waiting.
+function flushLiveExports() {
+  const all = [...liveExports.values()];
+  liveExports.clear();
+  return Promise.allSettled(all.map((e) => { clearTimeout(e.timer); return syncRoomExport(e.room, e.args); }));
+}
+
 async function syncRoomExport(room, { round, qbj, inProgress, currentQuestion, regulation }) {
+  // A final save makes any live one still waiting out of date.
+  if (inProgress !== true) {
+    const pending = liveExports.get(room.code);
+    if (pending) { clearTimeout(pending.timer); liveExports.delete(room.code); }
+  }
   if (Number(regulation) > 0) room.regulation = Number(regulation);
   store.noteLiveGame(room, { round, inProgress, currentQuestion });
   const saved = await artifacts.saveExport(store.bucketForRoom(room), {
@@ -2350,13 +2390,20 @@ async function syncRoomExport(room, { round, qbj, inProgress, currentQuestion, r
     at: Date.now()
   });
   // Anyone the moderator added mid-game joins the shared roster (best-effort).
+  // Only when the game's players changed: it reads and parses the roster.
   try {
     const match = typeof qbj === 'string' ? JSON.parse(qbj) : qbj;
-    await artifacts.addMatchPlayersToRoster(store.bucketForRoom(room), match);
+    const names = (match?.match_teams || [])
+      .map((mt) => `${mt?.team?.name ?? ''}:${(mt?.match_players || []).map((mp) => mp?.player?.name ?? '').join(',')}`)
+      .join('|');
+    if (names !== room._rosterSyncedNames) {
+      await artifacts.addMatchPlayersToRoster(store.bucketForRoom(room), match);
+      room._rosterSyncedNames = names;
+    }
   } catch { /* roster sync must never fail the export */ }
   // The room's buzz log goes up with the game, so a room that is closed or
   // restarted later doesn't take its buzz points with it.
-  await flushBuzzPoints(room).catch(() => { /* never fail the export */ });
+  await flushBuzzPoints(room, { onlyIfChanged: true }).catch(() => { /* never fail the export */ });
   // A final sync may complete its round; auto-release the next packet if the
   // director opted in (best-effort).
   if (inProgress !== true) {
@@ -2469,7 +2516,39 @@ app.put('/api/rooms/:code/errata', ah(async (req, res) => {
 
 const REPORT_PAGES = new Set(PAGES.map((p) => p.key));
 
+// Stats are computed at most once per STATS_TTL_MS per tournament, and again
+// at once when a game is saved: the pages refresh themselves every 20-60 s in
+// every tab that has one open, and a projected standings at a big event is
+// many tabs. Room names and settings come along within the TTL.
+const STATS_TTL_MS = 10_000;
+const statsCache = new Map(); // tournament code -> { version, at, data, pages: Map(page -> html) }
 async function statsFor(code) {
+  const key = String(code || '').toUpperCase();
+  const t0 = store.getTournament(code);
+  const version = artifacts.exportsVersion({ kind: 't', code: t0 ? t0.code : key });
+  const hit = statsCache.get(key);
+  if (hit && hit.version === version && Date.now() - hit.at < STATS_TTL_MS) return hit.data;
+  const data = await computeStatsFor(code);
+  if (statsCache.size > 50) statsCache.clear();
+  if (data) statsCache.set(key, { version, at: Date.now(), data, pages: new Map() });
+  else statsCache.delete(key);
+  return data;
+}
+// One served report page, rendered once per stats computation.
+function servedReport(code, page, data) {
+  const c = statsCache.get(String(code || '').toUpperCase());
+  const cached = c?.data === data ? c.pages.get(page) : null;
+  if (cached) return cached;
+  // Served pages are the live view: auto-refresh so a projected standings stays
+  // current as moderators sync (the Live Games page refreshes faster). The
+  // downloaded zip keeps the pristine YF format.
+  const html = renderReport(page, data.stats, servedLink)
+    .replace('<HEAD>', `<HEAD>\n<meta http-equiv="refresh" content="${page === 'live' ? 20 : 60}">`);
+  if (c?.data === data) c.pages.set(page, html);
+  return html;
+}
+
+async function computeStatsFor(code) {
   const t = store.getTournament(code);
   const upper = String(code || '').toUpperCase();
   const bucket = { kind: 't', code: t ? t.code : upper };
@@ -2504,6 +2583,7 @@ app.put('/api/tournaments/:code/structure', ah(async (req, res) => {
   const t = tournamentOr(res, req.params.code); if (!t) return;
   if (!directorOk(t, req.body?.directorToken)) return res.status(403).json({ error: 'forbidden' });
   const saved = await artifacts.saveStructure({ kind: 't', code: t.code }, req.body?.structure || {});
+  statsCache.delete(t.code);   // the director looks at the result straight away
   res.json({ structure: saved });
 }));
 
@@ -2540,12 +2620,7 @@ app.get('/t/:code/stats/:page', ah(async (req, res) => {
   if (!REPORT_PAGES.has(page)) return res.status(404).send('Unknown report page.');
   const data = await statsFor(req.params.code);
   if (!data) return res.status(404).send('Tournament not found.');
-  // Served pages are the live view: auto-refresh so a projected standings stays
-  // current as moderators sync (the Live Games page refreshes faster). The
-  // downloaded zip keeps the pristine YF format.
-  const html = renderReport(page, data.stats, servedLink)
-    .replace('<HEAD>', `<HEAD>\n<meta http-equiv="refresh" content="${page === 'live' ? 20 : 60}">`);
-  res.type('html').send(html);
+  res.type('html').send(servedReport(req.params.code, page, data));
 }));
 
 // --- Buzzpoints (director-only: answer lines are in it) ---------------------
@@ -2709,9 +2784,7 @@ app.get('/s/:token/:page', ah(async (req, res) => {
   if (!REPORT_PAGES.has(page)) return res.status(404).send('Unknown report page.');
   const data = await statsFor(hit.t.code);
   if (!data) return res.status(404).send(SHARE_GONE);
-  const html = renderReport(page, data.stats, servedLink)
-    .replace('<HEAD>', `<HEAD>\n<meta http-equiv="refresh" content="${page === 'live' ? 20 : 60}">`);
-  res.type('html').send(html);
+  res.type('html').send(servedReport(hit.t.code, page, data));
 }));
 
 // Download the whole report as a YellowFruit-style set of HTML files, zipped.
@@ -2876,6 +2949,7 @@ app.post('/api/games/:id/reopen', ah(async (req, res) => {
     events: 1,
     continues: true
   };
+  store.persistNow(room);
   res.json({ code: room.code, readerToken: room.readerToken, coReaderToken: room.coReaderToken });
 }));
 
@@ -2996,11 +3070,37 @@ function afterMassingerChange(room) {
 }
 
 function emitState(room) {
+  // Whatever changed the board is saved with the room (see store.flushRooms).
+  store.touchRoom(room);
   // A new head of the queue has the floor (see answers.followQueue); the
   // moderator's live answer card follows it.
   if (answers.followQueue(room)) {
     emitToStaff(room.code, 'answers', answers.forStaff(room, (id) => store.memberName(room, id)));
   }
+  // At most one broadcast per room per STATE_EMIT_MS. The first goes at once
+  // (a lone buzz or ruling is never held back); anything more inside the
+  // window is folded into one more broadcast at its end, built from the room
+  // as it is then. A burst used to send the whole state to the whole room once
+  // per change: N people reconnecting after a restart was N^2 sends, at the
+  // moment the server could least afford them. Buzzes, rulings and resets have
+  // their own immediate events; this is the full picture that follows them.
+  const pending = stateEmits.get(room.code);
+  if (pending) { pending.again = true; return; }
+  sendState(room);
+  const entry = { again: false, timer: null };
+  const tick = () => {
+    if (!entry.again) { stateEmits.delete(room.code); return; }
+    entry.again = false;
+    sendState(store.getRoom(room.code) || room);
+    entry.timer = setTimeout(tick, STATE_EMIT_MS);
+  };
+  entry.timer = setTimeout(tick, STATE_EMIT_MS);
+  stateEmits.set(room.code, entry);
+}
+const STATE_EMIT_MS = Number(process.env.KLAXON_STATE_EMIT_MS) || 50;
+const stateEmits = new Map(); // room code -> { again, timer } while a window is open
+
+function sendState(room) {
   io.to(room.code).emit('state', store.publicState(room));
   // The moderator's recent-buzzes list rides along, to staff only: it names
   // who cleared what. Every buzzer change ends in an emitState, so this is
@@ -3066,6 +3166,32 @@ function emitToStaff(roomCode, event, payload, except = null) {
 // here (and on disk) so a reload on another device, or a second moderator,
 // gets the same game at the same question. Loaded from disk on first use
 // after a restart. STAFF ONLY — it contains the packet.
+// The shared game on disk is for a restart or a reload after one: everything
+// live reads room.modaqState. It is the whole game with its packet, and
+// MODAQ sends one every few seconds while reading, so it's written at most
+// every MODAQ_STATE_WRITE_MS per room (shutdown writes what's waiting).
+const MODAQ_STATE_WRITE_MS = 2000;
+const modaqStateWrites = new Map(); // room code -> { timer, room }
+function saveModaqStateSoon(room) {
+  if (modaqStateWrites.has(room.code)) return;
+  const entry = { room, timer: null };
+  entry.timer = setTimeout(() => {
+    modaqStateWrites.delete(room.code);
+    writeModaqState(room);
+  }, MODAQ_STATE_WRITE_MS);
+  entry.timer.unref?.();
+  modaqStateWrites.set(room.code, entry);
+}
+function writeModaqState(room) {
+  if (!room.modaqState) return Promise.resolve();
+  return artifacts.saveModaqState(room.code, room.modaqState).catch((e) => console.error('modaq state save failed:', e));
+}
+function flushModaqStates() {
+  const all = [...modaqStateWrites.values()];
+  modaqStateWrites.clear();
+  return Promise.allSettled(all.map((e) => { clearTimeout(e.timer); return writeModaqState(e.room); }));
+}
+
 async function modaqStateFor(room) {
   if (room.modaqState === undefined) {
     const st = (await artifacts.getModaqState(room.code)) || null;
@@ -3105,6 +3231,13 @@ const isAdmin = (account) => envAdmin(account) || account?.admin === true;
 
 const archiveTimers = new Map(); // room code -> pending write
 const ARCHIVE_WRITE_MS = 2000;
+// Shutdown: write the games still waiting (a deploy would lose the last 2 s).
+function flushArchives() {
+  const codes = [...archiveTimers.keys()];
+  for (const c of codes) clearTimeout(archiveTimers.get(c));
+  archiveTimers.clear();
+  return Promise.allSettled(codes.map((c) => { const r = store.getRoom(c); return r ? writeArchive(r) : null; }));
+}
 
 function countBuzzes(match) {
   return (Array.isArray(match?.match_questions) ? match.match_questions : [])
@@ -3155,6 +3288,7 @@ function trackArchive(room, match, accountId) {
     }
   }
   room.archiveQbj = match;
+  store.touchRoom(room);
   if (!archiveTimers.has(room.code)) {
     archiveTimers.set(room.code, setTimeout(() => {
       archiveTimers.delete(room.code);
@@ -4046,7 +4180,7 @@ io.on('connection', (socket) => {
         // with a separate POST /export (see syncRoomExport).
         if (payload.qbj && payload.export && typeof payload.export === 'object' && !room.correctionOf) {
           if (roundAllowed(ctx.staffRounds ?? ALL_ROUNDS, payload.export.round)) {
-            syncRoomExport(room, {
+            syncRoomExportLive(room, {
               round: payload.export.round, qbj: payload.qbj, inProgress: payload.export.inProgress === true,
               currentQuestion: payload.currentQuestion, regulation: payload.export.regulation
             }).catch((e) => console.error('live export failed:', e));
@@ -4156,7 +4290,7 @@ io.on('connection', (socket) => {
           ...(json && ref ? { packetRef: ref } : {})
         };
         room.modaqState = next;
-        artifacts.saveModaqState(room.code, next).catch((e) => console.error('modaq state save failed:', e));
+        saveModaqStateSoon(room);
         // The pusher already holds this packet.
         if (ref) ctx.knownPacket = ref;
         // Only staff sockets cleared for packets hear the game itself. A
@@ -4393,6 +4527,7 @@ io.on('connection', (socket) => {
       answer: row?.answer
     });
     if (res.error) return ack?.({ error: res.error });
+    store.touchRoom(room);
     emitToStaff(room.code, 'playtest_feedback', { cycle: Number(payload?.cycle), name: actor.name });
     ack?.({ ok: true, mine: playtest.mine(room, ctx.playerId) });
   });
@@ -4503,36 +4638,73 @@ io.on('connection', (socket) => {
 
 // Rehydrate tournaments and room identities from the data volume BEFORE
 // accepting traffic, so director consoles and reader links survive restarts.
-// Rooms older than the TTL are dropped at boot (they age out of rooms.json on
-// its next rewrite), except a tournament's; tournaments are kept indefinitely —
-// their stats live on the same volume.
+// Rooms older than the TTL are not loaded (at boot or later), except a
+// tournament's; tournaments are kept indefinitely — their stats live on the
+// same volume. Rooms idle for a few days stay on disk until someone asks for
+// one (store.DORMANT_MS).
 const ROOM_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+// A tournament's rooms live as long as the tournament does: its reader links
+// and director corrections still point at them long after the event.
+const roomExpired = (r) =>
+  Date.now() - (r.createdAt || 0) >= ROOM_TTL_MS && !(r.tournamentCode && store.getTournament(r.tournamentCode));
 try {
   const [tournamentRecords, roomRecords] = await Promise.all([
     artifacts.loadTournamentRecords(),
     artifacts.loadRoomRecords()
   ]);
-  // A tournament's rooms live as long as the tournament does: its reader links
-  // and director corrections still point at them long after the event.
-  const tournamentCodes = new Set(tournamentRecords.map((t) => t?.code));
-  const freshRooms = roomRecords.filter((r) =>
-    Date.now() - (r.createdAt || 0) < ROOM_TTL_MS || (r.tournamentCode && tournamentCodes.has(r.tournamentCode)));
-  store.hydrate({ tournaments: tournamentRecords, rooms: freshRooms });
-  if (tournamentRecords.length || freshRooms.length) {
-    console.log(`rehydrated ${tournamentRecords.length} tournament(s), ${freshRooms.length} room(s)`);
-  }
+  store.hydrate({ tournaments: tournamentRecords });
+  const freshRooms = roomRecords.filter((r) => !roomExpired(r));
+  store.hydrate({ rooms: freshRooms });
+  console.log(`rehydrated ${tournamentRecords.length} tournament(s), ${freshRooms.length} room(s) on record, ` +
+    `${store.activity().rooms} in memory`);
 } catch (e) {
   console.error('rehydration failed (continuing with empty store):', e);
 }
+store.setPersistence({
+  tournament: (record) => artifacts.saveTournamentRecord(record).catch((e) => console.error('persist tournament failed:', e)),
+  room: (record) => artifacts.saveRoomRecord(record).catch((e) => console.error('persist room failed:', e)),
+  loadRoom: (code) => {
+    const r = artifacts.loadRoomRecordSync(code);
+    return r && !roomExpired(r) ? r : null;
+  }
+});
+// Idle rooms leave memory (they come back on first use).
+setInterval(() => {
+  const n = store.evictDormantRooms();
+  if (n) console.log(`unloaded ${n} idle room(s)`);
+}, 60 * 60_000).unref();
 // Games scored before the archive existed are copied into it once, owned by
 // their room's tokens where the room is still on record.
 artifacts.importLegacyGames((code, at) => {
-  const room = store.getRoom(code);
+  const room = store.peekRoom(code);
   return room && ownGame(room, { at }) ? roomTokenHashes(room) : [];
 }).then((n) => { if (n) console.log(`archived ${n} earlier game(s)`); })
   .then(() => disownReusedCodes())
   .then(() => backfillArchiveSummaries())
+  .then(() => hideArchiveDuplicates())
   .catch((e) => console.error('legacy game import failed:', e));
+
+// Once: hide the copies the old boot-time import made of games the archive
+// already had (see artifacts.findArchiveDuplicates). Hidden, not deleted —
+// `hidden` on the meta says which game it copies, and clearing it brings the
+// entry back.
+async function hideArchiveDuplicates() {
+  if (artifacts.duplicatesHiddenDone()) return;
+  const dupes = artifacts.findArchiveDuplicates(await artifacts.listArchivedGames({ includeHidden: true }));
+  const at = new Date().toISOString();
+  let n = 0;
+  for (const d of dupes) {
+    await withArchiveLock(d.id, async () => {
+      const meta = await artifacts.getArchivedMeta(d.id);
+      if (!meta || meta.hidden) return;
+      meta.hidden = { reason: 'duplicate', of: d.of, at };
+      await artifacts.saveArchivedMeta(meta);
+      n++;
+    });
+  }
+  await artifacts.markDuplicatesHidden({ at, hidden: n, ids: dupes });
+  if (n) console.log(`hid ${n} duplicate archived game(s)`);
+}
 
 // Games imported before that check: if the room now holding the code was
 // created after the game was saved, its links were credited with a game that
@@ -4541,7 +4713,7 @@ async function disownReusedCodes() {
   let n = 0;
   for (const m of await artifacts.listArchivedGames()) {
     if (!m.legacy || !m.owners?.tokens?.length) continue;
-    const room = store.getRoom(m.room);
+    const room = store.peekRoom(m.room);
     if (!room || ownGame(room, { at: m.startedAt })) continue;
     const wrong = new Set(roomTokenHashes(room));
     if (!m.owners.tokens.some((h) => wrong.has(h))) continue;
@@ -4579,11 +4751,6 @@ async function backfillArchiveSummaries() {
   }
   if (n) console.log(`summarized ${n} archived game(s)`);
 }
-store.setPersistence({
-  tournament: (record) => artifacts.saveTournamentRecord(record).catch((e) => console.error('persist tournament failed:', e)),
-  rooms: (records) => artifacts.saveRoomRecords(records).catch((e) => console.error('persist rooms failed:', e))
-});
-
 httpServer.listen(PORT, () => {
   console.log(`buzz-online listening on http://localhost:${PORT}`);
 });
@@ -4601,7 +4768,11 @@ const watchdog = (emailEnabled() || process.env.KLAXON_WATCHDOG === '1')
 // A nightly copy of the data volume off Fly's disks (see backup.js).
 startBackups({
   dataDir: artifacts.DATA_DIR,
-  beforeBackup: () => { store.persistNow(); return artifacts.flushRecordWrites(); },
+  beforeBackup: async () => {
+    await Promise.allSettled([flushLiveExports(), flushModaqStates()]);
+    store.persistNow();
+    return artifacts.flushRecordWrites();
+  },
   onFailure: (e) => {
     if (!emailEnabled()) return;
     sendEmail({
@@ -4624,6 +4795,11 @@ async function shutdown(sig) {
   const leave = () => { watchdog?.cleanExit(); process.exit(0); };
   setTimeout(leave, 3500).unref();   // Fly's kill_timeout is 5 s: never be the reason it waits
   try {
+    // Room records first (what a restart needs most), alongside the writes
+    // held back to spare the CPU: live stats files, shared games, the game
+    // archive. Those can mark rooms changed, so the records go once more.
+    store.persistNow();
+    await Promise.allSettled([flushLiveExports(), flushModaqStates(), flushArchives(), artifacts.flushRecordWrites()]);
     store.persistNow();
     await artifacts.flushRecordWrites();
   } catch (e) {

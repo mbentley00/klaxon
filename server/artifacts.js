@@ -17,6 +17,7 @@
 // ---------------------------------------------------------------------------
 
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 // The same split the /yapp page does, so a packet broken up here and one broken
 // up in the browser produce identical files. It lives under public/ because the
@@ -523,44 +524,43 @@ export async function saveExport(bucket, { room, round, qbj, inProgress = false,
     // game as a W/L yet. Final is sticky per matchup: once this room+round has
     // been saved as final for the same teams, post-game review edits (which sync
     // from an earlier question index) must not flip it back to "live".
-    if (inProgress && !(await wasFinalizedForSameTeams(file, obj))) {
+    const prev = await previousExport(file);
+    const same = prev && prev.teams === matchTeamNames(obj);
+    if (inProgress && !(same && !prev.inProgress)) {
       obj._inProgress = true;
       // Which question the reader is on, plus when the game first went live, so
       // the live stats view can show progress and elapsed time.
       if (Number.isFinite(currentQuestion) && currentQuestion > 0) obj._currentQuestion = currentQuestion;
-      obj._startedAt = (await liveStartedAt(file, obj)) ?? at ?? Date.now();
+      obj._startedAt = (same && prev.inProgress && Number.isFinite(prev.startedAt) ? prev.startedAt : null) ?? at ?? Date.now();
     }
   }
   const text = JSON.stringify(obj, null, 2);
   await writeAtomic(file, text);
+  noteExport(file, obj);
+  exportWritten(file, text);
   return { filename };
+}
+
+// What the last save of each stats file said about its game, so a live
+// re-sync doesn't read and parse the file twice to find out (see saveExport).
+// Kept for files written this run; anything else is read once.
+const exportNotes = new Map(); // file -> { teams, inProgress, startedAt } | null
+function noteExport(file, obj) {
+  exportNotes.set(file, obj && typeof obj === 'object'
+    ? { teams: matchTeamNames(obj), inProgress: obj._inProgress === true, startedAt: obj._startedAt }
+    : null);
+}
+async function previousExport(file) {
+  if (exportNotes.has(file)) return exportNotes.get(file);
+  const text = await readTextOrNull(file);
+  let obj = null;
+  if (text != null) { try { obj = JSON.parse(text); } catch { obj = null; } }
+  noteExport(file, obj);
+  return exportNotes.get(file);
 }
 
 const matchTeamNames = (m) =>
   (Array.isArray(m?.match_teams) ? m.match_teams : []).map((mt) => mt?.team?.name || '?').sort().join(' ');
-
-// Keep the original "went live" time across re-syncs of the same game, so the
-// live view can show how long a game has been running. A different matchup in
-// the same slot starts its own clock.
-async function liveStartedAt(file, incoming) {
-  const text = await readTextOrNull(file);
-  if (text == null) return null;
-  try {
-    const prev = JSON.parse(text);
-    if (prev._inProgress !== true || matchTeamNames(prev) !== matchTeamNames(incoming)) return null;
-    return Number.isFinite(prev._startedAt) ? prev._startedAt : null;
-  } catch { return null; }
-}
-
-async function wasFinalizedForSameTeams(file, incoming) {
-  const text = await readTextOrNull(file);
-  if (text == null) return false;
-  try {
-    const prev = JSON.parse(text);
-    // Different teams = a new game reusing the slot; its status starts fresh.
-    return prev._inProgress !== true && matchTeamNames(prev) === matchTeamNames(incoming);
-  } catch { return false; }
-}
 
 // --- protest rulings ---------------------------------------------------------
 // The director's ruling on a protest lives inside the match's stored QBJ under
@@ -614,7 +614,9 @@ export async function setProtestRuling(bucket, { room, round, type, question, pa
     };
   }
   obj._protestRulings = rulings;
-  await writeAtomic(file, JSON.stringify(obj, null, 2));
+  const written = JSON.stringify(obj, null, 2);
+  await writeAtomic(file, written);
+  exportWritten(file, written);
   return rulings[key] ?? { cleared: true };
 }
 
@@ -642,55 +644,138 @@ export async function setExportRemoved(bucket, filename, remove) {
   else delete removed[f];
   await ensureDir(path.join(bucketDir(bucket), 'exports'));
   await writeAtomic(path.join(bucketDir(bucket), 'exports', '_removed.json'), JSON.stringify(removed, null, 2));
+  removedWritten(bucket, removed);
   return { filename: f, removed: !!remove };
 }
 
-// Read and parse every exported match in a bucket — used to hand the TD all the
-// stats in one download. Games the director removed are left out unless
-// asked for.
-export async function readAllExports(bucket, { includeRemoved = false } = {}) {
-  const removed = includeRemoved ? {} : await getRemoved(bucket);
-  const dir = path.join(bucketDir(bucket), 'exports');
-  try {
-    const files = await fs.readdir(dir);
-    const out = [];
-    for (const f of files.sort()) {
+// --- the parsed games, cached ----------------------------------------------
+// Every stats page, the live board, the director console's lists and the
+// downloads all want every game in a tournament, parsed. They used to read
+// and JSON.parse every file on every request: stats pages refresh themselves
+// every 20-60 s, a console polls four of these every 15 s, so a few open tabs
+// at a big event spent the machine's whole CPU budget re-parsing the same
+// unchanged files. Now each tournament's games are read once and kept, and a
+// save updates just its own entry.
+//
+// The objects handed out are SHARED and deep-frozen: a reader that tries to
+// change one throws (modules are strict) instead of quietly changing every
+// later reader's copy. Copy before editing (structuredClone).
+//
+// At most EXPORT_CACHE_MAX tournaments are kept, and one nobody has asked for
+// in EXPORT_CACHE_IDLE_MS is dropped: parsed games are several times their
+// size on disk.
+const EXPORT_CACHE_MAX = 8;
+const EXPORT_CACHE_IDLE_MS = 15 * 60_000;
+const exportCaches = new Map(); // exports dir -> { entries: Map(filename -> entry), removed, usedAt }
+const exportLoads = new Map();  // exports dir -> promise of a load in progress
+const exportGen = new Map();    // exports dir -> writes so far (a load that raced one isn't kept)
+
+function deepFreeze(o) {
+  if (o && typeof o === 'object' && !Object.isFrozen(o)) {
+    Object.freeze(o);
+    for (const v of Object.values(o)) deepFreeze(v);
+  }
+  return o;
+}
+const exportsDirOf = (bucket) => path.join(bucketDir(bucket), 'exports');
+
+async function exportCache(bucket) {
+  const dir = exportsDirOf(bucket);
+  const hit = exportCaches.get(dir);
+  if (hit) { hit.usedAt = Date.now(); return hit; }
+  if (exportLoads.has(dir)) return exportLoads.get(dir);
+  const gen = exportGen.get(dir) || 0;
+  const load = (async () => {
+    const entries = new Map();
+    let files = [];
+    try { files = await fs.readdir(dir); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    for (const f of files) {
       if (!f.endsWith('.qbj')) continue;
       const text = await readTextOrNull(path.join(dir, f));
       if (text == null) continue;
-      let qbj;
-      try { qbj = JSON.parse(text); } catch { continue; }
-      if (isRemoved(removed, f, qbj)) continue;
-      const stat = await fs.stat(path.join(dir, f));
-      out.push({ filename: f, savedAt: stat.mtimeMs, qbj });
+      let qbj = null;
+      try { qbj = deepFreeze(JSON.parse(text)); } catch { /* listed, but not a game */ }
+      const stat = await fs.stat(path.join(dir, f)).catch(() => null);
+      entries.set(f, { filename: f, size: stat?.size ?? text.length, savedAt: stat?.mtimeMs ?? Date.now(), qbj });
     }
-    return out;
-  } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+    const cache = { entries, removed: await getRemoved(bucket), usedAt: Date.now() };
+    // A save landed while this was reading: what it read may be older. Hand it
+    // to whoever asked, but let the next reader load afresh.
+    if ((exportGen.get(dir) || 0) === gen) {
+      exportCaches.set(dir, cache);
+      trimExportCaches();
+    }
+    return cache;
+  })();
+  exportLoads.set(dir, load);
+  try { return await load; } finally { exportLoads.delete(dir); }
+}
+
+function trimExportCaches() {
+  const now = Date.now();
+  for (const [dir, c] of exportCaches) if (now - c.usedAt > EXPORT_CACHE_IDLE_MS) exportCaches.delete(dir);
+  while (exportCaches.size > EXPORT_CACHE_MAX) {
+    let oldest = null;
+    for (const [dir, c] of exportCaches) if (!oldest || c.usedAt < oldest[1].usedAt) oldest = [dir, c];
+    exportCaches.delete(oldest[0]);
+  }
+}
+setInterval(trimExportCaches, 60_000).unref();
+
+// A stats file was just written with `text`: its cache entry follows.
+function exportWritten(file, text) {
+  const dir = path.dirname(file);
+  exportGen.set(dir, (exportGen.get(dir) || 0) + 1);
+  const c = exportCaches.get(dir);
+  if (!c) return;
+  let qbj = null;
+  try { qbj = deepFreeze(JSON.parse(text)); } catch { /* not a game */ }
+  const f = path.basename(file);
+  c.entries.set(f, { filename: f, size: Buffer.byteLength(text), savedAt: Date.now(), qbj });
+}
+function removedWritten(bucket, removed) {
+  const dir = exportsDirOf(bucket);
+  exportGen.set(dir, (exportGen.get(dir) || 0) + 1);
+  const c = exportCaches.get(dir);
+  if (c) c.removed = removed;
+}
+
+// Every exported match in a bucket, parsed — for stats, the live board,
+// downloads. Games the director removed are left out unless asked for.
+// The qbj objects are shared and frozen (see above).
+export async function readAllExports(bucket, { includeRemoved = false } = {}) {
+  const c = await exportCache(bucket);
+  const out = [];
+  for (const e of c.entries.values()) {
+    if (!e.qbj) continue;
+    if (!includeRemoved && isRemoved(c.removed, e.filename, e.qbj)) continue;
+    out.push({ filename: e.filename, savedAt: e.savedAt, qbj: e.qbj });
+  }
+  return out.sort((a, b) => (a.filename < b.filename ? -1 : a.filename > b.filename ? 1 : 0));
 }
 
 // Every match file, removed ones flagged (the director's list shows them, to
 // restore), with the teams so a row can say which game it is.
 export async function listExports(bucket) {
-  const dir = path.join(bucketDir(bucket), 'exports');
-  try {
-    const files = await fs.readdir(dir);
-    const removed = await getRemoved(bucket);
-    const out = [];
-    for (const f of files) {
-      if (!f.endsWith('.qbj')) continue;
-      const stat = await fs.stat(path.join(dir, f));
-      let qbj = null;
-      try { qbj = JSON.parse(await readTextOrNull(path.join(dir, f))); } catch { /* listed anyway */ }
-      out.push({
-        filename: f, size: stat.size, savedAt: stat.mtimeMs,
-        teams: qbj ? (qbj.match_teams || []).map((mt) => mt?.team?.name).filter(Boolean) : [],
-        round: qbj?._round != null ? String(qbj._round) : null,
-        removed: qbj ? isRemoved(removed, f, qbj) : false
-      });
-    }
-    out.sort((a, b) => b.savedAt - a.savedAt);
-    return out;
-  } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+  const c = await exportCache(bucket);
+  const out = [];
+  for (const e of c.entries.values()) {
+    const qbj = e.qbj;
+    out.push({
+      filename: e.filename, size: e.size, savedAt: e.savedAt,
+      teams: qbj ? (qbj.match_teams || []).map((mt) => mt?.team?.name).filter(Boolean) : [],
+      round: qbj?._round != null ? String(qbj._round) : null,
+      removed: qbj ? isRemoved(c.removed, e.filename, qbj) : false
+    });
+  }
+  out.sort((a, b) => b.savedAt - a.savedAt);
+  return out;
+}
+
+// How many saves this bucket's games have had (this run): a key for anything
+// computed from them (see statsFor in index.js).
+export function exportsVersion(bucket) {
+  return exportGen.get(exportsDirOf(bucket)) || 0;
 }
 
 export async function getExport(bucket, filename) {
@@ -766,7 +851,7 @@ export async function saveStructure(bucket, structure) {
 // records and room identities are written here so a restart/deploy doesn't
 // orphan every director console and reader link. Live buzz state is NOT saved.
 
-// Chained per tournament like rooms.json below: two quick changes (a schedule
+// Chained per tournament like room records below: two quick changes (a schedule
 // save, then auto-release) must land in order, or the older record wins.
 const tournamentWrites = new Map(); // code -> promise of its last write
 export function saveTournamentRecord(record) {
@@ -783,7 +868,7 @@ export function saveTournamentRecord(record) {
 // Every tournament and room record write still in flight, for a clean
 // shutdown: a deploy stops the process, and a half-done write is a lost change.
 export function flushRecordWrites() {
-  return Promise.allSettled([roomWrites, ...tournamentWrites.values()]);
+  return Promise.allSettled([...roomWrites.values(), ...tournamentWrites.values()]);
 }
 
 export async function loadTournamentRecords() {
@@ -801,22 +886,77 @@ export async function loadTournamentRecords() {
   return out;
 }
 
-// Every room mutation rewrites the whole file, and several can land in the same
-// tick (loading a roster, then picking its teams). Chain them so the last call
-// is the last write — concurrent writes could otherwise finish out of order and
-// leave the older snapshot on disk.
-let roomWrites = Promise.resolve();
-export function saveRoomRecords(records) {
-  roomWrites = roomWrites
+// Each room is its own record, r/CODE/room.json (see store.flushRooms). Writes
+// to one room are chained so the last call is the last write — two in flight
+// could otherwise finish out of order and leave the older record on disk.
+const roomRecordFile = (code) => path.join(bucketDir({ kind: 'r', code }), 'room.json');
+const roomWrites = new Map(); // code -> promise of its last write
+export function saveRoomRecord(record) {
+  const text = JSON.stringify(record);
+  const next = (roomWrites.get(record.code) || Promise.resolve())
     .catch(() => { /* a failed write must not stall later ones */ })
-    .then(() => writeAtomic(path.join(DATA_DIR, 'rooms.json'), JSON.stringify(records)));
-  return roomWrites;
+    .then(() => writeAtomic(roomRecordFile(record.code), text));
+  roomWrites.set(record.code, next);
+  next.finally(() => { if (roomWrites.get(record.code) === next) roomWrites.delete(record.code); }).catch(() => {});
+  return next;
 }
 
+// One room's record, read synchronously: store.getRoom loads a dormant room on
+// first use and has to answer there and then. A single room is a few hundred
+// KB at most.
+export function loadRoomRecordSync(code) {
+  try { return JSON.parse(fsSync.readFileSync(roomRecordFile(code), 'utf8')); }
+  catch { return null; }
+}
+
+// Every room record, at boot. Rooms used to live in one rooms.json; the first
+// boot after the change writes each of them out to its own file and leaves
+// rooms.json where it is (frozen from then on), so a rollback to the old code
+// still boots with every room. rooms.json.migrated marks it done.
 export async function loadRoomRecords() {
-  const text = await readTextOrNull(path.join(DATA_DIR, 'rooms.json'));
-  if (!text) return [];
-  try { const a = JSON.parse(text); return Array.isArray(a) ? a : []; } catch { return []; }
+  await migrateRoomsJson();
+  const dir = path.join(DATA_DIR, 'r');
+  let codes;
+  try { codes = await fs.readdir(dir); }
+  catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+  const out = [];
+  for (const code of codes) {
+    if (!CODE_RE.test(code)) continue;
+    const text = await readTextOrNull(path.join(dir, code, 'room.json'));
+    if (!text) continue; // artifacts only (an old shared game, filed games): no record
+    try { out.push(JSON.parse(text)); } catch { /* skip a corrupt record */ }
+  }
+  return out;
+}
+
+async function migrateRoomsJson() {
+  const legacy = path.join(DATA_DIR, 'rooms.json');
+  // Half-written temp copies a killed process left behind.
+  try {
+    for (const f of await fs.readdir(DATA_DIR)) {
+      if (f.startsWith('rooms.json.tmp-')) await fs.rm(path.join(DATA_DIR, f), { force: true });
+    }
+  } catch { /* no data dir yet */ }
+  const done = `${legacy}.migrated`;
+  if (await readTextOrNull(done) != null) return;
+  const text = await readTextOrNull(legacy);
+  if (text == null) return;
+  let records = [];
+  try { const a = JSON.parse(text); if (Array.isArray(a)) records = a; } catch { /* corrupt: set aside below */ }
+  let moved = 0;
+  const valid = records.filter((r) => r?.code && CODE_RE.test(r.code));
+  // A few at a time: this runs before the server listens, and one at a time
+  // a few hundred rooms is long enough to fail a deploy's health check.
+  for (let i = 0; i < valid.length; i += 16) {
+    await Promise.all(valid.slice(i, i + 16).map(async (r) => {
+      // A per-room file already there is newer than anything in rooms.json.
+      if (fsSync.existsSync(roomRecordFile(r.code))) return;
+      await writeAtomic(roomRecordFile(r.code), JSON.stringify(r));
+      moved++;
+    }));
+  }
+  await writeAtomic(done, JSON.stringify({ at: new Date().toISOString(), rooms: records.length, moved }));
+  console.log(`rooms.json: moved ${moved} of ${records.length} room(s) to r/CODE/room.json`);
 }
 
 // --- reader memberships (account approval per tournament) ------------------
@@ -950,7 +1090,9 @@ export async function getArchivedBody(id) {
 }
 
 // Every meta, newest first.
-export async function listArchivedGames() {
+// Hidden games (see findArchiveDuplicates) are left out of listings unless
+// asked for; they still open by id, so no link to one breaks.
+export async function listArchivedGames({ includeHidden = false } = {}) {
   let files;
   try { files = await fs.readdir(archiveDir()); }
   catch (e) { if (e.code === 'ENOENT') return []; throw e; }
@@ -959,7 +1101,10 @@ export async function listArchivedGames() {
     if (!f.endsWith('.meta.json')) continue;
     const text = await readTextOrNull(path.join(archiveDir(), f));
     if (text == null) continue;
-    try { out.push(JSON.parse(text)); } catch { /* skip a bad file */ }
+    let meta;
+    try { meta = JSON.parse(text); } catch { continue; /* skip a bad file */ }
+    if (meta?.hidden && !includeHidden) continue;
+    out.push(meta);
   }
   // When the game was played, not when it was last touched: reopening an old
   // game to fix a score mustn't move it to the top.
@@ -972,17 +1117,61 @@ export async function listArchivedGames() {
 // only through a room that may be long gone. Copied in once (an id that's
 // already archived is skipped), owned by the room's tokens when the room is
 // still on record.
+//
+// Only games from BEFORE the archive: every game since was archived live (see
+// trackArchive in index.js), so importing its r/CODE copy again made a second
+// entry. Until 2026-11-14 this ran on every boot with no such limit and added
+// one duplicate per game played since the last boot (103 at the restart that
+// day). Done once, then a marker file stops it reading the volume again.
+const LEGACY_IMPORT_DONE = () => path.join(archiveDir(), '_legacy-import-done.json');
+const DUPLICATES_HIDDEN = () => path.join(archiveDir(), '_duplicates-hidden.json');
+export const duplicatesHiddenDone = () => fsSync.existsSync(DUPLICATES_HIDDEN());
+export const markDuplicatesHidden = (info) => writeAtomic(DUPLICATES_HIDDEN(), JSON.stringify(info));
+
+// The copies that import made: a "legacy" entry from after the archive began
+// whose game the archive already has — same room, same teams, same score,
+// same question reached, within three days. Only exact copies: where the two
+// disagree, the legacy one can be the more complete (the real entry stopped
+// early), so it stays. Returns [{ id, of }].
+export function findArchiveDuplicates(metas) {
+  const real = metas.filter((m) => !m.legacy);
+  const live = real.map((m) => m.startedAt || m.updatedAt || Infinity);
+  const began = live.length ? Math.min(...live) : Infinity;
+  const teams = (m) => [...(m.teams || [])].sort().join('|');
+  const score = (m) => JSON.stringify(m.scores || []);
+  const byRoom = new Map();
+  for (const m of real) {
+    if (!byRoom.has(m.room)) byRoom.set(m.room, []);
+    byRoom.get(m.room).push(m);
+  }
+  const out = [];
+  for (const m of metas) {
+    if (!m.legacy || m.hidden || !(m.startedAt >= began) || !m.teams?.length) continue;
+    const twin = (byRoom.get(m.room) || []).find((r) => teams(r) === teams(m) && score(r) === score(m) &&
+      (r.current || 0) === (m.current || 0) && Math.abs((r.startedAt || 0) - m.startedAt) < 3 * 864e5);
+    if (twin) out.push({ id: m.id, of: twin.id });
+  }
+  return out;
+}
+
 export async function importLegacyGames(tokenHashesFor) {
+  if (fsSync.existsSync(LEGACY_IMPORT_DONE())) return 0;
   const rDir = path.join(DATA_DIR, 'r');
   let codes;
   try { codes = await fs.readdir(rDir); }
   catch (e) { if (e.code === 'ENOENT') return 0; throw e; }
   let imported = 0;
-  const have = new Set((await listArchivedGames()).map((m) => m.id));
+  const archived = await listArchivedGames({ includeHidden: true });
+  const have = new Set(archived.map((m) => m.id));
+  // When the archive began: the first game it filed itself. Nothing archived
+  // live yet means everything on the volume is from before.
+  const live = archived.filter((m) => !m.legacy).map((m) => m.startedAt || m.updatedAt || Infinity);
+  const archiveBegan = live.length ? Math.min(...live) : Infinity;
   for (const code of codes) {
     if (!CODE_RE.test(code)) continue;
     const candidates = [];
     for (const g of await listGames(code).catch(() => [])) {
+      if ((g.at || 0) >= archiveBegan) continue;
       candidates.push({ id: `r-${code}-${safeName(g.id, 'game')}`, load: () => getGame(code, g.id) });
     }
     candidates.push({ id: `r-${code}-shared`, load: () => getModaqState(code) });
@@ -990,7 +1179,10 @@ export async function importLegacyGames(tokenHashesFor) {
       if (have.has(c.id) || !ARCHIVE_ID_RE.test(c.id)) continue;
       const rec = await c.load().catch(() => null);
       if (!rec?.json) continue;
-      const at = rec.at || Date.now();
+      // No date: can't tell it's from before, and since the archive began
+      // everything is in it already.
+      if (!rec.at || rec.at >= archiveBegan) continue;
+      const at = rec.at;
       // The room holding this code now owns the game only if it was already
       // there when the game was saved: codes get dealt again.
       const owners = { tokens: tokenHashesFor(code, at), accounts: [] };
@@ -1013,5 +1205,6 @@ export async function importLegacyGames(tokenHashesFor) {
       imported++;
     }
   }
+  await writeAtomic(LEGACY_IMPORT_DONE(), JSON.stringify({ at: new Date().toISOString(), imported, archiveBegan }));
   return imported;
 }

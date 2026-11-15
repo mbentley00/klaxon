@@ -78,10 +78,15 @@ function saveToDisk() {
 
 const id = () => crypto.randomBytes(9).toString('hex');
 const token = () => crypto.randomBytes(24).toString('hex');
-const hash = (password, salt) => crypto.scryptSync(String(password), salt, 64).toString('hex');
+// scrypt runs on libuv's thread pool, never on the event loop: the sync
+// version takes ~50-100 ms per call, ~1 s once Fly throttles the CPU, and a
+// room full of moderators signing in at check-in would freeze every room.
+const hash = (password, salt) => new Promise((resolve, reject) => {
+  crypto.scrypt(String(password), salt, 64, (err, key) => (err ? reject(err) : resolve(key.toString('hex'))));
+});
 
-function verify(password, account) {
-  const computed = hash(password, account.salt);
+async function verify(password, account) {
+  const computed = await hash(password, account.salt);
   const a = Buffer.from(computed, 'hex');
   const b = Buffer.from(account.hash, 'hex');
   return a.length === b.length && crypto.timingSafeEqual(a, b);
@@ -103,7 +108,7 @@ function cleanEmail(v) {
   return EMAIL_RE.test(s) ? s : null;
 }
 
-export function register(username, password, displayName, email) {
+export async function register(username, password, displayName, email) {
   const name = String(username || '').trim();
   if (!USERNAME_RE.test(name)) return { error: 'bad_username' };
   if (String(password || '').length < 6) return { error: 'bad_password' };
@@ -116,11 +121,15 @@ export function register(username, password, displayName, email) {
   if (cleanedEmail == null) return { error: 'bad_email' };
   if (byEmail.has(cleanedEmail)) return { error: 'email_taken' };
   const salt = crypto.randomBytes(16).toString('hex');
+  const passwordHash = await hash(password, salt);
+  // Someone else may have taken the name or email while the hash ran.
+  if (byUsername.has(name.toLowerCase())) return { error: 'username_taken' };
+  if (byEmail.has(cleanedEmail)) return { error: 'email_taken' };
   const account = {
     id: id(), username: name, usernameLower: name.toLowerCase(),
     displayName: cleanDisplayName(displayName),
     email: cleanedEmail,
-    salt, hash: hash(password, salt), createdAt: Date.now()
+    salt, hash: passwordHash, createdAt: Date.now()
   };
   accounts.set(account.id, account);
   byUsername.set(account.usernameLower, account.id);
@@ -231,10 +240,10 @@ export function findByIdentifier(identifier) {
   return accountId ? accounts.get(accountId) || null : null;
 }
 
-export function login(username, password) {
+export async function login(username, password) {
   const accountId = byUsername.get(String(username || '').trim().toLowerCase());
   const account = accountId && accounts.get(accountId);
-  if (!account || !verify(password, account)) return { error: 'bad_credentials' };
+  if (!account || !(await verify(password, account))) return { error: 'bad_credentials' };
   return { account, sessionToken: startSession(account.id) };
 }
 

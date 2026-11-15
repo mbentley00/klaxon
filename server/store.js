@@ -29,7 +29,7 @@ const tournaments = new Map();  // code -> tournament
 // buzz state) must survive restarts/deploys, or every director console link
 // and reader link dies with the process. index.js injects the actual disk
 // writers (artifacts.js) at boot; this module stays fs-free.
-let persistence = null; // { tournament(record), rooms(records) }
+let persistence = null; // { tournament(record), room(record), loadRoom(code) -> record | null }
 
 export function setPersistence(p) {
   persistence = p;
@@ -41,6 +41,7 @@ const serializeRoom = (r) => ({
   name: r.name,
   tournamentCode: r.tournamentCode,
   createdAt: r.createdAt,
+  lastActiveAt: r.lastActiveAt || null,
   readerToken: r.readerToken,
   coReaderToken: r.coReaderToken,
   settings: r.settings,
@@ -96,31 +97,72 @@ const serializeRoom = (r) => ({
 
 const persistTournament = (t) => persistence?.tournament(serializeTournament(t));
 
-// Rooms are persisted as one file holding every room, and the record now
-// carries the live scoresheet and the full buzz log. Serializing that on every
-// change (a scoresheet update lands ~once a second while scoring, and every
-// buzz resolves one) would block the event loop right where the room is
-// waiting for its state broadcast. So writes are coalesced: mark dirty, flush
-// shortly after. Anything whose loss would be unrecoverable — a freshly minted
-// room and its tokens — asks for an immediate flush.
+// Each room is its own record (r/CODE/room.json), written only when THAT room
+// changed. It used to be one file holding every room ever made; by 2026-11-14
+// that was 10.7 MB, re-serialized within 1.5 s of any buzz anywhere, which
+// spent the machine's CPU credit in two hours of one tournament and froze the
+// server. A record carries the live scoresheet and the full buzz log, so
+// writes are still coalesced: mark the room dirty, flush shortly after.
+// Anything whose loss would be unrecoverable — a freshly minted room and its
+// tokens — asks for an immediate flush.
 const ROOM_PERSIST_MS = 1500;
-let roomsDirty = false;
+const dirtyRooms = new Set();   // codes changed since the last flush
 let roomsTimer = null;
 
 function flushRooms() {
   if (roomsTimer) { clearTimeout(roomsTimer); roomsTimer = null; }
-  if (!roomsDirty || !persistence) return;
-  roomsDirty = false;
-  persistence.rooms([...rooms.values()].map(serializeRoom));
+  if (!persistence) return;
+  for (const code of dirtyRooms) {
+    const room = rooms.get(code);
+    if (room) persistence.room(serializeRoom(room));
+  }
+  dirtyRooms.clear();
 }
 
-function persistRooms(immediate = false) {
-  if (!persistence) return;
-  roomsDirty = true;
+function persistRooms(room, immediate = false) {
+  if (!persistence || !room?.code) return;
+  room.lastActiveAt = Date.now();
+  dirtyRooms.add(room.code);
   if (immediate) return flushRooms();
+  scheduleRoomFlush();
+}
+
+function scheduleRoomFlush() {
   if (roomsTimer) return;
   roomsTimer = setTimeout(flushRooms, ROOM_PERSIST_MS);
   roomsTimer.unref?.();   // never hold the process open for a pending write
+}
+
+// Mark a room changed by code outside the store (a protest, playtest
+// feedback, the game archive): it is written with the next flush.
+export function touchRoom(room) {
+  persistRooms(room);
+}
+
+// A room nobody has touched for this long is not kept in memory: its record
+// stays on disk and getRoom reads it back the first time anyone asks for it.
+// Tournament rooms live as long as their tournament, so without this every
+// room of every past event sat in memory for good.
+export const DORMANT_MS = 3 * 24 * 60 * 60 * 1000;
+
+// When the room last changed. Records written before lastActiveAt existed
+// fall back to the newest thing in them.
+function lastActive(r) {
+  const tail = (a) => (Array.isArray(a) && a.length ? Number(a[a.length - 1]?.at ?? a[a.length - 1]?.t) || 0 : 0);
+  return Math.max(Number(r.lastActiveAt) || 0, Number(r.createdAt) || 0, tail(r.log), tail(r.buzzLog), tail(r.chat));
+}
+
+// Drop idle rooms from memory (see DORMANT_MS). Never one with someone in it,
+// or one with a change still waiting to be written.
+export function evictDormantRooms(now = Date.now()) {
+  let evicted = 0;
+  for (const [code, room] of rooms) {
+    if (dirtyRooms.has(code) || now - lastActive(room) < DORMANT_MS) continue;
+    if ([...room.members.values()].some((m) => m.connected)) continue;
+    rooms.delete(code);
+    evicted++;
+  }
+  return evicted;
 }
 
 // Reload persisted records at boot (before setPersistence, so hydration never
@@ -145,24 +187,36 @@ export function hydrate({ tournaments: tournamentRecords = [], rooms: roomRecord
       questionLag: clampNum(t.questionLag, 0, 20, DEFAULT_QUESTION_LAG)
     });
   }
+  // Idle rooms stay on disk until someone asks for one (see DORMANT_MS).
+  const now = Date.now();
   for (const r of roomRecords) {
-    if (!r?.code || !r.readerToken) continue;
-    rooms.set(r.code, {
-      ...r,
-      coReaderToken: r.coReaderToken || secretToken(),
-      // playerAlerts defaults ON, so rooms persisted before it existed get it.
-      settings: { ...(r.settings || {}), playerAlerts: r.settings?.playerAlerts !== false },
-      roster: normalizeRoster(r.roster),
-      rosterTeams: Array.isArray(r.rosterTeams) ? r.rosterTeams.map(String) : [],
-      phase: 'open',
-      cycleNo: 1,
-      cycle: freshCycle(1),
-      lastBuzzAt: null,
-      queue: [],
-      members: new Map(),
-      log: Array.isArray(r.log) ? r.log : []
-    });
+    if (r && now - lastActive(r) >= DORMANT_MS) continue;
+    hydrateRoom(r);
   }
+}
+
+function hydrateRoom(r) {
+  if (!r?.code || !r.readerToken) return null;
+  const room = {
+    ...r,
+    coReaderToken: r.coReaderToken || secretToken(),
+    // playerAlerts defaults ON, so rooms persisted before it existed get it.
+    settings: { ...(r.settings || {}), playerAlerts: r.settings?.playerAlerts !== false },
+    roster: normalizeRoster(r.roster),
+    rosterTeams: Array.isArray(r.rosterTeams) ? r.rosterTeams.map(String) : [],
+    phase: 'open',
+    cycleNo: 1,
+    cycle: freshCycle(1),
+    lastBuzzAt: null,
+    queue: [],
+    members: new Map(),
+    log: Array.isArray(r.log) ? r.log : []
+  };
+  rooms.set(room.code, room);
+  // A token minted just now has to be kept, or the next load mints another.
+  // (Written without touching lastActiveAt: loading a room isn't using it.)
+  if (!r.coReaderToken) { dirtyRooms.add(room.code); scheduleRoomFlush(); }
+  return room;
 }
 
 function freshCycle(cycleNo) {
@@ -258,12 +312,37 @@ export function createRoom({ name, tournamentCode = null, settings = {} }) {
     tournaments.get(tournamentCode).roomCodes.add(code);
     persistTournament(tournaments.get(tournamentCode));
   }
-  persistRooms(true);
+  persistRooms(room, true);
   return room;
 }
 
+// The one way in to a room by code: a dormant room (see DORMANT_MS) is read
+// back from disk here, so nothing else needs to know rooms can be unloaded.
 export function getRoom(code) {
-  return rooms.get((code || '').toUpperCase());
+  const c = String(code || '').toUpperCase();
+  const room = rooms.get(c);
+  if (room || !persistence?.loadRoom || !/^[A-Z0-9]{3,8}$/.test(c)) return room;
+  // A code that isn't on disk is remembered for a minute, so a stream of
+  // made-up codes (or a stale link polling) costs a lookup, not a disk read.
+  const missAt = roomMisses.get(c);
+  if (missAt && Date.now() - missAt < 60_000) return undefined;
+  let record = null;
+  try { record = persistence.loadRoom(c); } catch { /* unreadable: no such room */ }
+  const loaded = record?.code === c ? hydrateRoom(record) : null;
+  if (loaded) { roomMisses.delete(c); return loaded; }
+  if (roomMisses.size > 5000) roomMisses.clear();
+  roomMisses.set(c, Date.now());
+  return undefined;
+}
+const roomMisses = new Map();   // code -> when it was last not found
+
+// A room's record without loading it into memory: for a sweep over many old
+// codes (the game archive at boot), which only reads tokens and dates.
+export function peekRoom(code) {
+  const c = String(code || '').toUpperCase();
+  if (rooms.has(c)) return rooms.get(c);
+  if (!persistence?.loadRoom || !/^[A-Z0-9]{3,8}$/.test(c)) return undefined;
+  try { return persistence.loadRoom(c) ?? undefined; } catch { return undefined; }
 }
 
 export function allRooms() {
@@ -500,7 +579,7 @@ export function endGame(room, ended, by = null) {
   room.ended = ended ? { at: Date.now(), by } : null;
   if (ended) room.settings.listed = false;
   pushLog(room, { type: ended ? 'end_game' : 'reopen_game', by });
-  persistRooms(true);
+  persistRooms(room, true);
   return room.ended;
 }
 
@@ -544,11 +623,12 @@ export function nextGame(room, by = null, { keepPlayers = false } = {}) {
   // The next game is its own entry in the reader's games, with its own buzz log.
   room.archive = null;
   room.buzzLog = [];
+  room.buzzLogRev = (room.buzzLogRev || 0) + 1;
   room.gameNumber = (room.gameNumber || 1) + 1;
   // A shootout room's leaderboard is this game's, not the evening's.
   if (room.settings.shootout) shootout.reset(room);
   pushLog(room, { type: 'next_game', game: room.gameNumber, removed: removed.length, kept: !!keepPlayers, by });
-  persistRooms(true);
+  persistRooms(room, true);
   return { removed, gameNumber: room.gameNumber };
 }
 
@@ -611,7 +691,7 @@ function recordEveningGame(room) {
 export function resetEvening(room, by = null) {
   room.evening = { games: [], since: room.gameNumber || 1 };
   pushLog(room, { type: 'reset_evening', by });
-  persistRooms();
+  persistRooms(room);
 }
 
 // What players see: one row per player across every game tonight, the teams
@@ -679,7 +759,7 @@ export function setOwnTeam(room, playerId, team) {
   }
   refreshQueueNames(room);
   pushLog(room, { type: 'set_own_team', playerId, team: name || null, pending: !!member.pendingTeam });
-  persistRooms();
+  persistRooms(room);
   return { ok: true, pending: member.pendingTeam || null };
 }
 
@@ -933,7 +1013,7 @@ export function noteLiveGame(room, { round, inProgress, currentQuestion }) {
     q: Number(currentQuestion) || 0,
     at: Date.now()
   };
-  persistRooms();
+  persistRooms(room);
 }
 // { state, round, q, of }: state is one of
 //   'setup' (the moderator is setting up the teams), 'pickban', 'playing',
@@ -1063,7 +1143,7 @@ export function setRoster(room, roster) {
     : [];
   pruneAssignments(room);
   pushLog(room, { type: 'set_roster', teams: room.roster?.teams.length || 0 });
-  persistRooms();
+  persistRooms(room);
   return room.roster;
 }
 
@@ -1072,7 +1152,7 @@ export function clearRoster(room) {
   room.rosterTeams = [];
   pruneAssignments(room);
   pushLog(room, { type: 'clear_roster' });
-  persistRooms();
+  persistRooms(room);
 }
 
 // Build the room's roster straight from the teams a moderator entered in
@@ -1212,7 +1292,7 @@ export function autoLinkRosterPlayers(room) {
       linked++;
     }
   }
-  if (linked) persistRooms();
+  if (linked) persistRooms(room);
   return linked;
 }
 
@@ -1241,7 +1321,7 @@ export function setMemberTeam(room, playerId, team) {
   }
   refreshQueueNames(room);
   pushLog(room, { type: 'set_member_team', playerId, team: member.assignedTeam });
-  persistRooms();
+  persistRooms(room);
   return { ok: true };
 }
 
@@ -1251,7 +1331,7 @@ export function setCaptain(room, playerId, isCaptain) {
   if (!member || member.role !== 'player') return { error: 'no_member' };
   if (!isCaptain) {
     member.isCaptain = false;
-    persistRooms();
+    persistRooms(room);
     return { ok: true };
   }
   const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -1262,7 +1342,7 @@ export function setCaptain(room, playerId, isCaptain) {
   }
   member.isCaptain = true;
   pushLog(room, { type: 'set_captain', playerId, team: effectiveTeam(member) });
-  persistRooms();
+  persistRooms(room);
   return { ok: true };
 }
 
@@ -1288,7 +1368,7 @@ export function setRosterTeams(room, names) {
   }
   room.rosterTeams = picked;
   pruneAssignments(room);
-  persistRooms();
+  persistRooms(room);
   return room.rosterTeams;
 }
 
@@ -1341,12 +1421,12 @@ export function setRoomName(room, name) {
   const next = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
   if (next === (room.name || '')) return false;
   room.name = next;
-  persistRooms();
+  persistRooms(room);
   return true;
 }
 
 export function describeRoom(code) {
-  const room = rooms.get(String(code || '').toUpperCase());
+  const room = getRoom(code);
   if (!room) return null;
   const staff = [...room.members.values()].filter((m) => m.role === 'reader' || m.role === 'co-reader');
   const live = staff.filter((m) => m.connected);
@@ -1383,7 +1463,7 @@ export function resetBuzzer(room, { by = null, judged = false } = {}) {
   pushLog(room, {
     type: 'reset_buzzer', id: nextLogId(), cycleNo: room.cycleNo, by, judged, dropped, droppedQueue, question
   });
-  persistRooms();
+  persistRooms(room);
 }
 
 // Names one clear, so an Undo pressed on a list that has since moved on can't
@@ -1438,7 +1518,7 @@ export function restoreCleared(room, id, { by = null } = {}) {
   }
   e.restored = true;
   pushLog(room, { type: 'restore_buzzes', by, restored: back.map((q) => q.name), clearId: e.id });
-  persistRooms();
+  persistRooms(room);
   return { ok: true, restored: back.length };
 }
 
@@ -1568,6 +1648,9 @@ function logBuzzAttempt(room, member, { clampedTime, arrival, accepted, reason }
     reason: reason || null
   });
   if (room.buzzLog.length > FULL_BUZZ_CAP) room.buzzLog.splice(0, room.buzzLog.length - FULL_BUZZ_CAP);
+  // Bumped on every change to the log (runtime only), so a copy of it knows
+  // when it is out of date (see flushBuzzPoints).
+  room.buzzLogRev = (room.buzzLogRev || 0) + 1;
 }
 
 export function recordBuzz(room, { playerId, clampedTime, arrival }) {
@@ -1619,6 +1702,7 @@ export function markAccidentalBuzz(room, judged) {
     if (b.cycleNo !== room.cycleNo) break;
     if (b.accepted && held.has(b.playerId) && !b.accidental) { b.accidental = true; marked++; }
   }
+  if (marked) room.buzzLogRev = (room.buzzLogRev || 0) + 1;
   return marked;
 }
 
@@ -1674,7 +1758,7 @@ export function resolveWindow(room) {
     });
   }
   room.cycle = freshCycle(room.cycleNo); // ready to collect the next wave
-  persistRooms();                        // the full buzz log survives a restart
+  persistRooms(room);                        // the full buzz log survives a restart
   // Stamped once per unresolved queue: the "is the buzzer stuck?" clock that
   // gates player alerts runs from the FIRST buzz still waiting on the reader.
   if (room.lastBuzzAt == null && room.queue.length) room.lastBuzzAt = Date.now();
@@ -1748,7 +1832,7 @@ export function setApiAccess(owner, { action, questions, room } = {}) {
     if (!owner.api) return { error: 'not_enabled' };
     if (mode) owner.api.questions = mode;
   } else if (action !== 'get') return { error: 'bad_action' };
-  if (owner.roomCodes) persistTournament(owner); else persistRooms(true);
+  if (owner.roomCodes) persistTournament(owner); else persistRooms(owner, true);
   return { ok: true, api: apiAccessView(owner) };
 }
 export const apiAccessView = (owner) => (owner.api
@@ -1767,7 +1851,7 @@ export function setSheet(room, sheet) {
     if (JSON.stringify(sheet).length > SHEET_MAX_BYTES) return { error: 'too_big' };
     room.sheet = { ...sheet, savedAt: Date.now() };
   }
-  persistRooms();
+  persistRooms(room);
   return { ok: true };
 }
 
@@ -1800,7 +1884,7 @@ export function setOptions(room, opts = {}) {
   // Leaving queue mode collapses any queue back to the standard locked state.
   if (!room.settings.queueMode && room.queue.length) room.phase = 'locked';
   pushLog(room, { type: 'set_options', settings: room.settings });
-  persistRooms();
+  persistRooms(room);
 }
 
 // --- "the buzzer isn't clear" alerts --------------------------------------
@@ -2102,7 +2186,7 @@ export function refreshShootoutRoster(room) {
   if (JSON.stringify(next?.teams ?? null) === before && allActive) return false;
   room.roster = next;
   room.rosterTeams = next ? next.teams.map((t) => t.name) : [];
-  persistRooms();
+  persistRooms(room);
   return true;
 }
 
@@ -2144,7 +2228,7 @@ export function createReplayRoom({ tournamentCode, round, teams, gameplay, prote
     room.roster = { name: 'Protest replay', teams: clean.map((t) => ({ name: t, players: [] })) };
     room.rosterTeams = clean;
   }
-  persistRooms();
+  persistRooms(room);
   return room;
 }
 
@@ -2157,7 +2241,7 @@ export function setShootoutSession(room, input) {
   Object.assign(room.settings, shootout.withdrawSettings(session.withdraw, session.withdrawCooldown));
   // A buzz can only be withdrawn from a queue.
   if (room.settings.allowWithdraw) room.settings.queueMode = true;
-  persistRooms(true);
+  persistRooms(room, true);
   return { ok: true, session: shootout.publicSession(session) };
 }
 
@@ -2178,14 +2262,14 @@ export function setShootoutCurrent(room, packetId) {
     shootout.bankPacket(room, scored, shootout.currentScores(room.scoresheet));
   }
   session.current = packetId;
-  persistRooms();
+  persistRooms(room);
   return { ok: true };
 }
 
 // The moderator wipes the leaderboard and starts the evening again.
 export function resetShootout(room) {
   shootout.reset(room);
-  persistRooms();
+  persistRooms(room);
   return shootout.board(room, shootout.currentScores(room.scoresheet), room.shootoutSession?.current ?? null,
     [...room.members.values()].filter((m) => m.role === 'player').map((m) => displayName(m)));
 }
@@ -2206,7 +2290,7 @@ export function chatSay(room, actor, text) {
     if (m.role === 'reader' || m.role === 'co-reader') people.push({ id: m.id, name: 'moderator' });
   }
   const res = shootout.say(room, actor, text, people);
-  if (res.ok) persistRooms();
+  if (res.ok) persistRooms(room);
   return res;
 }
 
@@ -2534,7 +2618,7 @@ export function recentActivity(room, limit = RECENT_LIMIT) {
 export function chatAnnounce(room, kind, payload) {
   if (!chatOn(room)) return { error: 'disabled' };
   const res = shootout.announce(room, kind, payload);
-  if (res.ok) persistRooms();
+  if (res.ok) persistRooms(room);
   return res;
 }
 
@@ -2787,7 +2871,7 @@ export function setScoresheet(room, match, currentQuestion, hasBonuses = true, p
   if (match == null) {
     room.scoresheet = null;
     room.catGate = null;
-    persistRooms();
+    persistRooms(room);
     return { ok: true };
   }
   // The reader's page sends the WHOLE packet's categories; the gate decides how
@@ -2830,7 +2914,7 @@ export function setScoresheet(room, match, currentQuestion, hasBonuses = true, p
   // The moderator page clears the live sheet just before it moves the room on,
   // so the evening's totals take the game from the last sheet it had.
   if (room.scoresheet) room.eveningSheet = room.scoresheet;
-  persistRooms();
+  persistRooms(room);
   return { ok: true };
 }
 
@@ -3188,6 +3272,8 @@ export const _internal = { rooms, tournaments };
 
 // For a route that set persisted room fields itself (the correction room's
 // link back to its game): write them now rather than on the next change.
-export function persistNow() {
-  persistRooms(true);
+// Without a room, writes whatever is waiting (shutdown, the nightly backup).
+export function persistNow(room = null) {
+  if (room) persistRooms(room, true);
+  else flushRooms();
 }

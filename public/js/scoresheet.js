@@ -7,7 +7,13 @@ import { staffPlayerId, recall, remember, api, $, el } from './util.js';
 import * as M from './scoresheet-model.js';
 
 const code = (location.pathname.split('/')[2] || '').toUpperCase();
-const socket = io({ transports: ['websocket', 'polling'], reconnection: true });
+// After a restart or a stall every page reconnects at once, and each one
+// costs the server a join. Spread them: the first try lands anywhere in
+// 0-3 s instead of 0.5-1.5 s, and later tries back off to 15 s.
+const socket = io({
+  transports: ['websocket', 'polling'], reconnection: true,
+  reconnectionDelay: 1500, reconnectionDelayMax: 15000, randomizationFactor: 1,
+});
 const session = () => localStorage.getItem('bz_sessionToken') || '';
 const staffToken = () => recall('staffToken:' + code) || '';
 
