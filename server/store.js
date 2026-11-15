@@ -151,6 +151,13 @@ function lastActive(r) {
   const tail = (a) => (Array.isArray(a) && a.length ? Number(a[a.length - 1]?.at ?? a[a.length - 1]?.t) || 0 : 0);
   return Math.max(Number(r.lastActiveAt) || 0, Number(r.createdAt) || 0, tail(r.log), tail(r.buzzLog), tail(r.chat));
 }
+export const roomLastActive = lastActive;
+
+// In memory, or with a change not yet written: never one to delete from disk.
+export function roomInUse(code) {
+  const c = String(code || '').toUpperCase();
+  return rooms.has(c) || dirtyRooms.has(c);
+}
 
 // Drop idle rooms from memory (see DORMANT_MS). Never one with someone in it,
 // or one with a change still waiting to be written.

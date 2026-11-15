@@ -4650,12 +4650,14 @@ const roomExpired = (r) =>
 try {
   const [tournamentRecords, roomRecords] = await Promise.all([
     artifacts.loadTournamentRecords(),
-    artifacts.loadRoomRecords()
+    // Only records written in the last few days: older rooms would stay on
+    // disk anyway (store.DORMANT_MS), so boot doesn't read every room ever made.
+    artifacts.loadRoomRecords({ activeSince: Date.now() - store.DORMANT_MS })
   ]);
   store.hydrate({ tournaments: tournamentRecords });
   const freshRooms = roomRecords.filter((r) => !roomExpired(r));
   store.hydrate({ rooms: freshRooms });
-  console.log(`rehydrated ${tournamentRecords.length} tournament(s), ${freshRooms.length} room(s) on record, ` +
+  console.log(`rehydrated ${tournamentRecords.length} tournament(s), ${freshRooms.length} recent room record(s), ` +
     `${store.activity().rooms} in memory`);
 } catch (e) {
   console.error('rehydration failed (continuing with empty store):', e);
@@ -4682,7 +4684,37 @@ artifacts.importLegacyGames((code, at) => {
   .then(() => disownReusedCodes())
   .then(() => backfillArchiveSummaries())
   .then(() => hideArchiveDuplicates())
-  .catch((e) => console.error('legacy game import failed:', e));
+  .catch((e) => console.error('legacy game import failed:', e))
+  .then(() => purgeOldRooms());
+// Then once a day.
+setInterval(() => purgeOldRooms(), 24 * 60 * 60_000).unref();
+
+// Room folders (r/CODE) of rooms unused for ROOM_PURGE_DAYS are deleted (see
+// artifacts.purgeOldRooms): the room expired long before (ROOM_TTL_MS) and its
+// games are in the archive. A tournament's rooms stay while the tournament
+// does. KLAXON_ROOM_PURGE_DAYS=0 turns it off.
+const ROOM_PURGE_DAYS = Number(process.env.KLAXON_ROOM_PURGE_DAYS ?? 60);
+let purging = false;
+async function purgeOldRooms() {
+  if (!(ROOM_PURGE_DAYS > 0) || purging) return;
+  purging = true;
+  try {
+    const cutoff = Date.now() - ROOM_PURGE_DAYS * 864e5;
+    const { removed, bytes, skipped } = await artifacts.purgeOldRooms({
+      cutoff,
+      keep: (r) => (r.tournamentCode && store.getTournament(r.tournamentCode)) || store.roomLastActive(r) >= cutoff,
+      inUse: (code) => store.roomInUse(code)
+    });
+    if (removed.length) {
+      console.log(`deleted ${removed.length} room folder(s) unused for ${ROOM_PURGE_DAYS}+ days ` +
+        `(${(bytes / 1e6).toFixed(1)} MB; list in purged-rooms.log)`);
+    } else if (skipped !== 'none') console.log(`room cleanup skipped: ${skipped}`);
+  } catch (e) {
+    console.error('room cleanup failed:', e);
+  } finally {
+    purging = false;
+  }
+}
 
 // Once: hide the copies the old boot-time import made of games the archive
 // already had (see artifacts.findArchiveDuplicates). Hidden, not deleted —

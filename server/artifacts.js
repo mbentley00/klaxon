@@ -913,18 +913,98 @@ export function loadRoomRecordSync(code) {
 // boot after the change writes each of them out to its own file and leaves
 // rooms.json where it is (frozen from then on), so a rollback to the old code
 // still boots with every room. rooms.json.migrated marks it done.
-export async function loadRoomRecords() {
+//
+// `activeSince`: skip, without reading it, any record last written before
+// then. Everything in a record (its dates, its log) is older than the write
+// that put it there, so a file untouched since `activeSince` can only hold a
+// room idle since then: store.hydrate would leave it on disk anyway. Boot reads
+// the handful of recent rooms instead of every room ever made (about 47 KB
+// each on average, so 10,000 rooms would be ~470 MB of JSON).
+export async function loadRoomRecords({ activeSince = 0 } = {}) {
   await migrateRoomsJson();
   const dir = path.join(DATA_DIR, 'r');
   let codes;
   try { codes = await fs.readdir(dir); }
   catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+  codes = codes.filter((c) => CODE_RE.test(c));
   const out = [];
-  for (const code of codes) {
-    if (!CODE_RE.test(code)) continue;
-    const text = await readTextOrNull(path.join(dir, code, 'room.json'));
-    if (!text) continue; // artifacts only (an old shared game, filed games): no record
+  const one = async (code) => {
+    const file = path.join(dir, code, 'room.json');
+    if (activeSince) {
+      let st;
+      try { st = await fs.stat(file); } catch { return; } // no record: artifacts only
+      if (st.mtimeMs < activeSince) return;
+    }
+    const text = await readTextOrNull(file);
+    if (!text) return; // artifacts only (an old shared game, filed games): no record
     try { out.push(JSON.parse(text)); } catch { /* skip a corrupt record */ }
+  };
+  for (let i = 0; i < codes.length; i += 32) await Promise.all(codes.slice(i, i + 32).map(one));
+  return out;
+}
+
+// --- clearing out old rooms ------------------------------------------------------
+// Nothing used to delete a room's folder: a room past its TTL just stopped
+// loading, and r/CODE (record, packets, filed games, shared MODAQ game) stayed
+// on the volume for good. Every game scored in a room is in the game archive
+// (games/), which this never touches, so the folder is dead weight once the
+// room is.
+//
+// A folder goes when:
+//   - keep(record) says no (the caller's rule: age, a tournament that still
+//     exists), judged on the record's own dates, not room.json's mtime (the
+//     2026-11-14 migration rewrote every room.json);
+//   - nothing else in it was written since `cutoff`;
+//   - inUse(code) is false (in memory, or a write pending).
+// A folder with no record (rooms from before records, or a record lost) goes on
+// the newest-file rule alone. Never before the pre-archive games were copied
+// into the archive (importLegacyGames): until then r/CODE is their only copy.
+// Every deletion is appended to purged-rooms.log on the volume.
+export async function purgeOldRooms({ cutoff, keep, inUse = () => false, dryRun = false }) {
+  const result = { removed: [], bytes: 0, skipped: 'none' };
+  if (!fsSync.existsSync(LEGACY_IMPORT_DONE())) { result.skipped = 'legacy_import_pending'; return result; }
+  const dir = path.join(DATA_DIR, 'r');
+  let codes;
+  try { codes = await fs.readdir(dir); }
+  catch (e) { if (e.code === 'ENOENT') return result; throw e; }
+  for (const code of codes) {
+    if (!CODE_RE.test(code) || inUse(code) || roomWrites.has(code)) continue;
+    const folder = path.join(dir, code);
+    let files;
+    try { files = await filesUnder(folder); } catch { continue; }
+    let record = null;
+    const recordFile = path.join(folder, 'room.json');
+    if (files.some((f) => f.file === recordFile)) {
+      try { record = JSON.parse(await fs.readFile(recordFile, 'utf8')); } catch { continue; } // unreadable: leave it be
+      if (keep(record)) continue;
+    }
+    // Anything but the record written recently: the folder is still in use.
+    if (files.some((f) => f.file !== recordFile && f.mtimeMs >= cutoff)) continue;
+    const bytes = files.reduce((n, f) => n + f.size, 0);
+    // Checked again right before deleting: the loop awaits, and a room can be
+    // opened (or a write queued) in the meantime.
+    if (inUse(code) || roomWrites.has(code)) continue;
+    if (!dryRun) {
+      await fs.rm(folder, { recursive: true, force: true });
+      const line = JSON.stringify({ at: new Date().toISOString(), code, bytes, created: record?.createdAt ?? null,
+        tournament: record?.tournamentCode ?? null }) + '\n';
+      await fs.appendFile(path.join(DATA_DIR, 'purged-rooms.log'), line).catch(() => {});
+    }
+    result.removed.push(code);
+    result.bytes += bytes;
+  }
+  return result;
+}
+
+async function filesUnder(dir) {
+  const out = [];
+  for (const ent of await fs.readdir(dir, { withFileTypes: true })) {
+    const p = path.join(dir, ent.name);
+    if (ent.isDirectory()) out.push(...await filesUnder(p));
+    else {
+      const st = await fs.stat(p).catch(() => null);
+      if (st) out.push({ file: p, mtimeMs: st.mtimeMs, size: st.size });
+    }
   }
   return out;
 }
@@ -1066,14 +1146,64 @@ export async function saveArchivedGame(meta, body) {
   if (!ARCHIVE_ID_RE.test(meta?.id || '')) throw new Error('bad_game_id');
   // The body first: a meta that lists a game must always have one to hand out.
   await writeAtomic(path.join(archiveDir(), `${meta.id}.json`), JSON.stringify(body));
-  await writeAtomic(path.join(archiveDir(), `${meta.id}.meta.json`), JSON.stringify(meta));
+  const text = JSON.stringify(meta);
+  await writeAtomic(path.join(archiveDir(), `${meta.id}.meta.json`), text);
+  metaWritten(text);
 }
 
 // The meta alone: requests and grants change it without touching the body.
 export async function saveArchivedMeta(meta) {
   if (!ARCHIVE_ID_RE.test(meta?.id || '')) throw new Error('bad_game_id');
-  await writeAtomic(path.join(archiveDir(), `${meta.id}.meta.json`), JSON.stringify(meta));
+  const text = JSON.stringify(meta);
+  await writeAtomic(path.join(archiveDir(), `${meta.id}.meta.json`), text);
+  metaWritten(text);
 }
+
+// Every meta, held in memory: the listing used to read one file per game on
+// every call (the /games page, a director's correction, the boot sweeps),
+// which at a few games per room is tens of thousands of reads once there are
+// thousands of rooms. Read from disk once, then kept current by the two
+// writers above (nothing deletes a meta). Entries are shared and frozen, like
+// the parsed-games cache: a caller that wants to change one reads its own copy
+// with getArchivedMeta, changes that and saves it.
+let metaIndex = null;            // id -> frozen meta, once loaded
+let metaIndexLoading = null;     // the first load, while it runs
+const metasDuringLoad = new Map(); // written while the first load ran: these win
+let metaSorted = null;           // newest first, every meta; rebuilt after a write
+
+function metaWritten(text) {
+  const meta = deepFreeze(JSON.parse(text));
+  if (metaIndex) metaIndex.set(meta.id, meta);
+  else if (metaIndexLoading) metasDuringLoad.set(meta.id, meta);
+  metaSorted = null;
+}
+
+async function loadMetaIndex() {
+  if (metaIndex) return metaIndex;
+  if (!metaIndexLoading) {
+    metaIndexLoading = (async () => {
+      const index = new Map();
+      let files = [];
+      try { files = (await fs.readdir(archiveDir())).filter((f) => f.endsWith('.meta.json')); }
+      catch (e) { if (e.code !== 'ENOENT') throw e; }
+      const one = async (f) => {
+        const text = await readTextOrNull(path.join(archiveDir(), f));
+        if (text == null) return;
+        try { const m = JSON.parse(text); if (m?.id) index.set(m.id, deepFreeze(m)); } catch { /* skip a bad file */ }
+      };
+      for (let i = 0; i < files.length; i += 32) await Promise.all(files.slice(i, i + 32).map(one));
+      for (const [id, m] of metasDuringLoad) index.set(id, m);
+      metasDuringLoad.clear();
+      metaIndex = index;
+      metaSorted = null;
+      return index;
+    })().finally(() => { metaIndexLoading = null; });
+  }
+  return metaIndexLoading;
+}
+
+// For tests: forget the index so the next listing reads the disk again.
+export function _resetMetaIndex() { metaIndex = null; metaSorted = null; metasDuringLoad.clear(); }
 
 export async function getArchivedMeta(id) {
   if (!ARCHIVE_ID_RE.test(String(id || ''))) return null;
@@ -1092,24 +1222,16 @@ export async function getArchivedBody(id) {
 // Every meta, newest first.
 // Hidden games (see findArchiveDuplicates) are left out of listings unless
 // asked for; they still open by id, so no link to one breaks.
+// The metas are shared and frozen (see metaIndex); the array is the caller's.
 export async function listArchivedGames({ includeHidden = false } = {}) {
-  let files;
-  try { files = await fs.readdir(archiveDir()); }
-  catch (e) { if (e.code === 'ENOENT') return []; throw e; }
-  const out = [];
-  for (const f of files) {
-    if (!f.endsWith('.meta.json')) continue;
-    const text = await readTextOrNull(path.join(archiveDir(), f));
-    if (text == null) continue;
-    let meta;
-    try { meta = JSON.parse(text); } catch { continue; /* skip a bad file */ }
-    if (meta?.hidden && !includeHidden) continue;
-    out.push(meta);
+  const index = await loadMetaIndex();
+  if (!metaSorted) {
+    // When the game was played, not when it was last touched: reopening an old
+    // game to fix a score mustn't move it to the top.
+    metaSorted = [...index.values()]
+      .sort((a, b) => (b.startedAt || b.updatedAt || 0) - (a.startedAt || a.updatedAt || 0));
   }
-  // When the game was played, not when it was last touched: reopening an old
-  // game to fix a score mustn't move it to the top.
-  out.sort((a, b) => (b.startedAt || b.updatedAt || 0) - (a.startedAt || a.updatedAt || 0));
-  return out;
+  return includeHidden ? metaSorted.slice() : metaSorted.filter((m) => !m.hidden);
 }
 
 // Games from before the archive existed: each room's filed "previous games"
